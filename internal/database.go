@@ -16,10 +16,10 @@ type Database struct {
 
 type Storage interface {
 	CreateTask(task *ItemModel) error
-	GetTaskByID(id string) (*ItemModel, error)
+	GetTaskByID(id uint) (*ItemModel, error)
 	ListTasks() ([]*ItemModel, error)
 	UpdateTask(task *ItemModel) error
-	DeleteTask(id string) error
+	DeleteTask(id uint) error
 }
 
 // NewDatabase opens (or creates) the sqlite file and runs migrations.
@@ -55,8 +55,8 @@ func (d *Database) CreateTask(task *ItemModel) error {
 }
 
 // ListTasks returns all tasks.
-func (d *Database) ListTasks() ([]ItemModel, error) {
-	var tasks []ItemModel
+func (d *Database) ListTasks() ([]*ItemModel, error) {
+	var tasks []*ItemModel
 	if err := d.conn.Order("id DESC").Find(&tasks).Error; err != nil {
 		return nil, err
 	}

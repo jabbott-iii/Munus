@@ -41,6 +41,7 @@ type FormModel struct {
 	submitted    bool
 }
 
+// DataLoadedMsg is emitted when tasks are loaded from storage.
 type DataLoadedMsg struct {
 	tasks []*ItemModel
 }

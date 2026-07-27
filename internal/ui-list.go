@@ -2,7 +2,6 @@ package internal
 
 import (
 	"fmt"
-	"strconv"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -98,7 +97,7 @@ func (m *ListModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		case "y":
 			if m.confirmingDelete && m.taskToDelete != nil {
-				if err := m.storage.DeleteTask(strconv.Itoa(int(m.taskToDelete.ID))); err != nil {
+				if err := m.storage.DeleteTask(m.taskToDelete.ID); err != nil {
 					m.err = err
 				}
 				m.confirmingDelete = false

@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"log"
 	"os"
-	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/jabbott-iii/Munus/internal"
@@ -26,17 +25,17 @@ var (
 )
 
 func init() {
-	flag.StringVar(&title, "title", "", "Title of the todo")
-	flag.StringVar(&title, "t", "", "Title of the todo")
+	flag.StringVar(&title, "title", "", "Title of the task")
+	flag.StringVar(&title, "t", "", "Title of the task")
 
-	flag.StringVar(&description, "description", "", "Description of the todo")
-	flag.StringVar(&description, "d", "", "Description of the todo")
+	flag.StringVar(&description, "description", "", "Description of the task")
+	flag.StringVar(&description, "d", "", "Description of the task")
 
-	flag.StringVar(&deadline, "deadline", "", "Deadline for the todo")
-	flag.StringVar(&deadline, "n", "", "Deadline for the todo")
+	flag.StringVar(&deadline, "deadline", "", "Deadline for the task")
+	flag.StringVar(&deadline, "n", "", "Deadline for the task")
 
-	flag.BoolVar(&listMode, "list", false, "List all todos")
-	flag.BoolVar(&listMode, "l", false, "List all todos")
+	flag.BoolVar(&listMode, "list", false, "List all tasks")
+	flag.BoolVar(&listMode, "l", false, "List all tasks")
 
 	flag.BoolVar(&showHelp, "help", false, "Show help")
 	flag.BoolVar(&showHelp, "h", false, "Show help")
@@ -50,93 +49,68 @@ func main() {
 		os.Exit(0)
 	}
 
-	dbPath, err := getDBPath()
+	db, err := internal.NewDatabase("munus.db")
 	if err != nil {
-		log.Fatal("Failed to get database path:", err)
+		log.Fatalf("failed to initialize database: %v", err)
 	}
-
-	store, err := storage.NewBoltStorage(dbPath)
-	if err != nil {
-		log.Fatal("Failed to initialize storage:", err)
-	}
-	defer store.Close()
 
 	if listMode {
-		p := tea.NewProgram(ui.NewListModel(store), tea.WithAltScreen())
+		p := tea.NewProgram(internal.NewListModel(db), tea.WithAltScreen())
 		if _, err := p.Run(); err != nil {
-			log.Fatal("Error running list view:", err)
+			log.Fatalf("error running list view: %v", err)
 		}
 		return
 	}
 
+	// No CLI args: open interactive create form
 	if title == "" && description == "" {
-		p := tea.NewProgram(ui.NewFormModel(store), tea.WithAltScreen())
+		p := tea.NewProgram(internal.NewFormModel(db), tea.WithAltScreen())
 		if _, err := p.Run(); err != nil {
-			log.Fatal("Error running form view:", err)
+			log.Fatalf("error running form view: %v", err)
 		}
 		return
 	}
 
+	// Partial CLI input is invalid
 	if title == "" || description == "" {
-		fmt.Println("Error: Both title (-t) and description (-d) are required")
+		fmt.Println("Error: both title (-t) and description (-d) are required")
 		internal.PrintHelp()
 		os.Exit(1)
 	}
 
 	if len(title) > MaxTitleLength {
-		fmt.Printf("Error: Title exceeds maximum length of %d characters (current: %d)\n", MaxTitleLength, len(title))
+		fmt.Printf("Error: title exceeds maximum length of %d characters (current: %d)\n", MaxTitleLength, len(title))
 		os.Exit(1)
 	}
 
 	if len(description) > MaxDescriptionLength {
-		fmt.Printf("Error: Description exceeds maximum length of %d characters (current: %d)\n", MaxDescriptionLength, len(description))
+		fmt.Printf("Error: description exceeds maximum length of %d characters (current: %d)\n", MaxDescriptionLength, len(description))
 		os.Exit(1)
 	}
 
-	var deadlineTime *time.Time
+	var deadlineTime = (*internal.Deadline)(nil)
 	if deadline != "" {
-		parsed, err := utils.ParseDeadline(deadline)
+		parsed, err := internal.ParseDeadline(deadline)
 		if err != nil {
-			log.Fatal("Invalid deadline format: ", err)
+			log.Fatalf("invalid deadline format: %v", err)
 		}
 		deadlineTime = parsed
 	}
 
-	task := internal.ItemModel{
+	task := &internal.ItemModel{
 		Title:       title,
 		Description: description,
-		Deadline:    deadlineTime,
-		CreatedAt:   time.Now(),
+		Deadline:    (*deadlineTime),
 		Completed:   false,
 	}
 
-	if err := store.SaveTodo(&task); err != nil {
-		log.Fatal("Failed to save todo:", err)
+	if err := db.CreateTask(task); err != nil {
+		log.Fatalf("failed to save task: %v", err)
 	}
 
-	fmt.Printf("✔ Todo created successfully!\n")
+	fmt.Println("✔ Task created successfully!")
 	fmt.Printf("Title: %s\n", task.Title)
-	if deadlineTime != nil {
-		fmt.Printf("Deadline: %s\n", deadlineTime.Format("2006-01-02 15:04"))
+	if task.Deadline != nil {
+		fmt.Printf("Deadline: %s\n", task.Deadline.Format("2006-01-02 15:04"))
 	}
 }
-
-func generateID() string {
-	return fmt.Sprintf("%d", time.Now().UnixNano())
-}
-
-/* func getDBPath() (string, error) {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "", fmt.Errorf("failed to get home directory: %w", err)
-	}
-
-	dataDir := filepath.Join(home, ".local", "share", "munus")
-
-	if err := os.MkdirAll(dataDir, 0o755); err != nil {
-		return "", fmt.Errorf("failed to create data directory: %w", err)
-	}
-
-	return filepath.Join(dataDir, "doit.db"), nil
-}
-*/
