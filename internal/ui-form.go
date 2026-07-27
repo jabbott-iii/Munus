@@ -254,7 +254,6 @@ func (m *FormModel) submitForm() error {
 
 	now := time.Now()
 	task := ItemModel{
-		ID:          fmt.Sprintf("%d", now.UnixNano()),
 		Title:       strings.TrimSpace(m.fields[titleField]),
 		Description: strings.TrimSpace(m.fields[descriptionField]),
 		Deadline:    deadline,
