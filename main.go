@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/jabbott-iii/Munus/internal"
@@ -88,7 +89,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	var deadlineTime = (*internal.Deadline)(nil)
+	var deadlineTime *time.Time
 	if deadline != "" {
 		parsed, err := internal.ParseDeadline(deadline)
 		if err != nil {
@@ -100,7 +101,7 @@ func main() {
 	task := &internal.ItemModel{
 		Title:       title,
 		Description: description,
-		Deadline:    (*deadlineTime),
+		Deadline:    deadlineTime,
 		Completed:   false,
 	}
 
