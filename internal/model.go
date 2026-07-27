@@ -2,8 +2,8 @@ package internal
 
 import "time"
 
-// Munus Represents an item
-type Munus struct {
+// ItemModel Represents an item
+type ItemModel struct {
 	ID          string     `json:"id"`
 	Title       string     `json:"title"`
 	Description string     `json:"description"`
@@ -14,8 +14,43 @@ type Munus struct {
 	UpdatedAt   time.Time  `json:"updated_at"`
 }
 
+// ListModel represents the list view model
+type ListModel struct {
+	storage          storage.Storage
+	tasks            []*ItemModel
+	topUpcoming      []*ItemModel
+	tasksNoDeadline  []*ItemModel
+	streak           *storage.Streak
+	cursor           int
+	expanded         map[int]bool
+	currentPage      int
+	showHelp         bool
+	err              error
+	loading          bool
+	confirmingDelete bool
+	taskToDelete     *ItemModel
+}
+
+// FormModel represents the form input model
+type FormModel struct {
+	storage      storage.Storage
+	fields       []string
+	currentField formField
+	cursor       int
+	done         bool
+	err          error
+	submitted    bool
+}
+
+type DataLoadedMsg struct {
+	tasks  []*ItemModel
+	streak *storage.Streak
+}
+
+type ErrMsg struct{ error }
+
 // IsOverdue checks if the item is overdue
-func (t *Munus) IsOverdue() bool {
+func (t *ItemModel) IsOverdue() bool {
 	if t.Deadline == nil || t.Completed {
 		return false
 	}
@@ -23,7 +58,7 @@ func (t *Munus) IsOverdue() bool {
 }
 
 // DaysUntilDeadline returns the number of days until the deadline
-func (t *Munus) DaysUntilDeadline() int {
+func (t *ItemModel) DaysUntilDeadline() int {
 	if t.Deadline == nil {
 		return -1
 	}
@@ -32,7 +67,7 @@ func (t *Munus) DaysUntilDeadline() int {
 }
 
 // MarkComplete marks the item as complete
-func (t *Munus) MarkComplete() {
+func (t *ItemModel) MarkComplete() {
 	t.Completed = true
 	now := time.Now()
 	t.CompletedAt = &now
@@ -40,7 +75,7 @@ func (t *Munus) MarkComplete() {
 }
 
 // MarkIncomplete marks the item as incomplete
-func (t *Munus) MarkIncomplete() {
+func (t *ItemModel) MarkIncomplete() {
 	t.Completed = false
 	t.CompletedAt = nil
 	t.UpdatedAt = time.Now()

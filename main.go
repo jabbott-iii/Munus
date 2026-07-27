@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"log"
 	"os"
-	"strings"
 	"time"
 
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/jabbott-iii/Munus/internal"
 )
 
@@ -46,7 +46,7 @@ func main() {
 	flag.Parse()
 
 	if showHelp {
-		printHelp()
+		internal.PrintHelp()
 		os.Exit(0)
 	}
 
@@ -79,7 +79,7 @@ func main() {
 
 	if title == "" || description == "" {
 		fmt.Println("Error: Both title (-t) and description (-d) are required")
-		printHelp()
+		internal.PrintHelp()
 		os.Exit(1)
 	}
 
@@ -120,37 +120,6 @@ func main() {
 	if deadlineTime != nil {
 		fmt.Printf("Deadline: %s\n", deadlineTime.Format("2006-01-02 15:04"))
 	}
-}
-
-func printHelp() {
-	fmt.Println("Munus - A task manager")
-	fmt.Println()
-	fmt.Println("Usage:")
-	fmt.Println("  Munus [OPTIONS]")
-	fmt.Println("  Munus -t \"Title\" -d \"Description\" [-n DEADLINE]")
-	fmt.Println()
-	fmt.Println("Options:")
-	fmt.Printf("  -t string    Title of the task (required, max %d chars)\n", MaxTitleLength)
-	fmt.Printf("  -d string    Description of the task (required, max %d chars)\n", MaxDescriptionLength)
-	fmt.Println("  -n string    Deadline for the task")
-
-	deadlineHelp := utils.FormatDeadlineHelp()
-	lines := strings.SplitSeq(deadlineHelp, "\n")
-	for line := range lines {
-		if line != "" {
-			fmt.Println("              ", line)
-		}
-	}
-	fmt.Println("  -list, -l    List all todos")
-	fmt.Println("  -help, -h    Show this help message")
-	fmt.Println()
-	fmt.Println("Interactive Mode:")
-	fmt.Println(" Run without arguments to enter interactive mode")
-	fmt.Println()
-	fmt.Println("Examples:")
-	fmt.Println("  Munus -t \"Meeting\" -d \"Team sync\" -n \"2025-11-20 14:00\"")
-	fmt.Println("  Munus -t \"Quick fix\" -d \"Bug #123\" -n \"2h\"")
-	fmt.Println("  Munus -t \"Project\" -d \"Milestone 1\" -n \"1w 2d\"")
 }
 
 func generateID() string {
