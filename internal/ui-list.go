@@ -33,6 +33,7 @@ func (m *ListModel) loadData() tea.Msg {
 	if err != nil {
 		return ErrMsg{err}
 	}
+	return DataLoadedMsg{tasks: tasks}
 }
 
 func (m *ListModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
