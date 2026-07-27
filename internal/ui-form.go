@@ -24,7 +24,7 @@ const (
 )
 
 // NewFormModel creates a new form model
-func NewFormModel(storage storage.Storage) *FormModel {
+func NewFormModel(storage Storage) *FormModel {
 	return &FormModel{
 		storage:      storage,
 		fields:       make([]string, 3),
@@ -263,5 +263,5 @@ func (m *FormModel) submitForm() error {
 		Completed:   false,
 	}
 
-	return m.storage.SaveTodo(&task)
+	return m.storage.CreateTask(&task)
 }

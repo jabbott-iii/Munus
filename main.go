@@ -102,8 +102,7 @@ func main() {
 		deadlineTime = parsed
 	}
 
-	task := internal.Munus{
-		ID:          generateID(),
+	task := internal.ItemModel{
 		Title:       title,
 		Description: description,
 		Deadline:    deadlineTime,

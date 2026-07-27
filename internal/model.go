@@ -4,11 +4,11 @@ import "time"
 
 // ItemModel Represents an item
 type ItemModel struct {
-	ID          string     `json:"id"`
-	Title       string     `json:"title"`
-	Description string     `json:"description"`
+	ID          uint       `gorm:"primaryKey"`
+	Title       string     `gorm:"size:255;not null"`
+	Description string     `gorm:"type:text"`
 	Deadline    *time.Time `json:"deadline,omitempty"`
-	Completed   bool       `json:"completed"`
+	Completed   bool       `gorm:"default:false;not null"`
 	CompletedAt *time.Time `json:"completed_at,omitempty"`
 	CreatedAt   time.Time  `json:"created_at"`
 	UpdatedAt   time.Time  `json:"updated_at"`
@@ -16,11 +16,10 @@ type ItemModel struct {
 
 // ListModel represents the list view model
 type ListModel struct {
-	storage          storage.Storage
+	storage          Storage
 	tasks            []*ItemModel
 	topUpcoming      []*ItemModel
 	tasksNoDeadline  []*ItemModel
-	streak           *storage.Streak
 	cursor           int
 	expanded         map[int]bool
 	currentPage      int
@@ -33,7 +32,7 @@ type ListModel struct {
 
 // FormModel represents the form input model
 type FormModel struct {
-	storage      storage.Storage
+	storage      Storage
 	fields       []string
 	currentField formField
 	cursor       int
@@ -43,8 +42,7 @@ type FormModel struct {
 }
 
 type DataLoadedMsg struct {
-	tasks  []*ItemModel
-	streak *storage.Streak
+	tasks []*ItemModel
 }
 
 type ErrMsg struct{ error }

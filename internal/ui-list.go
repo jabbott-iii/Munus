@@ -2,6 +2,7 @@ package internal
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -11,13 +12,13 @@ import (
 const pageSize = 10
 
 // NewListModel creates a new list model
-func NewListModel(storage storage.Storage) *ListModel {
+func NewListModel(storage Storage) *ListModel {
 	m := &ListModel{
 		storage:          storage,
 		expanded:         make(map[int]bool),
 		loading:          true,
 		confirmingDelete: false,
-		todoToDelete:     nil,
+		taskToDelete:     nil,
 	}
 	return m
 }
@@ -28,24 +29,9 @@ func (m *ListModel) Init() tea.Cmd {
 }
 
 func (m *ListModel) loadData() tea.Msg {
-	tasks, err := m.storage.GetAllTasks()
+	tasks, err := m.storage.ListTasks()
 	if err != nil {
 		return ErrMsg{err}
-	}
-
-	streak, err := m.storage.GetStreak()
-	if err != nil {
-		streak = &storage.Streak{
-			CurrentStreak:    0,
-			MaxStreak:        0,
-			TotalCompleted:   0,
-			DailyCompletions: make(map[string]int),
-		}
-	}
-
-	return DataLoadedMsg{
-		tasks:  tasks,
-		streak: streak,
 	}
 }
 
@@ -54,11 +40,10 @@ func (m *ListModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case DataLoadedMsg:
 		m.loading = false
 		m.tasks = msg.tasks
-		m.streak = msg.streak
 
-		m.topUpcoming = storage.GetTopUpcomingTodos(m.tasks, 10)
+		m.topUpcoming = GetTopUpcomingTasks(m.tasks, 10)
 
-		m.tasksNoDeadline = storage.GetTodosWithoutDeadline(m.tasks)
+		m.tasksNoDeadline = GetTasksWithoutDeadline(m.tasks)
 		return m, nil
 
 	case ErrMsg:
@@ -112,7 +97,7 @@ func (m *ListModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		case "y":
 			if m.confirmingDelete && m.taskToDelete != nil {
-				if err := m.storage.DeleteTask(m.taskToDelete.ID); err != nil {
+				if err := m.storage.DeleteTask(strconv.Itoa(int(m.taskToDelete.ID))); err != nil {
 					m.err = err
 				}
 				m.confirmingDelete = false
@@ -165,12 +150,6 @@ func (m *ListModel) View() string {
 		Bold(true).
 		MarginBottom(1)
 
-	streakStyle := lipgloss.NewStyle().
-		Background(lipgloss.Color("#7C3AED")).
-		Foreground(lipgloss.Color("#FFFFFF")).
-		Padding(0, 1).
-		MarginBottom(1)
-
 	sectionStyle := lipgloss.NewStyle().
 		Foreground(lipgloss.Color("#9333EA")).
 		Bold(true).
@@ -208,13 +187,6 @@ func (m *ListModel) View() string {
 	var s strings.Builder
 
 	s.WriteString(titleStyle.Render(" Task List"))
-
-	if m.streak != nil && m.streak.CurrentStreak > 0 {
-		streakText := fmt.Sprintf(" Streak: %d days | Max: %d days | Total: %d completed",
-			m.streak.CurrentStreak, m.streak.MaxStreak, m.streak.TotalCompleted)
-		s.WriteString(streakStyle.Render(streakText))
-		s.WriteString("\n")
-	}
 
 	if len(m.topUpcoming) > 0 {
 		s.WriteString(sectionStyle.Render(" Upcoming Deadlines (Top 10)"))
@@ -443,5 +415,5 @@ func (m *ListModel) ToggleComplete() error {
 		task.MarkComplete()
 	}
 
-	return m.storage.UpdateTodo(todo)
+	return m.storage.UpdateTask(task)
 }
