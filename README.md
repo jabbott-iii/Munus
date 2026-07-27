@@ -1,2 +1,2 @@
 # Munus
-Task Manager CLI tool.
+Task Manager TUI tool.
