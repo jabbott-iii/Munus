@@ -34,7 +34,7 @@ func NewDatabase(path string) (*Database, error) {
 	}
 
 	// Persistence structs
-	if err := conn.AutoMigrate(&ItemModel{}, &ListModel{}, &FormModel{}); err != nil {
+	if err := conn.AutoMigrate(&ItemModel{}); err != nil {
 		return nil, fmt.Errorf("auto-migrate schema: %w", err)
 	}
 
