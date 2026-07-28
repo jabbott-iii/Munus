@@ -86,12 +86,17 @@ Windows:
 Download the appropriate binary for your platform below and make it executable:
 
 Linux:
-    - chmod +x munus-linux-amd64 # munus-linux-arm64
-    - sudo mv munus-linux-amd64 /usr/local/bin/munus # munus-linux-arm64
+
+    - chmod +x munus-linux-amd64 # or munus-linux-arm64
+
+    - sudo mv munus-linux-amd64 /usr/local/bin/munus # or munus-linux-arm64
 
 macOS:
-    - chmod +x munus-macos-arm64 # munus-macos-amd64
-    - sudo mv munus-macos-arm64 /usr/local/bin/munus # munus-macos-amd64
+
+    - chmod +x munus-macos-arm64 # or munus-macos-amd64
+
+    - sudo mv munus-macos-arm64 /usr/local/bin/munus # or munus-macos-amd64
 
 Windows:
+
     - Download munus-windows-amd64.exe and add it to your PATH.
