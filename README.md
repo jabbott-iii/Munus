@@ -63,9 +63,11 @@ Examples:
 
     Munus -t "Meeting" -d "Team sync" -n "2025-11-20 14:00"
 
+  or
 
     Munus -t "Quick fix" -d "Bug #123" -n "2h"
 
+  or
 
     Munus -t "Project" -d "Milestone 1" -n "1w 2d"
 
