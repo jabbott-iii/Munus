@@ -80,3 +80,18 @@ macOS (Darwin):
 Windows:
     -AMD64 (64-bit Intel/AMD): GOOS=windows GOARCH=amd64 go build -o munus-windows-amd64.exe
     -ARM64 (64-bit ARM Windows): GOOS=windows GOARCH=arm64 go build -o munus-windows-arm64.exe
+
+## Install:
+
+Download the appropriate binary for your platform below and make it executable:
+
+Linux:
+    - chmod +x munus-linux-amd64 # munus-linux-arm64
+    - sudo mv munus-linux-amd64 /usr/local/bin/munus # munus-linux-arm64
+
+macOS:
+    - chmod +x munus-macos-arm64 # munus-macos-amd64
+    - sudo mv munus-macos-arm64 /usr/local/bin/munus # munus-macos-amd64
+
+Windows:
+    - Download munus-windows-amd64.exe and add it to your PATH.
