@@ -32,6 +32,7 @@ func PrintHelp() {
 	fmt.Println("  Munus -t \"Title\" -d \"Description\" [-n DEADLINE]")
 	fmt.Println()
 	fmt.Println("Options:")
+	fmt.Println("  Munus    Run without arguments to enter the terminal user interface to input a task")
 	fmt.Printf("  -t string    Title of the task (required, max 100 chars)\n")
 	fmt.Printf("  -d string    Description of the task (required, max 500 chars)\n")
 	fmt.Println("  -n string    Deadline for the task")
@@ -44,11 +45,8 @@ func PrintHelp() {
 		}
 	}
 
-	fmt.Println("  -list, -l    List all tasks sing a terminal user interface")
+	fmt.Println("  -list, -l    List all tasks in a terminal user interface")
 	fmt.Println("  -help, -h    Show this help message")
-	fmt.Println()
-	fmt.Println("Interactive Mode:")
-	fmt.Println(" Munus    Run without arguments to enter terminal user interface")
 	fmt.Println()
 	fmt.Println("Examples:")
 	fmt.Println("  Munus -t \"Meeting\" -d \"Team sync\" -n \"2025-11-20 14:00\"")
