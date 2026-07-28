@@ -66,3 +66,17 @@ Examples:
     Munus -t "Quick fix" -d "Bug #123" -n "2h"
 
     Munus -t "Project" -d "Milestone 1" -n "1w 2d"
+
+## Go Compile:
+
+Linux:
+    -AMD64 (64-bit Intel/AMD): GOOS=linux GOARCH=amd64 go build -o munus-linux-amd64
+    -ARM64 (64-bit ARM / v8): GOOS=linux GOARCH=arm64 go build -o munus-linux-arm64
+
+macOS (Darwin):
+    -AMD64 (Intel Macs): GOOS=darwin GOARCH=amd64 go build -o munus-mac-amd64
+    -ARM64 (Apple Silicon M1/M2/M3/M4): GOOS=darwin GOARCH=arm64 go build -o munus-mac-arm64
+
+Windows:
+    -AMD64 (64-bit Intel/AMD): GOOS=windows GOARCH=amd64 go build -o munus-windows-amd64.exe
+    -ARM64 (64-bit ARM Windows): GOOS=windows GOARCH=arm64 go build -o munus-windows-arm64.exe
