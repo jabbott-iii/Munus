@@ -14,7 +14,7 @@ software distributed under the License is distributed on an
 "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
 KIND, either express or implied.  See the License for the
 specific language governing permissions and limitations
-under the License.   
+under the License.
 */
 
 package internal
@@ -180,7 +180,7 @@ func (m *FormModel) View() string {
 		PaddingLeft(2)
 
 	var s strings.Builder
-	s.WriteString(titleStyle.Render("Create New Todo"))
+	s.WriteString(titleStyle.Render("Create New Task"))
 	s.WriteString("\n\n")
 
 	titleLabel := fmt.Sprintf("Title * (%d/%d)", len(m.fields[titleField]), MaxTitleLength)

@@ -14,7 +14,7 @@ software distributed under the License is distributed on an
 "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
 KIND, either express or implied.  See the License for the
 specific language governing permissions and limitations
-under the License.   
+under the License.
 */
 
 package internal
@@ -301,7 +301,7 @@ func (m *ListModel) View() string {
 		var dialog strings.Builder
 		dialog.WriteString(warningStyle.Render("⚠  Delete Confirmation"))
 		dialog.WriteString("\n\n")
-		dialog.WriteString("Are you sure you want to delete this todo?\n\n")
+		dialog.WriteString("Are you sure you want to delete this task?\n\n")
 		dialog.WriteString(titleStyle.Render("Title: "))
 		dialog.WriteString(m.taskToDelete.Title)
 		dialog.WriteString("\n\n")

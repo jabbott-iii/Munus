@@ -14,7 +14,7 @@ software distributed under the License is distributed on an
 "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
 KIND, either express or implied.  See the License for the
 specific language governing permissions and limitations
-under the License.   
+under the License.
 */
 
 package internal
@@ -44,11 +44,11 @@ func PrintHelp() {
 		}
 	}
 
-	fmt.Println("  -list, -l    List all todos")
+	fmt.Println("  -list, -l    List all tasks sing a terminal user interface")
 	fmt.Println("  -help, -h    Show this help message")
 	fmt.Println()
 	fmt.Println("Interactive Mode:")
-	fmt.Println(" Run without arguments to enter interactive mode")
+	fmt.Println(" Munus    Run without arguments to enter terminal user interface")
 	fmt.Println()
 	fmt.Println("Examples:")
 	fmt.Println("  Munus -t \"Meeting\" -d \"Team sync\" -n \"2025-11-20 14:00\"")

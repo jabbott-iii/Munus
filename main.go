@@ -14,7 +14,7 @@ software distributed under the License is distributed on an
 "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
 KIND, either express or implied.  See the License for the
 specific language governing permissions and limitations
-under the License.   
+under the License.
 */
 
 package main
@@ -36,6 +36,7 @@ const (
 	MaxDescriptionLength = 500
 )
 
+// cli flag variables
 var (
 	title       string
 	description string
@@ -44,6 +45,7 @@ var (
 	showHelp    bool
 )
 
+// cli flags
 func init() {
 	flag.StringVar(&title, "title", "", "Title of the task")
 	flag.StringVar(&title, "t", "", "Title of the task")
@@ -69,6 +71,7 @@ func main() {
 		os.Exit(0)
 	}
 
+	// sqlite db creation / use
 	db, err := internal.NewDatabase("munus.db")
 	if err != nil {
 		log.Fatalf("failed to initialize database: %v", err)
@@ -98,16 +101,19 @@ func main() {
 		os.Exit(1)
 	}
 
+	// title length enforcement
 	if len(title) > MaxTitleLength {
 		fmt.Printf("Error: title exceeds maximum length of %d characters (current: %d)\n", MaxTitleLength, len(title))
 		os.Exit(1)
 	}
 
+	// description length enforcement
 	if len(description) > MaxDescriptionLength {
 		fmt.Printf("Error: description exceeds maximum length of %d characters (current: %d)\n", MaxDescriptionLength, len(description))
 		os.Exit(1)
 	}
 
+	// deadline enforcement
 	var deadlineTime *time.Time
 	if deadline != "" {
 		parsed, err := internal.ParseDeadline(deadline)
@@ -117,6 +123,7 @@ func main() {
 		deadlineTime = parsed
 	}
 
+	// task item
 	task := &internal.ItemModel{
 		Title:       title,
 		Description: description,
