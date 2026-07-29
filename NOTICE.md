@@ -3,5 +3,7 @@ Apache Munus
 Copyright 2026 Joseph Anthony Abbott III
 
 This product includes third-party software:
-
-n/a
+  - github.com/charmbracelet/bubbletea v1.3.10 Charmbracelet, Inc. MIT License
+	- github.com/charmbracelet/lipgloss v1.1.0 Charmbracelet, Inc. MIT License
+	- gorm.io/driver/sqlite v1.6.0 Jinzhu MIT License
+	- gorm.io/gorm v1.31.2 Jinzhu MIT License
