@@ -8,10 +8,6 @@
 -  P2P database sharing.
 -  Create cli commands for tui only features.
 
-## status: 
-- 🗹 Compilation pass. 
-- 🗹 Testing pass.
-
 ## Contributing Instructions:
 - Create an issue to pitch an addition or change, pull requests with no corresponding issue will be denied.
 - If the issue item is already existing, comment on it before making a pull request to address the issue item.
@@ -36,6 +32,10 @@ Options:
     -d string    Description of the task (required, max 500 chars)
 
     -n string    Deadline for the task
+    
+    -list, -l    List all tasks in the terminal user interface
+
+    -help, -h    Show this help message
 
 Deadline formats:
 
@@ -54,10 +54,6 @@ Deadline formats:
         • M: months (1M = 1 month from now)
 
     - Combinations: 2d 3h 30m (2days, 3hours, 30 minutes from now)
-
-    -list, -l    List all tasks in the terminal user interface
-
-    -help, -h    Show this help message
 
 Examples:
 
