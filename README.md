@@ -60,6 +60,38 @@ Examples:
 
     Munus -t "Project" -d "Milestone 1" -n "1w 2d"
 
+## Run with Docker
+
+### Build the image
+
+```bash
+docker build -t munus:latest .
+```
+
+### Run interactively (recommended for TUI)
+
+```bash
+docker run --rm -it \
+  -v munus-data:/app/data \
+  munus:latest
+```
+
+This starts the TUI/CLI and persists your SQLite database in a Docker volume (`munus-data`).
+
+### Run CLI mode with flags
+
+```bash
+docker run --rm -it \
+  -v munus-data:/app/data \
+  munus:latest -t "Meeting" -d "Team sync" -n "2h"
+```
+
+### Show help
+
+```bash
+docker run --rm munus:latest -h
+```
+
 ## Go Compile:
 
 Linux:
