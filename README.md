@@ -60,7 +60,7 @@ Examples:
 
     Munus -t "Project" -d "Milestone 1" -n "1w 2d"
 
-## Run with Docker
+## Run with Docker:
 
 ### Build the image
 
