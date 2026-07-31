@@ -12,13 +12,13 @@
 
 Usage:
 
-    Munus [OPTIONS]
+    munus [OPTIONS]
 
-    Munus -t "Title" -d "Description" [-n DEADLINE]
+    munus -t "Title" -d "Description" [-n DEADLINE]
 
 Options:
 
-    Munus        Run without arguments to enter the terminal user interface to input a task
+    munus        Run without arguments to enter the terminal user interface to input a task
 
     -t string    Title of the task (required, max 100 chars)
 
@@ -50,15 +50,15 @@ Deadline formats:
 
 Examples:
 
-    Munus -t "Meeting" -d "Team sync" -n "2025-11-20 14:00"
+    munus -t "Meeting" -d "Team sync" -n "2025-11-20 14:00"
 
   or
 
-    Munus -t "Quick fix" -d "Bug #123" -n "2h"
+    munus -t "Quick fix" -d "Bug #123" -n "2h"
 
   or
 
-    Munus -t "Project" -d "Milestone 1" -n "1w 2d"
+    munus -t "Project" -d "Milestone 1" -n "1w 2d"
 
 ## Run with Docker:
 
@@ -130,36 +130,36 @@ Download the appropriate binary for your platform below and make it executable:
 
 Linux:
 
-    - chmod +x munus-linux-amd64
+     chmod +x munus-linux-amd64
 
   or
 
-    - chmod +x munus-linux-arm64
+     chmod +x munus-linux-arm64
 
   then
 
-    - sudo mv munus-linux-amd64 /usr/local/bin/munus
+     sudo mv munus-linux-amd64 /usr/local/bin/munus
 
   or
 
-    - sudo mv munus-linux-arm64 /usr/local/bin/munus
+     sudo mv munus-linux-arm64 /usr/local/bin/munus
 
 macOS:
 
-    - chmod +x munus-macos-arm64
+     chmod +x munus-macos-arm64
 
   or
 
-    - chmod +x munus-macos-amd64
+     chmod +x munus-macos-amd64
 
   then
 
-    - sudo mv munus-macos-arm64 /usr/local/bin/munus
+     sudo mv munus-macos-arm64 /usr/local/bin/munus
 
   or
 
-    - sudo mv munus-macos-amd64 /usr/local/bin/munus
+     sudo mv munus-macos-amd64 /usr/local/bin/munus
 
 Windows:
 
-    - Download munus-windows-amd64.exe and add it to your PATH.
+     Download munus-windows-amd64.exe and add it to your PATH as munus.
