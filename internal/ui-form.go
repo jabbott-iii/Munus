@@ -61,6 +61,10 @@ func (m *FormModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.done = true
 			return m, tea.Quit
 
+		case "ctrl+l":
+			lm := NewListModel(m.storage)
+			return lm, lm.Init()
+
 		case "tab", "down":
 			if m.currentField < deadlineField {
 				m.currentField++
@@ -108,10 +112,6 @@ func (m *FormModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		case "end":
 			m.cursor = len(m.fields[m.currentField])
-
-		case "ctrl+l":
-			lm := NewListModel(m.storage)
-			return lm, lm.Init()
 
 		default:
 			if len(msg.String()) == 1 {
