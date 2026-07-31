@@ -109,6 +109,10 @@ func (m *FormModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "end":
 			m.cursor = len(m.fields[m.currentField])
 
+		case "l":
+			lm := NewListModel(m.storage)
+			return lm, lm.Init()
+
 		default:
 			if len(msg.String()) == 1 {
 				canAddChar := true
@@ -232,7 +236,7 @@ func (m *FormModel) View() string {
 	}
 
 	s.WriteString("\n")
-	s.WriteString(helpStyle.Render("Tab/↓: Next field • Shift+Tab/↑: Previous field • Enter: Submit • Esc: Cancel"))
+	s.WriteString(helpStyle.Render("Tab/↓: Next field • Shift+Tab/↑: Previous field • Enter: Submit • l: List • Esc: Cancel"))
 
 	return s.String()
 }
