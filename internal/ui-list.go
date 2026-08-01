@@ -170,14 +170,14 @@ func (m *ListModel) View() string {
 		MarginBottom(1)
 
 	sectionStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#9333EA")).
+		Foreground(lipgloss.Color("#8B5CF6")).
 		Bold(true).
 		MarginTop(1).
 		MarginBottom(1)
 
 	selectedStyle := lipgloss.NewStyle().
 		Foreground(lipgloss.Color("#FFFFFF")).
-		Background(lipgloss.Color("#8B5CF6")).
+		Background(lipgloss.Color("#5cc5f6")).
 		Padding(0, 1)
 
 	normalStyle := lipgloss.NewStyle().
@@ -243,7 +243,7 @@ func (m *ListModel) View() string {
 	for _, task := range m.tasksNoDeadline {
 		if currentIndex >= start && currentIndex < end {
 			s.WriteString(m.RenderTask(task, currentIndex, currentIndex == m.cursor,
-				sectionStyle, normalStyle, completeStyle, overdueStyle, upcomingStyle, descriptionStyle))
+				selectedStyle, normalStyle, completeStyle, overdueStyle, upcomingStyle, descriptionStyle))
 			s.WriteString("\n")
 		}
 		currentIndex++
@@ -260,7 +260,7 @@ func (m *ListModel) View() string {
 			}
 			if currentIndex >= start && currentIndex < end {
 				s.WriteString(m.RenderTask(task, currentIndex, currentIndex == m.cursor,
-					sectionStyle, normalStyle, completeStyle, overdueStyle, upcomingStyle, descriptionStyle))
+					selectedStyle, normalStyle, completeStyle, overdueStyle, upcomingStyle, descriptionStyle))
 				s.WriteString("\n")
 			}
 			currentIndex++
