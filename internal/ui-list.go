@@ -207,17 +207,12 @@ func (m *ListModel) View() string {
 
 	s.WriteString(titleStyle.Render(" Task List"))
 
-	if len(m.topUpcoming) > 0 {
-		s.WriteString(sectionStyle.Render(" Upcoming Deadlines (Top 10)"))
-		s.WriteString("\n")
-	}
+	s.WriteString(sectionStyle.Render(" Upcoming Deadlines (Top 10)"))
+	s.WriteString("\n")
 
 	visibleTasks := m.GetVisibleTasks()
 	start := m.currentPage * pageSize
 	end := start + pageSize
-	if end > len(visibleTasks) {
-		end = len(visibleTasks)
-	}
 
 	currentIndex := 0
 
@@ -232,13 +227,8 @@ func (m *ListModel) View() string {
 	}
 
 	// Tasks without deadline section
-	if len(m.tasksNoDeadline) > 0 {
-		if currentIndex > 0 {
-			s.WriteString("\n")
-		}
-		s.WriteString(sectionStyle.Render(" No Deadline"))
-		s.WriteString("\n")
-	}
+	s.WriteString(sectionStyle.Render(" No Deadline"))
+	s.WriteString("\n")
 
 	for _, task := range m.tasksNoDeadline {
 		if currentIndex >= start && currentIndex < end {
@@ -253,7 +243,7 @@ func (m *ListModel) View() string {
 	completedCount := 0
 	for _, task := range m.tasks {
 		if task.Completed {
-			if completedCount == 0 && currentIndex > 0 {
+			if completedCount == 0 && currentIndex >= 0 {
 				s.WriteString("\n")
 				s.WriteString(sectionStyle.Render("🗹 Completed"))
 				s.WriteString("\n")
@@ -278,63 +268,63 @@ func (m *ListModel) View() string {
 	s.WriteString(helpStyle.Render("ctrl+w/↑/ctrl+s/↓: Navigate • Space: Expand • c: Complete • d: Delete • n: New • r: Refresh • ctrl+c: Quit"))
 
 	if m.confirmingDelete && m.taskToDelete != nil {
-	dialogStyle := lipgloss.NewStyle().
-		Border(lipgloss.NormalBorder()).
-		BorderForeground(lipgloss.Color("#FF6B6B")).
-		Padding(1, 2).
-		Background(lipgloss.Color("#1A1A2E")).
-		Foreground(lipgloss.Color("#FFFFFF"))
+		dialogStyle := lipgloss.NewStyle().
+			Border(lipgloss.NormalBorder()).
+			BorderForeground(lipgloss.Color("#FF6B6B")).
+			Padding(1, 2).
+			Background(lipgloss.Color("#1A1A2E")).
+			Foreground(lipgloss.Color("#FFFFFF"))
 
-	warningStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#FFA500")).
-		Bold(true)
+		warningStyle := lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#FFA500")).
+			Bold(true)
 
-	modalTitleStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#FF6B6B")).
-		Bold(true)
+		modalTitleStyle := lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#FF6B6B")).
+			Bold(true)
 
-	var dialog strings.Builder
-	dialog.WriteString(warningStyle.Render("⚠  Delete Confirmation"))
-	dialog.WriteString("\n\n")
-	dialog.WriteString("Are you sure you want to delete this task?\n\n")
-	dialog.WriteString(modalTitleStyle.Render("Title: "))
-	dialog.WriteString(m.taskToDelete.Title)
-	dialog.WriteString("\n\n")
-	dialog.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("#4CAF50")).Render("[y] Yes  "))
-	dialog.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("#FF6B6B")).Render("[n] No  "))
-	dialog.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("#9CA3AF")).Render("[esc] Cancel"))
+		var dialog strings.Builder
+		dialog.WriteString(warningStyle.Render("⚠  Delete Confirmation"))
+		dialog.WriteString("\n\n")
+		dialog.WriteString("Are you sure you want to delete this task?\n\n")
+		dialog.WriteString(modalTitleStyle.Render("Title: "))
+		dialog.WriteString(m.taskToDelete.Title)
+		dialog.WriteString("\n\n")
+		dialog.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("#4CAF50")).Render("[y] Yes  "))
+		dialog.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("#FF6B6B")).Render("[n] No  "))
+		dialog.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("#9CA3AF")).Render("[esc] Cancel"))
 
-	dialogContent := dialogStyle.Render(dialog.String())
+		dialogContent := dialogStyle.Render(dialog.String())
 
-	viewW := m.viewportWidth
-	viewH := m.viewportHeight
-	if viewW <= 0 {
-		viewW = 80
+		viewW := m.viewportWidth
+		viewH := m.viewportHeight
+		if viewW <= 0 {
+			viewW = 80
+		}
+		if viewH <= 0 {
+			viewH = 24
+		}
+
+		// Base layer (dimmed)
+		base := lipgloss.NewStyle().
+			Width(viewW).
+			Height(viewH).
+			Foreground(lipgloss.Color("#6B7280")).
+			Render(s.String())
+
+		// Modal layer centered in full viewport
+		modalLayer := lipgloss.Place(
+			viewW,
+			viewH,
+			lipgloss.Center,
+			lipgloss.Center,
+			dialogContent,
+			lipgloss.WithWhitespaceChars(" "),
+		)
+
+		// Draw modal over base by resetting cursor to top-left before modal output.
+		return base + "\x1b[H" + modalLayer
 	}
-	if viewH <= 0 {
-		viewH = 24
-	}
-
-	// Base layer (dimmed)
-	base := lipgloss.NewStyle().
-		Width(viewW).
-		Height(viewH).
-		Foreground(lipgloss.Color("#6B7280")).
-		Render(s.String())
-
-	// Modal layer centered in full viewport
-	modalLayer := lipgloss.Place(
-		viewW,
-		viewH,
-		lipgloss.Center,
-		lipgloss.Center,
-		dialogContent,
-		lipgloss.WithWhitespaceChars(" "),
-	)
-
-	// Draw modal over base by resetting cursor to top-left before modal output.
-	return base + "\x1b[H" + modalLayer
-}
 
 	return s.String()
 }
