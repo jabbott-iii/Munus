@@ -87,7 +87,7 @@ func (m *ListModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.EnsureCursorVisible()
 			}
 
-		case "Space":
+		case "e":
 			m.expanded[m.cursor] = !m.expanded[m.cursor]
 
 		case "c":
@@ -197,7 +197,7 @@ func (m *ListModel) View() string {
 		Foreground(lipgloss.Color("#a1a1a0"))
 
 	descriptionStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#a1a1a0")).
+		Foreground(lipgloss.Color("#f7cf79")).
 		PaddingLeft(3)
 
 	helpStyle := lipgloss.NewStyle().
@@ -266,7 +266,7 @@ func (m *ListModel) View() string {
 
 	s.WriteString("\n")
 	s.WriteString(helpStyle.Render("Commands:\n"))
-	s.WriteString(helpStyle.Render("ctrl+w/↑/ctrl+s/↓: Navigate • Space: Expand • c: Complete • d: Delete • n: New • r: Refresh • ctrl+c: Quit"))
+	s.WriteString(helpStyle.Render("ctrl+w/↑/ctrl+s/↓: Navigate • e: Expand • c: Complete • d: Delete • n: New • r: Refresh • ctrl+c: Quit"))
 
 	if m.confirmingDelete && m.taskToDelete != nil {
 		dialogStyle := lipgloss.NewStyle().
@@ -367,6 +367,7 @@ func (m *ListModel) RenderTask(task *ItemModel, index int, isSelected bool,
 	if m.expanded[index] && task.Description != "" {
 		s.WriteString("\n")
 		s.WriteString(descriptionStyle.Render(task.Description))
+		s.WriteString("\n")
 	}
 
 	return s.String()
