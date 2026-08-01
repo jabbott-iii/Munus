@@ -165,7 +165,7 @@ func (m *FormModel) View() string {
 
 	inactiveStyle := lipgloss.NewStyle().
 		Border(lipgloss.NormalBorder()).
-		BorderForeground(lipgloss.Color("#6B7280")).
+		BorderForeground(lipgloss.Color("#f8c623")).
 		Padding(0, 1).
 		Width(60)
 
@@ -174,11 +174,11 @@ func (m *FormModel) View() string {
 		MarginTop(1)
 
 	helpStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#9CA3AF")).
+		Foreground(lipgloss.Color("#f8c623")).
 		MarginTop(2)
 
 	deadlineHelpStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#9CA3AF")).
+		Foreground(lipgloss.Color("#f8c623")).
 		PaddingLeft(2)
 
 	var s strings.Builder
