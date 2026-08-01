@@ -165,7 +165,7 @@ func (m *ListModel) View() string {
 	}
 
 	titleStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#f8c623")).
+		Foreground(lipgloss.Color("#f7cf79")).
 		Bold(true).
 		MarginBottom(1)
 
@@ -176,16 +176,16 @@ func (m *ListModel) View() string {
 		MarginBottom(1)
 
 	selectedStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#4c0377")).
-		Background(lipgloss.Color("#acfdf6")).
+		Foreground(lipgloss.Color("#000000")).
+		Background(lipgloss.Color("#f7cf79")).
 		Padding(0, 1)
 
 	normalStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#f8c623")).
+		Foreground(lipgloss.Color("#a1a1a0")).
 		Padding(0, 1)
 
 	completeStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#f8c623")).
+		Foreground(lipgloss.Color("#a1a1a0")).
 		Strikethrough(true).
 		Padding(0, 1)
 
@@ -194,14 +194,14 @@ func (m *ListModel) View() string {
 		Bold(true)
 
 	upcomingStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#f8c623"))
+		Foreground(lipgloss.Color("#a1a1a0"))
 
 	descriptionStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#f8c623")).
+		Foreground(lipgloss.Color("#a1a1a0")).
 		PaddingLeft(3)
 
 	helpStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#f8c623")).
+		Foreground(lipgloss.Color("#f7cf79")).
 		PaddingLeft(1)
 
 	var s strings.Builder
