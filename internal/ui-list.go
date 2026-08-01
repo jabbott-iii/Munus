@@ -72,13 +72,13 @@ func (m *ListModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "q", "ctrl+c", "esc":
 			return m, tea.Quit
 
-		case "up", "k":
+		case "up", "ctrl+w":
 			if m.cursor > 0 {
 				m.cursor--
 				m.EnsureCursorVisible()
 			}
 
-		case "down", "j":
+		case "down", "ctrl+s":
 			if m.cursor < len(m.GetVisibleTasks())-1 {
 				m.cursor++
 				m.EnsureCursorVisible()
@@ -273,7 +273,7 @@ func (m *ListModel) View() string {
 	if m.showHelp {
 		s.WriteString("\n")
 		s.WriteString(helpStyle.Render("Commands:\n"))
-		s.WriteString(helpStyle.Render("↑/↓/j/k: Navigate • Space: Expand • c: Complete • d: Delete • n: New • r: Refresh • q: Quit"))
+		s.WriteString(helpStyle.Render("ctrl+w/↑/ctrl+s/↓: Navigate • Space: Expand • c: Complete • d: Delete • n: New • r: Refresh • ctrl+c: Quit"))
 	} else {
 		s.WriteString("\n")
 		s.WriteString(helpStyle.Render("Press ? for help"))

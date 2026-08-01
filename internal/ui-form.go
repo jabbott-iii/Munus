@@ -65,13 +65,13 @@ func (m *FormModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			lm := NewListModel(m.storage)
 			return lm, lm.Init()
 
-		case "tab", "down":
+		case "ctrl+s", "down":
 			if m.currentField < deadlineField {
 				m.currentField++
 				m.cursor = len(m.fields[m.currentField])
 			}
 
-		case "shift+tab", "up":
+		case "ctrl+w", "up":
 			if m.currentField > titleField {
 				m.currentField--
 				m.cursor = len(m.fields[m.currentField])
@@ -237,7 +237,7 @@ func (m *FormModel) View() string {
 	}
 
 	s.WriteString("\n")
-	s.WriteString(helpStyle.Render("Tab/↓: Next field • Shift+Tab/↑: Previous field • Enter: Submit • CTRL+l: List • Esc: Cancel"))
+	s.WriteString(helpStyle.Render("ctrl+w/↑/ctrl+s/↓: Navigation • Enter: Submit • ctrl+l: List • ctrl+c: Quit"))
 
 	return s.String()
 }
