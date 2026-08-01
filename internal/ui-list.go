@@ -165,7 +165,7 @@ func (m *ListModel) View() string {
 	}
 
 	titleStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#7C3AED")).
+		Foreground(lipgloss.Color("#f8c623")).
 		Bold(true).
 		MarginBottom(1)
 
@@ -189,11 +189,11 @@ func (m *ListModel) View() string {
 		Padding(0, 1)
 
 	overdueStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#EF4444")).
+		Foreground(lipgloss.Color("#f8c623")).
 		Bold(true)
 
 	upcomingStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#F59E0B"))
+		Foreground(lipgloss.Color("#f8c623"))
 
 	descriptionStyle := lipgloss.NewStyle().
 		Foreground(lipgloss.Color("#f8c623")).
