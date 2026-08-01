@@ -53,12 +53,15 @@ func (m *ListModel) loadData() tea.Msg {
 
 func (m *ListModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
+	case tea.WindowSizeMsg:
+		m.viewportWidth = msg.Width
+		m.viewportHeight = msg.Height
+		return m, nil
+
 	case DataLoadedMsg:
 		m.loading = false
 		m.tasks = msg.tasks
-
 		m.topUpcoming = GetTopUpcomingTasks(m.tasks, 10)
-
 		m.tasksNoDeadline = GetTasksWithoutDeadline(m.tasks)
 		return m, nil
 
@@ -270,14 +273,9 @@ func (m *ListModel) View() string {
 		s.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("#9CA3AF")).Render(pageInfo))
 	}
 
-	if m.showHelp {
-		s.WriteString("\n")
-		s.WriteString(helpStyle.Render("Commands:\n"))
-		s.WriteString(helpStyle.Render("ctrl+w/↑/ctrl+s/↓: Navigate • Space: Expand • c: Complete • d: Delete • n: New • r: Refresh • ctrl+c: Quit"))
-	} else {
-		s.WriteString("\n")
-		s.WriteString(helpStyle.Render("Press ? for help"))
-	}
+	s.WriteString("\n")
+	s.WriteString(helpStyle.Render("Commands:\n"))
+	s.WriteString(helpStyle.Render("ctrl+w/↑/ctrl+s/↓: Navigate • Space: Expand • c: Complete • d: Delete • n: New • r: Refresh • ctrl+c: Quit"))
 
 	if m.confirmingDelete && m.taskToDelete != nil {
 		dialogStyle := lipgloss.NewStyle().
@@ -310,11 +308,23 @@ func (m *ListModel) View() string {
 
 		width := lipgloss.Width(dialogContent)
 		height := lipgloss.Height(dialogContent)
-		viewWidth := 80
-		viewHeight := 24
+		viewWidth := m.viewportWidth
+		viewHeight := m.viewportHeight
+		if viewWidth <= 0 {
+			viewWidth = 100
+		}
+		if viewHeight <= 0 {
+			viewHeight = 50
+		}
 
 		leftPadding := (viewWidth - width) / 2
 		topPadding := (viewHeight - height) / 2
+		if leftPadding < 0 {
+			leftPadding = 0
+		}
+		if topPadding < 0 {
+			topPadding = 0
+		}
 
 		var finalView strings.Builder
 		lines := strings.Split(s.String(), "\n")

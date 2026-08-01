@@ -44,6 +44,8 @@ type ListModel struct {
 	loading          bool
 	confirmingDelete bool
 	taskToDelete     *ItemModel
+	viewportWidth  	 int
+	viewportHeight   int
 }
 
 // FormModel represents the form input model
