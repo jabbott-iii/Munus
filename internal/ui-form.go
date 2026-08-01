@@ -86,7 +86,8 @@ func (m *FormModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.err = err
 				} else {
 					m.submitted = true
-					return m, tea.Quit
+					fm := NewFormModel(m.storage)
+					return fm, fm.Init()
 				}
 			}
 
