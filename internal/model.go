@@ -23,11 +23,11 @@ type ItemModel struct {
 	ID          uint       `gorm:"primaryKey"`
 	Title       string     `gorm:"size:255;not null"`
 	Description string     `gorm:"type:text"`
-	Deadline    *time.Time `json:"deadline,omitempty"`
+	Deadline    *time.Time `gorm:"column:deadline"`
 	Completed   bool       `gorm:"default:false;not null"`
-	CompletedAt *time.Time `json:"completed_at,omitempty"`
-	CreatedAt   time.Time  `json:"created_at"`
-	UpdatedAt   time.Time  `json:"updated_at"`
+	CompletedAt *time.Time `gorm:"column:completed_at"`
+	CreatedAt   time.Time  `gorm:'autoCreateTime"`
+	UpdatedAt   time.Time  `gorm:"autoUpdateTime"`
 }
 
 // ListModel represents the list view model
