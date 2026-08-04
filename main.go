@@ -74,12 +74,14 @@ func main() {
 		log.Fatalf("failed to initialize database: %v", err)
 	}
 
+	// printlist data
+	taskId := []internal.ItemModel{
+		{ID: 1, Title: "Task 1", Description: "Demo", Completed: false},
+	}
+	
 	if listMode {
-		p := tea.NewProgram(internal.NewListModel(db), tea.WithAltScreen())
-		if _, err := p.Run(); err != nil {
-			log.Fatalf("error running list view: %v", err)
-		}
-		return
+		internal.PrintList(taskId)
+		os.Exit(0)
 	}
 
 	// No CLI args: open interactive create form

@@ -26,7 +26,7 @@ type ItemModel struct {
 	Deadline    *time.Time `gorm:"column:deadline"`
 	Completed   bool       `gorm:"default:false;not null"`
 	CompletedAt *time.Time `gorm:"column:completed_at"`
-	CreatedAt   time.Time  `gorm:'autoCreateTime"`
+	CreatedAt   time.Time  `gorm:"autoCreateTime"`
 	UpdatedAt   time.Time  `gorm:"autoUpdateTime"`
 }
 
