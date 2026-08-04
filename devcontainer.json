@@ -1,5 +1,16 @@
 {
-"containerEnv": {
-  "GOROOT": ""
+  "name": "Munus",
+  "image": "mcr.microsoft.com/devcontainers/base:ubuntu",
+  "containerEnv": {
+    "GOROOT": ""
+  },
+  "features": {},
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "golang.go"
+      ]
     }
+  },
+  "postCreateCommand": "go version"
 }
