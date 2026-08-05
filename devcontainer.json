@@ -4,11 +4,16 @@
   "containerEnv": {
     "GOROOT": ""
   },
-  "features": {},
+  "features": {
+    "ghcr.io/duduribeiro/devcontainer-features/neovim:1": {
+      "version": "stable"
+    }
+  },
   "customizations": {
     "vscode": {
       "extensions": [
-        "golang.go"
+        "golang.go",
+        "asvetliakov.vscode-neovim"
       ]
     }
   },
