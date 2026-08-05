@@ -43,7 +43,7 @@ var (
 )
 
 // cli flags
-func init() {
+func CliFlag() {
 	flag.StringVar(&title, "title", "", "Title of the task")
 	flag.StringVar(&title, "t", "", "Title of the task")
 

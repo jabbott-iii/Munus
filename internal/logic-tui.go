@@ -16,55 +16,10 @@ limitations under the License.
 
 package internal
 
-import "time"
-
-// ItemModel Represents an item
-type ItemModel struct {
-	ID          uint       `gorm:"primaryKey"`
-	Title       string     `gorm:"size:255;not null"`
-	Description string     `gorm:"type:text"`
-	Deadline    *time.Time `gorm:"column:deadline"`
-	Completed   bool       `gorm:"default:false;not null"`
-	CompletedAt *time.Time `gorm:"column:completed_at"`
-	CreatedAt   time.Time  `gorm:"autoCreateTime"`
-	UpdatedAt   time.Time  `gorm:"autoUpdateTime"`
-}
-
-// ListModel represents the list view model
-type ListModel struct {
-	storage          Storage
-	tasks            []*ItemModel
-	topUpcoming      []*ItemModel
-	tasksNoDeadline  []*ItemModel
-	cursor           int
-	expanded         map[int]bool
-	currentPage      int
-	showHelp         bool
-	err              error
-	loading          bool
-	confirmingDelete bool
-	taskToDelete     *ItemModel
-	viewportWidth  	 int
-	viewportHeight   int
-}
-
-// FormModel represents the form input model
-type FormModel struct {
-	storage      Storage
-	fields       []string
-	currentField formField
-	cursor       int
-	done         bool
-	err          error
-	submitted    bool
-}
-
-// DataLoadedMsg is emitted when tasks are loaded from storage.
-type DataLoadedMsg struct {
-	tasks []*ItemModel
-}
-
-type ErrMsg struct{ error }
+import (
+	"sort"
+	"time"
+)
 
 // IsOverdue checks if the item is overdue
 func (t *ItemModel) IsOverdue() bool {
@@ -96,4 +51,37 @@ func (t *ItemModel) MarkIncomplete() {
 	t.Completed = false
 	t.CompletedAt = nil
 	t.UpdatedAt = time.Now()
+}
+
+// GetTopUpcomingTasks returns the top N tasks with the closest deadline
+func GetTopUpcomingTasks(tasks []*ItemModel, limit int) []*ItemModel {
+	var upcomingTasks []*ItemModel
+	for _, todo := range tasks {
+		if !todo.Completed && todo.Deadline != nil {
+			upcomingTasks = append(upcomingTasks, todo)
+		}
+	}
+
+	sort.Slice(upcomingTasks, func(i, j int) bool {
+		if upcomingTasks[i].Deadline == nil || upcomingTasks[j].Deadline == nil {
+			return false
+		}
+		return upcomingTasks[i].Deadline.Before(*upcomingTasks[j].Deadline)
+	})
+
+	if len(upcomingTasks) > limit {
+		return upcomingTasks[:limit]
+	}
+	return upcomingTasks
+}
+
+// GetTasksWithoutDeadline returns tasks without deadline
+func GetTasksWithoutDeadline(tasks []*ItemModel) []*ItemModel {
+	var noDeadlineTasks []*ItemModel
+	for _, task := range tasks {
+		if !task.Completed && task.Deadline == nil {
+			noDeadlineTasks = append(noDeadlineTasks, task)
+		}
+	}
+	return noDeadlineTasks
 }

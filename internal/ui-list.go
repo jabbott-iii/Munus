@@ -26,18 +26,6 @@ import (
 
 const pageSize = 10
 
-// NewListModel creates a new list model
-func NewListModel(storage Storage) *ListModel {
-	m := &ListModel{
-		storage:          storage,
-		expanded:         make(map[int]bool),
-		loading:          true,
-		confirmingDelete: false,
-		taskToDelete:     nil,
-	}
-	return m
-}
-
 // Init initializes the list model
 func (m *ListModel) Init() tea.Cmd {
 	return m.loadData

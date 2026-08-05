@@ -39,15 +39,6 @@ const (
 	MaxDescriptionLength = 500
 )
 
-// NewFormModel creates a new form model
-func NewFormModel(storage Storage) *FormModel {
-	return &FormModel{
-		storage:      storage,
-		fields:       make([]string, 3),
-		currentField: titleField,
-	}
-}
-
 // Init initializes the form model
 func (m *FormModel) Init() tea.Cmd {
 	return nil
