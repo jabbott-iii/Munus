@@ -1,12 +1,14 @@
 ## Features:
 - 🗹 Create a task title and description that is stored in a database.
 - 🗹 Create a deadline for tasks to stay on top of your project timeline.
-- 🗹 Complete tasks to check them off, they will stay in a complete state until they are deleted for data retention.
-- 🗹 TUI and CLI based on preference, the task list itself (including completions and deadlines) is TUI only.
+- 🗹 Complete tasks to check them off.
+- 🗹 Delete tasks and completed tasks at will.
+- 🗹 Data storage via sqlite.
 
 ## Planned Features:
--  P2P database sharing.
--  Create cli commands for tui only features.
+-  Git integration.
+-  Github task to issue.
+-  File export and import.
 
 ## Usage Information:
 
