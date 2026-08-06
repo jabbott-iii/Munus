@@ -35,11 +35,6 @@ jobs:
       - name: Run go vet
         run: go vet ./...
 
-#      - name: Run golangci-lint
-#        uses: golangci/golangci-lint-action@v6
-#        with:
-#          version: stable
-
       - name: Run tests
         run: go test -v ./...
 
