@@ -1,0 +1,85 @@
+name: CD
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build and Release
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Set release metadata
+        id: meta
+        shell: bash
+        run: |
+          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
+            echo "tag=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+          else
+            # manual run fallback
+            echo "tag=manual-${GITHUB_RUN_NUMBER}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Build release artifacts
+        shell: bash
+        run: |
+          mkdir -p dist
+          APP=munus
+          VERSION="${{ steps.meta.outputs.tag }}"
+
+          build_and_package () {
+            local goos=$1
+            local goarch=$2
+            local ext=$3
+            local out="${APP}_${goos}_${goarch}${ext}"
+
+            GOOS=$goos GOARCH=$goarch CGO_ENABLED=0 \
+              go build -ldflags="-s -w -X main.version=${VERSION}" -o "dist/${out}" .
+
+            if [ "$goos" = "windows" ]; then
+              (cd dist && zip -q "${APP}_${goos}_${goarch}.zip" "${out}")
+              rm "dist/${out}"
+            else
+              tar -czf "dist/${APP}_${goos}_${goarch}.tar.gz" -C dist "${out}"
+              rm "dist/${out}"
+            fi
+          }
+
+          build_and_package linux amd64 ""
+          build_and_package linux arm64 ""
+          build_and_package darwin amd64 ""
+          build_and_package darwin arm64 ""
+          build_and_package windows amd64 ".exe"
+
+      - name: Generate checksums
+        shell: bash
+        run: |
+          cd dist
+          sha256sum * > checksums.txt
+
+      - name: Create GitHub Release
+        if: github.ref_type == 'tag'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.meta.outputs.tag }}
+          name: Release ${{ steps.meta.outputs.tag }}
+          generate_release_notes: true
+          files: |
+            dist/*.tar.gz
+            dist/*.zip
+            dist/checksums.txt
