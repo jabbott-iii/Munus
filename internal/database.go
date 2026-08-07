@@ -29,7 +29,9 @@ import (
 type Database struct {
 	conn *gorm.DB
 }
+
 //--------------------------------------Models-------------------------------------//
+
 // ItemModel Represents an item
 type ItemModel struct {
 	ID          uint       `gorm:"primaryKey"`
@@ -56,7 +58,7 @@ type ListModel struct {
 	loading          bool
 	confirmingDelete bool
 	taskToDelete     *ItemModel
-	viewportWidth  	 int
+	viewportWidth    int
 	viewportHeight   int
 }
 
@@ -99,7 +101,28 @@ func NewListModel(storage Storage) *ListModel {
 	return m
 }
 
+//JSON models
+
+//export structure
+type ExportBundle struct {
+	Version    int        `json:"version"`
+	ExportedAt time.Time  `json:"exported_at"`
+	Tasks      []TaskJSON `json:"tasks"`
+}
+
+type TaskJSON struct {
+	ID          string     `json:"id"`
+	Title       string     `json:"title"`
+	Description string     `json:"description,omitempty"`
+	Status      string     `json:"status"`
+	DueAt       *time.Time `json:"due_at,omitempty"`
+	CreatedAt   time.Time  `json:"created_at"`
+	UpdatedAt   time.Time  `json:"updated_at"`
+}
+
 //-----------------------------------interface tasks-------------------------------//
+
+// Storage database sql interface
 type Storage interface {
 	CreateTask(task *ItemModel) error
 	GetTaskByID(id uint) (*ItemModel, error)

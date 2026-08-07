@@ -58,9 +58,6 @@ func CliFlag() {
 
 	flag.BoolVar(&showHelp, "help", false, "Show help")
 	flag.BoolVar(&showHelp, "h", false, "Show help")
-
-	/*flag.IntVar(&complete, "complete", 0, "Complete task by Id")
-	flag.IntVar(&complete, "c", 0, "Complete task by Id")*/
 }
 
 func main() {
@@ -77,7 +74,7 @@ func main() {
 		log.Fatalf("failed to initialize database: %v", err)
 	}
 
-	// printlist data
+	// print list data
 	taskId := []internal.ItemModel{
 		{ID: 1, Title: "Task 1", Description: "Demo", Completed: false},
 	}
@@ -86,10 +83,6 @@ func main() {
 		internal.PrintList(taskId)
 		os.Exit(0)
 	}
-
-/*	if complete {
-		internal.
-	} */
 
 	// No CLI args: open interactive create form
 	if title == "" && description == "" {
