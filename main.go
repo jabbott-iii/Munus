@@ -69,7 +69,7 @@ func main() {
 	}
 
 	// sqlite db creation / use
-	db, err := internal.NewDatabase("munus.db")
+	db, err := internal.NewDatabase(databasePathFromEnv())
 	if err != nil {
 		log.Fatalf("failed to initialize database: %v", err)
 	}
