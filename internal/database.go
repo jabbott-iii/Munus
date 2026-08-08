@@ -105,16 +105,18 @@ func NewListModel(storage Storage) *ListModel {
 
 //export structure
 type ExportBundle struct {
-	Version    int        `json:"version"`
-	ExportedAt time.Time  `json:"exported_at"`
-	Tasks      []TaskJSON `json:"tasks"`
+	Version    int       `json:"version"`
+	ExportedAt time.Time `json:"exported_at"`
+	Tasks      []TaskDTO `json:"tasks"`
 }
 
-type TaskJSON struct {
+type TaskDTO struct {
 	ID          string     `json:"id"`
 	Title       string     `json:"title"`
 	Description string     `json:"description,omitempty"`
 	Status      string     `json:"status"`
+	Priority    string     `json:"priority,omitempty"`
+	Tags        []string   `json:"tags,omitempty"`
 	DueAt       *time.Time `json:"due_at,omitempty"`
 	CreatedAt   time.Time  `json:"created_at"`
 	UpdatedAt   time.Time  `json:"updated_at"`
