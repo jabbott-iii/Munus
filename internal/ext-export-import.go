@@ -28,13 +28,13 @@ import (
 //---------------------------------------------types export/import---------------------------------//
 
 type Task struct {
-	ID          string
+	ID          uint
 	Title       string
 	Description string
 	Status      string // todo|doing|done
-	Priority    string
+	Priority    uint
 	Tags        []string
-	DueAt       *time.Time
+	Deadline    *time.Time
 	CreatedAt   time.Time
 	UpdatedAt   time.Time
 }
