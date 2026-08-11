@@ -131,6 +131,7 @@ type Storage interface {
 	ListTasks() ([]*ItemModel, error)
 	UpdateTask(task *ItemModel) error
 	DeleteTask(id uint) error
+	ReplaceAllTasks(tasks []*ItemModel) error
 }
 
 // NewDatabase opens (or creates) the sqlite file and runs migrations.
