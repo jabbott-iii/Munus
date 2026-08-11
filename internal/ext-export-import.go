@@ -39,10 +39,24 @@ type Task struct {
 	UpdatedAt   time.Time
 }
 
-type TaskServiceAdapter struct{}
+type TaskServiceAdapter struct {
+	storage Storage
+}
 
-// --------------------------------------------------------------------------------------------------------------------------------------think about it?
-func NewTaskServiceAdapterFromEnv() (*TaskServiceAdapter, error) { return &TaskServiceAdapter{}, nil }
+func NewTaskServiceAdapterFromEnv() (*TaskServiceAdapter, error) {
+	dbPath := os/Getenv("MUNUS_DB_PATH")
+	if dbPath == "" {
+		dbPath = "munus.db"
+		}
+
+	db, err := NewDatabase(dbPath)
+	if err != nil {
+		return nil, err
+		}
+	
+	return &TaskServiceAdapter {storage: db}, nil 
+}
+
 func (s *TaskServiceAdapter) ListTasks() ([]Task, error)         { return nil, nil }
 func (s *TaskServiceAdapter) ReplaceAll([]Task) error            { return nil }
 func (s *TaskServiceAdapter) UpsertMany([]Task) error            { return nil }
