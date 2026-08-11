@@ -56,7 +56,7 @@ func NewExportCmd() *cobra.Command {
 				Status:           opts.Status,
 			}
 
-			// service/repo wiring - adapt to your existing constructors
+			// service/repo wiring
 			svc, err := buildTaskService()
 			if err != nil {
 				return err
@@ -105,7 +105,7 @@ func NewExportCmd() *cobra.Command {
 
 //---------------------------------------------import-----------------------------------------//
 
-func newImportCmd() *cobra.Command {
+func NewImportCmd() *cobra.Command {
 	opts := importOpts{}
 
 	cmd := &cobra.Command{
@@ -190,7 +190,7 @@ func newImportCmd() *cobra.Command {
 	return cmd
 }
 
-func confirm(cmd *cobra.Command, prompt string) (bool, error) {
+func Confirm(cmd *cobra.Command, prompt string) (bool, error) {
 	fmt.Fprint(cmd.OutOrStdout(), prompt)
 	r := bufio.NewReader(cmd.InOrStdin())
 	s, err := r.ReadString('\n')
