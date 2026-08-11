@@ -31,7 +31,7 @@ type Task struct {
 	ID          uint
 	Title       string
 	Description string
-	Status      string // todo|doing|done
+	Completed   bool //former status
 	Priority    uint
 	Tags        []string
 	Deadline    *time.Time
@@ -57,7 +57,27 @@ func NewTaskServiceAdapterFromEnv() (*TaskServiceAdapter, error) {
 	return &TaskServiceAdapter {storage: db}, nil 
 }
 
-func (s *TaskServiceAdapter) ListTasks() ([]Task, error)         { return nil, nil }
+func (s *TaskServiceAdapter) ListTasks() ([]Task, error) {
+	items, err := s.storage.ListTasks()
+	if err != nil {
+		return nil, err
+	}
+
+	out := make([]Task, 0, len(items))
+	for _, item := range items {
+		out = append(out, Task{
+			ID:          fmt.Sprintf("%d", item.ID),
+			Title:       item.Title,
+			Description: item.Description,
+			Status:      statusFromItem(item),
+			Tags:        item.Tags
+			CreatedAt:   item.CreatedAt,
+			UpdatedAt:   item.UpdatedAt,
+		})
+	}
+	return out, nil
+}
+
 func (s *TaskServiceAdapter) ReplaceAll([]Task) error            { return nil }
 func (s *TaskServiceAdapter) UpsertMany([]Task) error            { return nil }
 
