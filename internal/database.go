@@ -39,6 +39,8 @@ type ItemModel struct {
 	Description string     `gorm:"type:text"`
 	Deadline    *time.Time `gorm:"column:deadline"`
 	Completed   bool       `gorm:"default:false;not null"`
+	Priority    uint       `gorm:"column:priority"`
+	Tags        []string   `gorm:"column:tags"`
 	CompletedAt *time.Time `gorm:"column:completed_at"`
 	CreatedAt   time.Time  `gorm:"autoCreateTime"`
 	UpdatedAt   time.Time  `gorm:"autoUpdateTime"`
@@ -111,11 +113,11 @@ type ExportBundle struct {
 }
 
 type TaskDTO struct {
-	ID          string     `json:"id"`
+	ID          uint       `json:"id"`
 	Title       string     `json:"title"`
 	Description string     `json:"description,omitempty"`
 	Status      string     `json:"status"`
-	Priority    string     `json:"priority,omitempty"`
+	Priority    uint       `json:"priority,omitempty"`
 	Tags        []string   `json:"tags,omitempty"`
 	DueAt       *time.Time `json:"due_at,omitempty"`
 	CreatedAt   time.Time  `json:"created_at"`
