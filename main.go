@@ -42,7 +42,7 @@ var (
 	showHelp    bool
 )
 
-// cli flags
+// cli flags----------------------------refactor to cobra
 func CliFlag() {
 	flag.StringVar(&title, "title", "", "Title of the task")
 	flag.StringVar(&title, "t", "", "Title of the task")
@@ -61,6 +61,19 @@ func CliFlag() {
 }
 
 func main() {
+
+	rootCmd := &cobra.Command {
+		Use: "munus",
+		}
+
+	rootCmd.AddCommand(internal.NewExportCmd())
+	rootCmd.AddCommand(internal.newImportCmd())
+
+	if err := rootCmd.Execute(); err != nil {
+		os.Exit(1)
+		}
+	}
+	
 	flag.Parse()
 
 	if showHelp {
