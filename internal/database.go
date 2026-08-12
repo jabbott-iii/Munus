@@ -30,7 +30,7 @@ type Database struct {
 	conn *gorm.DB
 }
 
-//--------------------------------------Models-------------------------------------//
+//-----------------------------------------------------------------------------------Models-------------------------------------------------------------------//
 
 // ItemModel Represents an item
 type ItemModel struct {
@@ -40,7 +40,6 @@ type ItemModel struct {
 	Deadline    *time.Time `gorm:"column:deadline"`
 	Completed   bool       `gorm:"default:false;not null"`
 	Priority    uint       `gorm:"column:priority"`
-	Tags        []string   `gorm:"column:tags"`
 	CompletedAt *time.Time `gorm:"column:completed_at"`
 	CreatedAt   time.Time  `gorm:"autoCreateTime"`
 	UpdatedAt   time.Time  `gorm:"autoUpdateTime"`
@@ -103,9 +102,8 @@ func NewListModel(storage Storage) *ListModel {
 	return m
 }
 
-//JSON models
+//-------------------------------------------------------------------------------export/import------------------------------------------------------//
 
-//export structure
 type ExportBundle struct {
 	Version    int       `json:"version"`
 	ExportedAt time.Time `json:"exported_at"`
@@ -113,18 +111,92 @@ type ExportBundle struct {
 }
 
 type TaskDTO struct {
-	ID          uint       `json:"id"`
+	ID          string     `json:"id"`
 	Title       string     `json:"title"`
 	Description string     `json:"description,omitempty"`
-	Status      string     `json:"status"`
-	Priority    uint       `json:"priority,omitempty"`
-	Tags        []string   `json:"tags,omitempty"`
-	DueAt       *time.Time `json:"due_at,omitempty"`
+	Priority    string     `json:"priority,omitempty"`
+	Completed   bool       `json:"completed"`
+	Deadline    *time.Time `json:"deadline,omitempty"`
 	CreatedAt   time.Time  `json:"created_at"`
 	UpdatedAt   time.Time  `json:"updated_at"`
 }
 
-//-----------------------------------interface tasks-------------------------------//
+type Task struct {
+	ID          string
+	Title       string
+	Description string
+	Completed   bool
+	Priority    string
+	Deadline    *time.Time
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
+}
+
+type ExportFilter struct {
+	IncludeCompleted bool
+}
+
+type ExportPlan struct {
+	Total int
+	Todo  int
+	Doing int
+	Done  int
+}
+
+type ImportConfig struct {
+	Mode       string
+	OnConflict string
+	IDStrategy string
+	Strict     bool
+	DryRun     bool
+	Backup     bool
+}
+
+type ImportPlan struct {
+	SchemaVersion int
+	Incoming      int
+	Current       int
+	ToCreate      int
+	ToUpdate      int
+	Unchanged     int
+	Conflicts     int
+}
+
+type ImportResult struct {
+	Created    int
+	Updated    int
+	Unchanged  int
+	Skipped    int
+	Conflicted int
+	BackupPath string
+}
+
+type exportOpts struct {
+	File             string
+	Pretty           bool
+	Stdout           bool
+	IncludeCompleted bool
+	Tags             []string
+	Status           []string
+	DryRun           bool
+}
+
+type importOpts struct {
+	File       string
+	Mode       string // merge|replace
+	OnConflict string // skip|overwrite|rename
+	IDStrategy string // preserve|regenerate
+	DryRun     bool
+	Yes        bool
+	Strict     bool
+	Backup     bool
+}
+
+type TaskServiceAdapter struct {
+	storage Storage
+}
+
+//-----------------------------------interface tasks------------------------------------------------------------------------------------------------------//
 
 // Storage database sql interface
 type Storage interface {

@@ -41,7 +41,7 @@ func NewExportCmd() *cobra.Command {
 		Short: "Export tasks to JSON",
 		Long:  "Export tasks to a versioned JSON file for backup/migration.",
 		Example: `  munus export -f tasks.json
-  					munus export --status todo --tag work --stdout > work-task.json
+  					munus export work --stdout > work-task.json
 					munus export --dry-run`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// Resolve default filename if not stdout
@@ -52,8 +52,6 @@ func NewExportCmd() *cobra.Command {
 			// Build filter
 			filter := ExportFilter{
 				IncludeCompleted: opts.IncludeCompleted,
-				Tags:             opts.Tags,
-				Status:           opts.Status,
 			}
 
 			// service/repo wiring
@@ -96,8 +94,6 @@ func NewExportCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&opts.Pretty, "pretty", true, "Pretty-print JSON output")
 	cmd.Flags().BoolVar(&opts.Stdout, "stdout", false, "Write JSON to stdout")
 	cmd.Flags().BoolVar(&opts.IncludeCompleted, "include-completed", false, "Include completed tasks")
-	cmd.Flags().StringSliceVar(&opts.Tags, "tag", nil, "Filter by tag (repeatable)")
-	cmd.Flags().StringSliceVar(&opts.Status, "status", nil, "Filter by status (repeatable: todo|doing|done)")
 	cmd.Flags().BoolVar(&opts.DryRun, "dry-run", false, "Show what would be exported without writing")
 
 	return cmd

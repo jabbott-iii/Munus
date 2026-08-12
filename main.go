@@ -25,6 +25,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/jabbott-iii/Munus/internal"
+	"github.com/spf13/cobra"
 )
 
 // Character limits
@@ -61,21 +62,21 @@ func CliFlag() {
 }
 
 func main() {
+	flag.Parse()
 
 	rootCmd := &cobra.Command {
 		Use: "munus",
 		}
 
 	rootCmd.AddCommand(internal.NewExportCmd())
-	rootCmd.AddCommand(internal.newImportCmd())
+	rootCmd.AddCommand(internal.NewImportCmd())
 
 	if err := rootCmd.Execute(); err != nil {
 		os.Exit(1)
 		}
-	}
-	
-	flag.Parse()
 
+	flag.Parse()
+	
 	if showHelp {
 		internal.PrintHelp()
 		os.Exit(0)

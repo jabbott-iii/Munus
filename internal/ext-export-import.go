@@ -27,24 +27,8 @@ import (
 
 //---------------------------------------------types export/import---------------------------------//
 
-type Task struct {
-	ID          uint
-	Title       string
-	Description string
-	Completed   bool //former status
-	Priority    uint
-	Tags        []string
-	Deadline    *time.Time
-	CreatedAt   time.Time
-	UpdatedAt   time.Time
-}
-
-type TaskServiceAdapter struct {
-	storage Storage
-}
-
 func NewTaskServiceAdapterFromEnv() (*TaskServiceAdapter, error) {
-	dbPath := os/Getenv("MUNUS_DB_PATH")
+	dbPath := os.Getenv("MUNUS_DB_PATH")
 	if dbPath == "" {
 		dbPath = "munus.db"
 		}
@@ -69,8 +53,6 @@ func (s *TaskServiceAdapter) ListTasks() ([]Task, error) {
 			ID:          fmt.Sprintf("%d", item.ID),
 			Title:       item.Title,
 			Description: item.Description,
-			Status:      statusFromItem(item),
-			Tags:        item.Tags
 			CreatedAt:   item.CreatedAt,
 			UpdatedAt:   item.UpdatedAt,
 		})
@@ -80,68 +62,6 @@ func (s *TaskServiceAdapter) ListTasks() ([]Task, error) {
 
 func (s *TaskServiceAdapter) ReplaceAll([]Task) error            { return nil }
 func (s *TaskServiceAdapter) UpsertMany([]Task) error            { return nil }
-
-type ExportFilter struct {
-	IncludeCompleted bool
-	Tags             []string
-	Status           []string
-}
-
-type ExportPlan struct {
-	Total int
-	Todo  int
-	Doing int
-	Done  int
-}
-
-type ImportConfig struct {
-	Mode       string
-	OnConflict string
-	IDStrategy string
-	Strict     bool
-	DryRun     bool
-	Backup     bool
-}
-
-type ImportPlan struct {
-	SchemaVersion int
-	Incoming      int
-	Current       int
-	ToCreate      int
-	ToUpdate      int
-	Unchanged     int
-	Conflicts     int
-}
-
-type ImportResult struct {
-	Created    int
-	Updated    int
-	Unchanged  int
-	Skipped    int
-	Conflicted int
-	BackupPath string
-}
-
-type exportOpts struct {
-	File             string
-	Pretty           bool
-	Stdout           bool
-	IncludeCompleted bool
-	Tags             []string
-	Status           []string
-	DryRun           bool
-}
-
-type importOpts struct {
-	File       string
-	Mode       string // merge|replace
-	OnConflict string // skip|overwrite|rename
-	IDStrategy string // preserve|regenerate
-	DryRun     bool
-	Yes        bool
-	Strict     bool
-	Backup     bool
-}
 
 //-----------------------------------Export-------------------------------//
 
@@ -157,13 +77,10 @@ func PlanExport(svc *TaskServiceAdapter, f ExportFilter) (ExportPlan, error) {
 	var p ExportPlan
 	for _, t := range filterTasks(tasks, f) {
 		p.Total++
-		switch t.Status {
-		case "todo":
-			p.Todo++
-		case "doing":
-			p.Doing++
-		case "done":
+		if t.Completed {
 			p.Done++
+		} else {
+			p.Todo++
 		}
 	}
 	return p, nil
@@ -208,10 +125,8 @@ func toDTO(t Task) TaskDTO {
 		ID:          t.ID,
 		Title:       t.Title,
 		Description: t.Description,
-		Status:      t.Status,
 		Priority:    t.Priority,
-		Tags:        t.Tags,
-		DueAt:       t.DueAt,
+		Deadline:    t.Deadline,
 		CreatedAt:   t.CreatedAt,
 		UpdatedAt:   t.UpdatedAt,
 	}
@@ -318,9 +233,6 @@ func readImportFile(path string, strict bool) ([]Task, int, error) {
 		if dto.Title == "" {
 			return nil, 0, fmt.Errorf("tasks[%d].title is required", i)
 		}
-		if dto.Status != "todo" && dto.Status != "doing" && dto.Status != "done" {
-			return nil, 0, fmt.Errorf("tasks[%d].status invalid: %q", i, dto.Status)
-		}
 		if dto.ID != "" {
 			if _, ok := seen[dto.ID]; ok {
 				return nil, 0, fmt.Errorf("duplicate id in import: %s", dto.ID)
@@ -337,10 +249,9 @@ func fromDTO(d TaskDTO) Task {
 		ID:          d.ID,
 		Title:       d.Title,
 		Description: d.Description,
-		Status:      d.Status,
+		Completed:   d.Completed,
 		Priority:    d.Priority,
-		Tags:        d.Tags,
-		DueAt:       d.DueAt,
+		Deadline:    d.Deadline,
 		CreatedAt:   d.CreatedAt,
 		UpdatedAt:   d.UpdatedAt,
 	}
@@ -424,42 +335,24 @@ func writeBackup(tasks []Task) (string, error) {
 func equalTask(a, b Task) bool {
 	return a.Title == b.Title &&
 		a.Description == b.Description &&
-		a.Status == b.Status &&
+		a.Completed == b.Completed &&
 		a.Priority == b.Priority
 }
 
 func filterTasks(in []Task, f ExportFilter) []Task {
 	out := make([]Task, 0, len(in))
-	statusOK := map[string]bool{}
-	tagOK := map[string]bool{}
-	for _, s := range f.Status {
-		statusOK[s] = true
-	}
-	for _, t := range f.Tags {
-		tagOK[t] = true
-	}
 
 	for _, t := range in {
-		if !f.IncludeCompleted && t.Status == "done" {
+		if f.IncludeCompleted {
+			out = append(out, t)
 			continue
 		}
-		if len(statusOK) > 0 && !statusOK[t.Status] {
-			continue
+
+		if !t.Completed {
+			out = append(out, t)
 		}
-		if len(tagOK) > 0 {
-			match := false
-			for _, tg := range t.Tags {
-				if tagOK[tg] {
-					match = true
-					break
-				}
-			}
-			if !match {
-				continue
-			}
-		}
-		out = append(out, t)
 	}
+
 	return out
 }
 
