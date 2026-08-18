@@ -165,3 +165,8 @@ macOS:
 Windows:
 
      Download munus-windows-amd64.exe and add it to your PATH as munus.
+
+
+## Testing Binaries on User Machines
+
+Documentation reference and guidelines for #11.
