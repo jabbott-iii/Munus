@@ -20,15 +20,130 @@ import (
 	"bufio"
 	"errors"
 	"fmt"
+	"io"
+	"strings"
 	"time"
 
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/spf13/cobra"
 )
 
-func PrintList(tasks []ItemModel) {
+func PrintList(w io.Writer, tasks []*ItemModel) {
 	for _, t := range tasks {
-		fmt.Printf(" %v- %s: %s\n -Complete: %t", t.ID, t.Title, t.Description, t.Completed)
+		fmt.Fprintf(w, " %d- %s: %s\n -Complete: %t\n", t.ID, t.Title, t.Description, t.Completed)
 	}
+}
+
+func NewRootCmd(db *Database) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:          "munus",
+		Short:        "A task manager",
+		SilenceUsage: true,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if db == nil {
+				return errors.New("database is not initialized")
+			}
+
+			p := tea.NewProgram(NewFormModel(db), tea.WithAltScreen())
+			_, err := p.Run()
+			return err
+		},
+	}
+
+	cmd.AddCommand(NewAddCmd(db))
+	cmd.AddCommand(NewListCmd(db))
+	cmd.AddCommand(NewExportCmd())
+	cmd.AddCommand(NewImportCmd())
+
+	return cmd
+}
+
+func NewAddCmd(db *Database) *cobra.Command {
+	var title, description, deadline string
+
+	cmd := &cobra.Command{
+		Use:          "add",
+		Short:        "Create a new task",
+		SilenceUsage: true,
+		Args:         cobra.NoArgs,
+		Example: `  munus add -t "Meeting" -d "Team sync" -n "2025-11-20 14:00"
+  munus add -t "Quick fix" -d "Bug #123" -n "2h"`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if db == nil {
+				return errors.New("database is not initialized")
+			}
+
+			title = strings.TrimSpace(title)
+			description = strings.TrimSpace(description)
+			deadline = strings.TrimSpace(deadline)
+
+			if title == "" {
+				return fmt.Errorf("title is required")
+			}
+			if description == "" {
+				return fmt.Errorf("description is required")
+			}
+			if len(title) > MaxTitleLength {
+				return fmt.Errorf("title exceeds maximum length of %d characters", MaxTitleLength)
+			}
+			if len(description) > MaxDescriptionLength {
+				return fmt.Errorf("description exceeds maximum length of %d characters", MaxDescriptionLength)
+			}
+
+			var deadlineTime *time.Time
+			if deadline != "" {
+				parsed, err := ParseDeadline(deadline)
+				if err != nil {
+					return err
+				}
+				deadlineTime = parsed
+			}
+
+			task := &ItemModel{
+				Title:       title,
+				Description: description,
+				Deadline:    deadlineTime,
+				Completed:   false,
+			}
+
+			if err := db.CreateTask(task); err != nil {
+				return err
+			}
+
+			fmt.Fprintln(cmd.OutOrStdout(), "✔ Task created successfully!")
+			return nil
+		},
+	}
+
+	cmd.Flags().StringVarP(&title, "title", "t", "", "Title of the task")
+	cmd.Flags().StringVarP(&description, "description", "d", "", "Description of the task")
+	cmd.Flags().StringVarP(&deadline, "deadline", "n", "", "Deadline for the task")
+	_ = cmd.MarkFlagRequired("title")
+	_ = cmd.MarkFlagRequired("description")
+
+	return cmd
+}
+
+func NewListCmd(db *Database) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:          "list",
+		Short:        "List all tasks",
+		SilenceUsage: true,
+		Args:         cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if db == nil {
+				return errors.New("database is not initialized")
+			}
+
+			tasks, err := db.ListTasks()
+			if err != nil {
+				return err
+			}
+			PrintList(cmd.OutOrStdout(), tasks)
+			return nil
+		},
+	}
+	return cmd
 }
 
 // -------------------------------------- export ------------------------------------------- //
@@ -37,24 +152,24 @@ func NewExportCmd() *cobra.Command {
 	opts := exportOpts{}
 
 	cmd := &cobra.Command{
-		Use:   "export",
-		Short: "Export tasks to JSON",
-		Long:  "Export tasks to a versioned JSON file for backup/migration.",
+		Use:          "export",
+		Short:        "Export tasks to JSON",
+		Long:         "Export tasks to a versioned JSON file for backup/migration.",
+		SilenceUsage: true,
+		Args:         cobra.NoArgs,
 		Example: `  munus export -f tasks.json
-  					munus export work --stdout > work-task.json
-					munus export --dry-run`,
+  munus export --stdout > tasks.json
+  munus export --include-completed
+  munus export --dry-run`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			// Resolve default filename if not stdout
 			if !opts.Stdout && opts.File == "" {
 				opts.File = fmt.Sprintf("munus-export-%s.json", time.Now().Format("20060102"))
 			}
 
-			// Build filter
 			filter := ExportFilter{
 				IncludeCompleted: opts.IncludeCompleted,
 			}
 
-			// service/repo wiring
 			svc, err := buildTaskService()
 			if err != nil {
 				return err
@@ -105,12 +220,14 @@ func NewImportCmd() *cobra.Command {
 	opts := importOpts{}
 
 	cmd := &cobra.Command{
-		Use:   "import",
-		Short: "Import tasks from JSON",
-		Long:  "Import tasks from a versioned JSON export.",
+		Use:          "import",
+		Short:        "Import tasks from JSON",
+		Long:         "Import tasks from a versioned JSON export.",
+		SilenceUsage: true,
+		Args:         cobra.NoArgs,
 		Example: `  munus import -f tasks.json
-                    munus import -f tasks.json --mode replace --yes --backup
-                    munus import -f tasks.json --dry-run --strict`,
+  munus import -f tasks.json --mode replace --yes --backup
+  munus import -f tasks.json --dry-run --strict`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if opts.File == "" {
 				return errors.New("required flag: --file")
@@ -146,7 +263,7 @@ func NewImportCmd() *cobra.Command {
 			}
 
 			if opts.Mode == "replace" && !opts.Yes {
-				ok, err := confirm(cmd, fmt.Sprintf(
+				ok, err := Confirm(cmd, fmt.Sprintf(
 					"This will replace all local tasks (current: %d, incoming: %d). Continue? [y/N]: ",
 					plan.Current, plan.Incoming,
 				))
@@ -193,5 +310,6 @@ func Confirm(cmd *cobra.Command, prompt string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	return s == "y\n" || s == "Y\n" || s == "yes\n" || s == "YES\n", nil
+	answer := strings.TrimSpace(s)
+	return strings.EqualFold(answer, "y") || strings.EqualFold(answer, "yes"), nil
 }

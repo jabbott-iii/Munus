@@ -276,3 +276,22 @@ func (d *Database) DeleteTask(id uint) error {
 	}
 	return d.conn.Delete(&ItemModel{}, id).Error
 }
+
+// ReplaceAllTasks deletes all existing tasks and inserts the provided tasks.
+func (d *Database) ReplaceAllTasks(tasks []*ItemModel) error {
+	if d == nil || d.conn == nil {
+		return errors.New("database is not initialized")
+	}
+
+	return d.conn.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Session(&gorm.Session{AllowGlobalUpdate: true}).Delete(&ItemModel{}).Error; err != nil {
+			return err
+		}
+
+		if len(tasks) == 0 {
+			return nil
+		}
+
+		return tx.Create(&tasks).Error
+	})
+}
