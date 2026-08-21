@@ -23,6 +23,8 @@ import (
 	"os"
 	"path/filepath"
 	"time"
+
+	"gorm.io/gorm"
 )
 
 //---------------------------------------------types export/import---------------------------------//
@@ -60,13 +62,54 @@ func (s *TaskServiceAdapter) ListTasks() ([]Task, error) {
 	return out, nil
 }
 
-func (s *TaskServiceAdapter) ReplaceAll([]Task) error            { return nil }
-func (s *TaskServiceAdapter) UpsertMany([]Task) error            { return nil }
+func (s *TaskServiceAdapter) ReplaceAll(tasks []Task) error {
+	if s.storage == nil {
+		return fmt.Errorf("task storage is not configured")
+	}
+
+	// If your Database exposes the raw gorm DB, use a transaction for safety.
+	db, ok := s.storage.(*Database)
+	if !ok {
+		return fmt.Errorf("storage does not support replace-all")
+	}
+
+	return db.Conn().Transaction(func(tx *gorm.DB) error {
+		if err := tx.Session(&gorm.Session{AllowGlobalUpdate: true}).Delete(&ItemModel{}).Error; err != nil {
+			return err
+		}
+
+		for _, t := range tasks {
+			item := &ItemModel{
+				Title:       t.Title,
+				Description: t.Description,
+				Completed:   t.Completed,
+				Deadline:    t.Deadline,
+				CreatedAt:   t.CreatedAt,
+				UpdatedAt:   t.UpdatedAt,
+			}
+			if err := tx.Create(item).Error; err != nil {
+				return err
+			}
+		}
+
+		return nil
+	})
+}
+
+// func (s *TaskServiceAdapter) InsertFiles([]Task) error            { return nil }
 
 //-----------------------------------Export-------------------------------//
 
 func buildTaskService() (*TaskServiceAdapter, error) {
-	return NewTaskServiceAdapterFromEnv() // ------------------------------------------------------------------------------------------think about it?
+	dbPath := os.Getenv("MUNUS_DB_PATH")
+	db, err := NewDatabase(dbPath)
+	if err != nil {
+		return nil, err
+	}
+
+	return &TaskServiceAdapter{
+		storage: db,
+	}, nil
 }
 
 func PlanExport(svc *TaskServiceAdapter, f ExportFilter) (ExportPlan, error) {

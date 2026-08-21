@@ -249,6 +249,24 @@ func (d *Database) ListTasks() ([]*ItemModel, error) {
 	return tasks, nil
 }
 
+func (d *Database) ReplaceAllTasks(tasks []*ItemModel) error {
+	if d == nil || d.conn == nil {
+		return errors.New("database is not initialized")
+	}
+
+	return d.conn.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Session(&gorm.Session{AllowGlobalUpdate: true}).Delete(&ItemModel{}).Error; err != nil {
+			return err
+		}
+
+		if len(tasks) == 0 {
+			return nil
+		}
+
+		return tx.Create(&tasks).Error
+	})
+}
+
 // GetTaskByID fetches a task by primary key.
 func (d *Database) GetTaskByID(id uint) (*ItemModel, error) {
 	var task ItemModel

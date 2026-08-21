@@ -7,3 +7,4 @@ This product includes third-party software:
   - github.com/charmbracelet/lipgloss v1.1.0 Charmbracelet, Inc. MIT License
   - gorm.io/driver/sqlite v1.6.0 Jinzhu MIT License
   - gorm.io/gorm v1.31.2 Jinzhu MIT License
+  - github.com/spf13/cobra v1.10.2 Steve Francia Apache 2.0 License
