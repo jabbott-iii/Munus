@@ -21,6 +21,8 @@ import (
 	"errors"
 	"fmt"
 	"time"
+	"io"
+	"strings"
 
 	"github.com/spf13/cobra"
 	tea "github.com/charmbracelet/bubbletea"
@@ -211,7 +213,8 @@ func Confirm(cmd *cobra.Command, prompt string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	return s == "y\n" || s == "Y\n" || s == "yes\n" || s == "YES\n", nil
+	answer := strings.TrimSpace(s)
+	return strings.EqualFold(answer, "y") || strings.EqualFold(answer, "yes"), nil
 }
 
 //------------------------------------------------------------add / list tasks----------------------------------------------------------------//
@@ -268,6 +271,12 @@ func NewAddCmd(db *Database) *cobra.Command {
 	return cmd
 }
 
+func PrintList(w io.Writer, tasks []*ItemModel) {
+	for _, t := range tasks {
+		fmt.Fprintf(w, " %d- %s: %s\n -Complete: %t\n", t.ID, t.Title, t.Description, t.Completed)
+	}
+}
+
 // lists tasks
 func NewListCmd(db *Database) *cobra.Command {
 	cmd := &cobra.Command{
@@ -278,7 +287,7 @@ func NewListCmd(db *Database) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			PrintList(tasks)
+			PrintList(cmd.OutOrStdout(), tasks)
 			return nil
 		},
 	}
