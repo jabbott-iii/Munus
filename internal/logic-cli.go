@@ -226,6 +226,16 @@ func NewAddCmd(db *Database) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "add",
 		Short: "Create a new task",
+		Example: `  munus add -t "Meeting" -d "Team sync" -n "2025-11-20 14:00
+					Deadline formats:
+					- Absolute: YYYY-MM-DD HH:MM (e.g., 2025-11-16 14:30)
+					- Relative units:
+						• m: minutes (30m = 30 minutes from now)
+						• h: hours (2h = 2 hours from now)
+						• d: days (1d = 1 day from now)
+						• w: weeks (2w = 2 weeks from now)
+						• M: months (1M = 1 month from now)
+					- Combinations: 2d 3h 30m (2days, 3hours, 30 minutes from now"`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if title == "" || description == "" {
 				return fmt.Errorf("both title and description are required")
