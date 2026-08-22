@@ -8,12 +8,15 @@
     "ghcr.io/duduribeiro/devcontainer-features/neovim:1": {
       "version": "stable"
     }
+    "ghcr.io/devcontainers/features/docker-outside-of-docker:1": {
+      "version": "stable"
   },
   "customizations": {
     "vscode": {
       "extensions": [
         "golang.go",
-        "asvetliakov.vscode-neovim"
+        "asvetliakov.vscode-neovim",
+        "ms-azuretools.vscode-docker"
       ]
     }
   },
