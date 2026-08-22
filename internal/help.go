@@ -19,20 +19,30 @@ package internal
 import (
 	"fmt"
 	"strings"
+	"io"
 )
 
-func PrintHelp() {
-	fmt.Println("Munus - A task manager")
-	fmt.Println()
-	fmt.Println("Usage:")
-	fmt.Println("  Munus [OPTIONS]")
-	fmt.Println("  Munus -t \"Title\" -d \"Description\" [-n DEADLINE]")
-	fmt.Println()
-	fmt.Println("Options:")
-	fmt.Println("  Munus    Run without arguments to enter the terminal user interface to input a task")
-	fmt.Printf("  -t string    Title of the task (required, max 100 chars)\n")
-	fmt.Printf("  -d string    Description of the task (required, max 500 chars)\n")
-	fmt.Println("  -n string    Deadline for the task")
+func PrintHelp(w io.Writer) {
+	fmt.Fprintln(w, "munus - A lightweight terminal task manager")
+	fmt.Fprintln(w)
+	fmt.Fprintln(w, "Usage:")
+	fmt.Fprintln(w, "  munus                  Start TUI")
+	fmt.Fprintln(w, "  munus <command> [flags]")
+	fmt.Fprintln(w)
+	fmt.Fprintln(w, "Commands:")
+	fmt.Fprintln(w, "  add        Create a new task")
+	fmt.Fprintln(w, "  list       List all tasks")
+	fmt.Fprintln(w, "  export     Export tasks to JSON")
+	fmt.Fprintln(w, "  import     Import tasks from JSON")
+	fmt.Fprintln(w)
+	fmt.Fprintln(w, "Examples:")
+	fmt.Fprintln(w, `  munus add -t "Meeting" -d "Team sync" -n "2025-11-20 14:00"`)
+	fmt.Fprintln(w, `  munus add -t "Quick fix" -d "Bug #123" -n "2h"`)
+	fmt.Fprintln(w, `  munus list`)
+	fmt.Fprintln(w, `  munus export -f tasks.json`)
+	fmt.Fprintln(w, `  munus import -f tasks.json --mode merge`)
+	fmt.Fprintln(w)
+	fmt.Fprintln(w, "Deadline formats for add --deadline/-n:")
 
 	deadlineHelp := FormatDeadlineHelp()
 	lines := strings.SplitSeq(deadlineHelp, "\n")
@@ -41,14 +51,6 @@ func PrintHelp() {
 			fmt.Println("              ", line)
 		}
 	}
-
-	fmt.Println("  -list, -l    List all tasks in a terminal user interface")
-	fmt.Println("  -help, -h    Show this help message")
-	fmt.Println()
-	fmt.Println("Examples:")
-	fmt.Println("  Munus -t \"Meeting\" -d \"Team sync\" -n \"2025-11-20 14:00\"")
-	fmt.Println("  Munus -t \"Quick fix\" -d \"Bug #123\" -n \"2h\"")
-	fmt.Println("  Munus -t \"Project\" -d \"Milestone 1\" -n \"1w 2d\"")
 }
 
 // FormatDeadlineHelp returns a help string explanation the deadline formats
