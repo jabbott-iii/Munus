@@ -31,7 +31,7 @@ import (
 
 //--------------------------------------CORE----------------------------------------------------------------------------//
 
-// tui main entry point
+// NewRootCmd tui main entry point
 func NewRootCmd(db *Database) *cobra.Command {
 	cmd := &cobra.Command{
 		Use: "munus",
@@ -88,7 +88,7 @@ func NewExportCmd() *cobra.Command {
 			}
 
 			if opts.DryRun {
-				fmt.Fprintf(cmd.OutOrStdout(),
+				_, _ = fmt.Fprintf(cmd.OutOrStdout(),
 					"Would export %d tasks (task:%d doing:%d done:%d)\n",
 					plan.Total, plan.Todo, plan.Doing, plan.Done)
 				return nil
@@ -107,7 +107,7 @@ func NewExportCmd() *cobra.Command {
 				return err
 			}
 
-			fmt.Fprintf(cmd.OutOrStdout(), "✓ Exported %d tasks to %s (v1)\n", plan.Total, opts.File)
+			_, _ = fmt.Fprintf(cmd.OutOrStdout(), "✓ Exported %d tasks to %s (v1)\n", plan.Total, opts.File)
 			return nil
 		},
 	}
@@ -158,13 +158,13 @@ func NewImportCmd() *cobra.Command {
 				return err
 			}
 
-			fmt.Fprintf(cmd.OutOrStdout(), "Importing: %s\nSchema: v%d\nIncoming tasks: %d\nMode: %s (conflict=%s, ids=%s)\n\n",
+			_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Importing: %s\nSchema: v%d\nIncoming tasks: %d\nMode: %s (conflict=%s, ids=%s)\n\n",
 				opts.File, plan.SchemaVersion, plan.Incoming, opts.Mode, opts.OnConflict, opts.IDStrategy)
-			fmt.Fprintf(cmd.OutOrStdout(), "Plan:\n  Create: %d\n  Update: %d\n  Unchanged: %d\n  Conflicts: %d\n\n",
+			_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Plan:\n  Create: %d\n  Update: %d\n  Unchanged: %d\n  Conflicts: %d\n\n",
 				plan.ToCreate, plan.ToUpdate, plan.Unchanged, plan.Conflicts)
 
 			if opts.DryRun {
-				fmt.Fprintln(cmd.OutOrStdout(), "Dry-run only. No changes applied.")
+				_, _ = fmt.Fprintln(cmd.OutOrStdout(), "Dry-run only. No changes applied.")
 				return nil
 			}
 
@@ -187,9 +187,9 @@ func NewImportCmd() *cobra.Command {
 			}
 
 			if res.BackupPath != "" {
-				fmt.Fprintf(cmd.OutOrStdout(), "✓ Backup created: %s\n", res.BackupPath)
+				_, _ = fmt.Fprintf(cmd.OutOrStdout(), "✓ Backup created: %s\n", res.BackupPath)
 			}
-			fmt.Fprintf(cmd.OutOrStdout(),
+			_, _ = fmt.Fprintf(cmd.OutOrStdout(),
 				"✓ Import complete: created=%d updated=%d unchanged=%d skipped=%d conflicted=%d\n",
 				res.Created, res.Updated, res.Unchanged, res.Skipped, res.Conflicted)
 
@@ -210,7 +210,7 @@ func NewImportCmd() *cobra.Command {
 }
 
 func Confirm(cmd *cobra.Command, prompt string) (bool, error) {
-	fmt.Fprint(cmd.OutOrStdout(), prompt)
+	_, _ = fmt.Fprint(cmd.OutOrStdout(), prompt)
 	r := bufio.NewReader(cmd.InOrStdin())
 	s, err := r.ReadString('\n')
 	if err != nil {
@@ -222,7 +222,7 @@ func Confirm(cmd *cobra.Command, prompt string) (bool, error) {
 
 //------------------------------------------------------------add / list tasks----------------------------------------------------------------//
 
-// adding tasks
+// NewAddCmd adding tasks
 func NewAddCmd(db *Database) *cobra.Command {
 	var title, description, deadline string
 
@@ -239,7 +239,7 @@ func NewAddCmd(db *Database) *cobra.Command {
 						• w: weeks (2w = 2 weeks from now)
 						• M: months (1M = 1 month from now)
 					- Combinations: 2d 3h 30m (2days, 3hours, 30 minutes from now"`,
-					
+
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if title == "" || description == "" {
 				return fmt.Errorf("both title and description are required")
@@ -271,7 +271,7 @@ func NewAddCmd(db *Database) *cobra.Command {
 				return err
 			}
 
-			fmt.Fprintln(cmd.OutOrStdout(), "✔ Task created successfully!")
+			_, _ = fmt.Fprintln(cmd.OutOrStdout(), "✔ Task created successfully!")
 			return nil
 		},
 	}
@@ -287,11 +287,11 @@ func NewAddCmd(db *Database) *cobra.Command {
 
 func PrintList(w io.Writer, tasks []*ItemModel) {
 	for _, t := range tasks {
-		fmt.Fprintf(w, " ID: %v- %s:\n%s\n -Deadline: %t\n -Complete: %t\n", t.ID, t.Title, t.Description, t.Deadline, t.Completed)
+		_, _ = fmt.Fprintf(w, " ID: %v- %s:\n%s\n -Deadline: %v\n -Complete: %t\n", t.ID, t.Title, t.Description, t.Deadline, t.Completed)
 	}
 }
 
-// lists tasks
+// NewListCmd lists tasks
 func NewListCmd(db *Database) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "list",
@@ -310,24 +310,24 @@ func NewListCmd(db *Database) *cobra.Command {
 
 //-------------------------------complete and delete--------------------------------------------------------//
 
-//delete task
+// DeleteTaskCmd delete task
 func DeleteTaskCmd(db *Database) *cobra.Command {
 	cmd := &cobra.Command{
-		Use:	"delete [task-id]",
-		Short:	"Delete a task",
+		Use:     "delete [task-id]",
+		Short:   "Delete a task",
 		Example: `munus delete 12`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			taskID, err := strconv.Atoi(args[0])
 			if err != nil || taskID <= 0 {
 				return fmt.Errorf("invalid task ID %q: must be a positive integer", args[0])
 			}
-			
+
 			// confirmation
 			var confirm string
-			fmt.Fprintf(cmd.OutOrStdout(), "Delete task %d? [y/N]: ", taskID)
+			_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Delete task %d? [y/N]: ", taskID)
 			_, _ = fmt.Fscanln(cmd.InOrStdin(), &confirm)
 			if confirm != "y" && confirm != "Y" && confirm != "yes" && confirm != "YES" {
-				fmt.Fprintln(cmd.OutOrStdout(), "Delete cancelled.")
+				_, _ = fmt.Fprintln(cmd.OutOrStdout(), "Delete cancelled.")
 				return nil
 			}
 
@@ -336,7 +336,7 @@ func DeleteTaskCmd(db *Database) *cobra.Command {
 				return fmt.Errorf("failed to delete task %d: %w", taskID, err)
 			}
 
-			fmt.Fprintf(cmd.OutOrStdout(), "Task %d deleted.\n", taskID)
+			_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Task %d deleted.\n", taskID)
 			return nil
 		},
 	}
@@ -345,12 +345,12 @@ func DeleteTaskCmd(db *Database) *cobra.Command {
 
 //-------------------------------------------------------toggle complete---------------------------------------------//
 
-//mark and unmark complete
-func CompleteTaskCmd(t *ItemModel) *cobra.Command {
+// CompleteTaskCmd mark and unmark complete
+func CompleteTaskCmd(db *Database) *cobra.Command {
 	var undo bool
 	cmd := &cobra.Command{
-		Use:	"complete [task-id]",
-		Short:	"Complete task",
+		Use:   "complete [task-id]",
+		Short: "Complete task",
 		Example: `munus complete 12,
 				  munus complete 12 --undo`,
 		Args: cobra.ExactArgs(1),
@@ -386,9 +386,9 @@ func CompleteTaskCmd(t *ItemModel) *cobra.Command {
 			}
 
 			if undo {
-				fmt.Fprintf(cmd.OutOrStdout(), "Task %d marked incomplete.\n", taskID)
+				_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Task %d marked incomplete.\n", taskID)
 			} else {
-				fmt.Fprintf(cmd.OutOrStdout(), "Task %d completed.\n", taskID)
+				_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Task %d completed.\n", taskID)
 			}
 			return nil
 		},

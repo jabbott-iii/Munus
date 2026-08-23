@@ -75,7 +75,7 @@ func GetTopUpcomingTasks(tasks []*ItemModel, limit int) []*ItemModel {
 	return upcomingTasks
 }
 
-// GetTasksWithoutDeadline returns tasks without deadline
+// GetTasksWithoutDeadline returns tasks without a deadline
 func GetTasksWithoutDeadline(tasks []*ItemModel) []*ItemModel {
 	var noDeadlineTasks []*ItemModel
 	for _, task := range tasks {

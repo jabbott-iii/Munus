@@ -66,7 +66,7 @@ func ParseRelativeTime(input string) (time.Duration, error) {
 			return 0, fmt.Errorf("invalid number, %s", match[1])
 		}
 		if value <= 0 {
-			return 0, fmt.Errorf("time values must be postivie")
+			return 0, fmt.Errorf("time values must be positive")
 		}
 		months += value
 	}
@@ -79,12 +79,12 @@ func ParseRelativeTime(input string) (time.Duration, error) {
 		return 0, fmt.Errorf("no valid time units found (use: m, h, d, w, M)")
 	}
 
-	reconstructed := ""
+	var reconstructed strings.Builder
 	for _, match := range matches {
-		reconstructed += match[0]
+		reconstructed.WriteString(match[0])
 	}
 	for i := 0; i < months; i++ {
-		reconstructed += "M"
+		reconstructed.WriteString("M")
 	}
 
 	inputNoSpace := strings.ReplaceAll(strings.ReplaceAll(originalInput, " ", ""), "\t", "")
@@ -92,7 +92,7 @@ func ParseRelativeTime(input string) (time.Duration, error) {
 	for _, match := range monthMatches {
 		inputNoSpace = strings.Replace(inputNoSpace, strings.ToLower(match[0]), "M", 1)
 	}
-	reconstructedNoSpaces := strings.ToLower(reconstructed)
+	reconstructedNoSpaces := strings.ToLower(reconstructed.String())
 
 	if len(reconstructedNoSpaces) != len(inputNoSpace) {
 		return 0, fmt.Errorf("contains invalid characters or format")

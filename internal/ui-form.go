@@ -113,6 +113,8 @@ func (m *FormModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					canAddChar = len(m.fields[titleField]) < MaxTitleLength
 				case descriptionField:
 					canAddChar = len(m.fields[descriptionField]) < MaxDescriptionLength
+				default:
+					panic("unhandled default case")
 				}
 				if canAddChar {
 					field := m.fields[m.currentField]
