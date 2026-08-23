@@ -20,12 +20,13 @@ import (
 	"bufio"
 	"errors"
 	"fmt"
-	"time"
 	"io"
+	"strconv"
 	"strings"
+	"time"
 
-	"github.com/spf13/cobra"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/spf13/cobra"
 )
 
 //--------------------------------------CORE----------------------------------------------------------------------------//
@@ -236,6 +237,7 @@ func NewAddCmd(db *Database) *cobra.Command {
 						• w: weeks (2w = 2 weeks from now)
 						• M: months (1M = 1 month from now)
 					- Combinations: 2d 3h 30m (2days, 3hours, 30 minutes from now"`,
+					
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if title == "" || description == "" {
 				return fmt.Errorf("both title and description are required")
@@ -283,7 +285,7 @@ func NewAddCmd(db *Database) *cobra.Command {
 
 func PrintList(w io.Writer, tasks []*ItemModel) {
 	for _, t := range tasks {
-		fmt.Fprintf(w, " %d- %s: %s\n -Complete: %t\n", t.ID, t.Title, t.Description, t.Completed)
+		fmt.Fprintf(w, " ID: %v- %s:\n%s\n -Deadline: %t\n -Complete: %t\n", t.ID, t.Title, t.Description, t.Deadline, t.Completed)
 	}
 }
 
@@ -301,5 +303,83 @@ func NewListCmd(db *Database) *cobra.Command {
 			return nil
 		},
 	}
+	return cmd
+}
+
+//-------------------------------complete and delete--------------------------------------------------------//
+
+//delete task
+func DeleteTaskCmd(db *Database) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:	"delete [task-id]",
+		Short:	"Delete a task",
+		Example: `munus delete 12`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			taskID, err := strconv.Atoi(args[0])
+			if err != nil || taskID <= 0 {
+				return fmt.Errorf("invalid task ID %q: must be a positive integer", args[0])
+			}
+			
+			// confirmation
+			var confirm string
+			fmt.Fprintf(cmd.OutOrStdout(), "Delete task %d? [y/N]: ", taskID)
+			_, _ = fmt.Fscanln(cmd.InOrStdin(), &confirm)
+			if confirm != "y" && confirm != "Y" && confirm != "yes" && confirm != "YES" {
+				fmt.Fprintln(cmd.OutOrStdout(), "Delete cancelled.")
+				return nil
+			}
+
+			// database check
+			if err := db.DeleteTask(taskID); err != nil {
+				return fmt.Errorf("failed to delete task %d: %w", taskID, err)
+			}
+
+			fmt.Fprintf(cmd.OutOrStdout(), "Task %d deleted.\n", taskID)
+			return nil
+		},
+	}
+	return cmd
+}
+
+//-------------------------------------------------------toggle complete---------------------------------------------//
+
+//mark and unmark complete
+func CompleteTaskCmd(t *ItemModel) *cobra.Command {
+	var undo bool
+	cmd := &cobra.Command{
+		Use:	"complete [task-id]",
+		Short:	"Complete task",
+		Example: `munus complete 12,
+				  munus complete 12 --undo`,
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			taskID := t.ID
+			if len(args) > 0 {
+				var err error
+				taskID, err = strconv.Atoi(args[0])
+
+			if err != nil || taskID <= 0 {
+			return fmt.Errorf("invalid task ID %q: must be a positive integer", args[0])
+				}
+			}
+
+			if !undo {
+				t.Completed = true
+				now := time.Now()
+				t.CompletedAt = &now
+				t.UpdatedAt = now
+				fmt.Fprintf(cmd.OutOrStdout(), "Task %d complete.\n", taskID)
+			}
+
+			if undo {
+				t.Completed = false
+				t.CompletedAt = nil
+				t.UpdatedAt = time.Now()
+				fmt.Fprintf(cmd.OutOrStdout(), "Task %d incomplete.\n", taskID)
+				}
+			return nil
+		},
+	}
+	cmd.Flags().BoolVarP(&undo, "undo", "u", false, "mark incomplete")
 	return cmd
 }

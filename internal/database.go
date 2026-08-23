@@ -34,12 +34,12 @@ type Database struct {
 
 // ItemModel Represents an item
 type ItemModel struct {
-	ID          uint       `gorm:"primaryKey"`
+	ID          int        `gorm:"primaryKey"`
 	Title       string     `gorm:"size:255;not null"`
 	Description string     `gorm:"type:text"`
 	Deadline    *time.Time `gorm:"column:deadline"`
 	Completed   bool       `gorm:"default:false;not null"`
-	Priority    uint       `gorm:"column:priority"`
+	Priority    int        `gorm:"column:priority"`
 	CompletedAt *time.Time `gorm:"column:completed_at"`
 	CreatedAt   time.Time  `gorm:"autoCreateTime"`
 	UpdatedAt   time.Time  `gorm:"autoUpdateTime"`
@@ -201,10 +201,10 @@ type TaskServiceAdapter struct {
 // Storage database sql interface
 type Storage interface {
 	CreateTask(task *ItemModel) error
-	GetTaskByID(id uint) (*ItemModel, error)
+	GetTaskByID(id int) (*ItemModel, error)
 	ListTasks() ([]*ItemModel, error)
 	UpdateTask(task *ItemModel) error
-	DeleteTask(id uint) error
+	DeleteTask(id int) error
 	ReplaceAllTasks(tasks []*ItemModel) error
 }
 
@@ -268,7 +268,7 @@ func (d *Database) ReplaceAllTasks(tasks []*ItemModel) error {
 }
 
 // GetTaskByID fetches a task by primary key.
-func (d *Database) GetTaskByID(id uint) (*ItemModel, error) {
+func (d *Database) GetTaskByID(id int) (*ItemModel, error) {
 	var task ItemModel
 	if err := d.conn.First(&task, id).Error; err != nil {
 		return nil, err
@@ -288,7 +288,7 @@ func (d *Database) UpdateTask(task *ItemModel) error {
 }
 
 // DeleteTask deletes a task by id.
-func (d *Database) DeleteTask(id uint) error {
+func (d *Database) DeleteTask(id int) error {
 	if id == 0 {
 		return errors.New("task id is required")
 	}
