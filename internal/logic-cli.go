@@ -44,6 +44,8 @@ func NewRootCmd(db *Database) *cobra.Command {
 
 	cmd.AddCommand(NewAddCmd(db))
 	cmd.AddCommand(NewListCmd(db))
+	cmd.AddCommand(DeleteTaskCmd(db))
+	cmd.AddCommand(CompleteTaskCmd(db))
 	cmd.AddCommand(NewExportCmd())
 	cmd.AddCommand(NewImportCmd())
 
@@ -353,33 +355,45 @@ func CompleteTaskCmd(t *ItemModel) *cobra.Command {
 				  munus complete 12 --undo`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			taskID := t.ID
-			if len(args) > 0 {
-				var err error
-				taskID, err = strconv.Atoi(args[0])
-
+			taskID, err := strconv.Atoi(args[0])
 			if err != nil || taskID <= 0 {
-			return fmt.Errorf("invalid task ID %q: must be a positive integer", args[0])
-				}
+				return fmt.Errorf("invalid task ID %q: must be a positive integer", args[0])
 			}
 
-			if !undo {
-				t.Completed = true
-				now := time.Now()
-				t.CompletedAt = &now
-				t.UpdatedAt = now
-				fmt.Fprintf(cmd.OutOrStdout(), "Task %d complete.\n", taskID)
+			// 1) Load task from DB by ID
+			task, err := db.GetTaskByID(taskID)
+			if err != nil {
+				return fmt.Errorf("failed to load task %d: %w", taskID, err)
+			}
+			if task == nil {
+				return fmt.Errorf("task %d not found", taskID)
+			}
+
+			// 2) Update fields in memory
+			now := time.Now()
+			if undo {
+				task.Completed = false
+				task.CompletedAt = nil
+			} else {
+				task.Completed = true
+				task.CompletedAt = &now
+			}
+			task.UpdatedAt = now
+
+			// 3) Persist update
+			if err := db.UpdateTask(task); err != nil {
+				return fmt.Errorf("failed to update task %d: %w", taskID, err)
 			}
 
 			if undo {
-				t.Completed = false
-				t.CompletedAt = nil
-				t.UpdatedAt = time.Now()
-				fmt.Fprintf(cmd.OutOrStdout(), "Task %d incomplete.\n", taskID)
-				}
+				fmt.Fprintf(cmd.OutOrStdout(), "Task %d marked incomplete.\n", taskID)
+			} else {
+				fmt.Fprintf(cmd.OutOrStdout(), "Task %d completed.\n", taskID)
+			}
 			return nil
 		},
 	}
+
 	cmd.Flags().BoolVarP(&undo, "undo", "u", false, "mark incomplete")
 	return cmd
 }
