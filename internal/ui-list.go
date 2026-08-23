@@ -63,13 +63,13 @@ func (m *ListModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "q", "ctrl+c", "esc":
 			return m, tea.Quit
 
-		case "up", "ctrl+w":
+		case "up", "shift+tab":
 			if m.cursor > 0 {
 				m.cursor--
 				m.EnsureCursorVisible()
 			}
 
-		case "down", "ctrl+s":
+		case "down", "tab":
 			if m.cursor < len(m.GetVisibleTasks())-1 {
 				m.cursor++
 				m.EnsureCursorVisible()
@@ -254,7 +254,8 @@ func (m *ListModel) View() string {
 
 	s.WriteString("\n")
 	s.WriteString(helpStyle.Render("Commands:\n"))
-	s.WriteString(helpStyle.Render("ctrl+w/↑/ctrl+s/↓: Navigate • e: Expand • c: Complete • d: Delete • n: New • r: Refresh • ctrl+c: Quit"))
+	s.WriteString(helpStyle.Render("shift+tab/↑ | tab/↓: Navigate • e: Expand • c: Complete • d: Delete • n: New • r: Refresh • ctrl+c: Quit\n"))
+	s.WriteString(helpStyle.Render("x: Export to File • i: Import from File --- currently WIP"))
 
 	if m.confirmingDelete && m.taskToDelete != nil {
 		dialogStyle := lipgloss.NewStyle().
