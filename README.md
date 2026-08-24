@@ -51,17 +51,15 @@ Deadline formats:
     - Combinations: 2d 3h 30m (2days, 3hours, 30 minutes from now)
 
 Examples:
-
-    munus -t "Meeting" -d "Team sync" -n "2025-11-20 14:00"
-
-  or
-
-    munus -t "Quick fix" -d "Bug #123" -n "2h"
-
-  or
-
-    munus -t "Project" -d "Milestone 1" -n "1w 2d"
-
+```
+munus -t "Meeting" -d "Team sync" -n "2025-11-20 14:00"
+```
+```    
+munus -t "Quick fix" -d "Bug #123" -n "2h"
+```
+```
+munus -t "Project" -d "Milestone 1" -n "1w 2d"
+```
 ## Run with Docker:
 
 ### Build the image
@@ -131,37 +129,34 @@ Windows:
 Download the appropriate binary for your platform below and make it executable:
 
 Linux:
-
-     chmod +x munus-linux-amd64
-
-  or
-
-     chmod +x munus-linux-arm64
-
-  then
-
-     sudo mv munus-linux-amd64 /usr/local/bin/munus
-
-  or
-
-     sudo mv munus-linux-arm64 /usr/local/bin/munus
-
+```
+chmod +x munus-linux-amd64
+```
+```
+chmod +x munus-linux-arm64
+```
+ then
+```
+sudo mv munus-linux-amd64 /usr/local/bin/munus
+```
+```
+sudo mv munus-linux-arm64 /usr/local/bin/munus
+```
 macOS:
-
-     chmod +x munus-macos-arm64
-
-  or
-
-     chmod +x munus-macos-amd64
-
+```
+chmod +x munus-macos-arm64
+```
+```
+chmod +x munus-macos-amd64
+```
   then
-
-     sudo mv munus-macos-arm64 /usr/local/bin/munus
-
-  or
-
-     sudo mv munus-macos-amd64 /usr/local/bin/munus
-
+```
+sudo mv munus-macos-arm64 /usr/local/bin/munus
+```
+```
+sudo mv munus-macos-amd64 /usr/local/bin/munus
+```
 Windows:
-
-     Download munus-windows-amd64.exe and add it to your PATH as munus.
+```
+Download munus-windows-amd64.exe and add it to your PATH as munus.
+```
