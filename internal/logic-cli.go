@@ -61,10 +61,10 @@ func NewExportCmd(db *Database) *cobra.Command {
 		Use:   "export",
 		Short: "Export tasks to JSON",
 		Long:  "Export tasks to a versioned JSON file for backup/migration.",
-		Example: `  munus export -f tasks.json
- 					munus export --stdout > tasks.json
-					munus export --include-completed
-					munus export --dry-run`,
+		Example: `	munus export -f tasks.json
+	munus export --stdout > tasks.json
+	munus export --include-completed
+	munus export --dry-run`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// Resolve default filename if not stdout
 			if !opts.Stdout && opts.File == "" {
@@ -112,7 +112,7 @@ func NewExportCmd(db *Database) *cobra.Command {
 	cmd.Flags().StringVarP(&opts.File, "file", "f", "", "Output JSON file path")
 	cmd.Flags().BoolVar(&opts.Pretty, "pretty", true, "Pretty-print JSON output")
 	cmd.Flags().BoolVar(&opts.Stdout, "stdout", false, "Write JSON to stdout")
-	cmd.Flags().BoolVar(&opts.IncludeCompleted, "include-completed", false, "Include completed tasks")
+	cmd.Flags().BoolVarP(&opts.IncludeCompleted, "include-completed", "i", false, "Include completed tasks")
 	cmd.Flags().BoolVar(&opts.DryRun, "dry-run", false, "Show what would be exported without writing")
 
 	return cmd
@@ -127,10 +127,10 @@ func NewImportCmd(db *Database) *cobra.Command {
 		Use:   "import",
 		Short: "Import tasks from JSON",
 		Long:  "Import tasks from a versioned JSON export.",
-		Example: `  munus import -f tasks.json
-					munus import -f tasks.json --mode replace --yes --backup
-					munus import -f tasks.json --dry-run --strict
-					munus import -f tasks.json --mode merge --on-conflict rename --id-strategy ict`,
+		Example: `	munus import -f tasks.json
+	munus import -f tasks.json --mode replace --yes --backup
+	munus import -f tasks.json --dry-run --strict
+	munus import -f tasks.json --mode merge --on-conflict rename --id-strategy ict`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if opts.File == "" {
 				return errors.New("required flag: --file")
@@ -227,16 +227,17 @@ func NewAddCmd(db *Database) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "add",
 		Short: "Create a new task",
-		Example: `  munus add -t "Meeting" -d "Team sync" -n "2025-11-20 14:00
-					Deadline formats:
-					- Absolute: YYYY-MM-DD HH:MM (e.g., 2025-11-16 14:30)
-					- Relative units:
-						• m: minutes (30m = 30 minutes from now)
-						• h: hours (2h = 2 hours from now)
-						• d: days (1d = 1 day from now)
-						• w: weeks (2w = 2 weeks from now)
-						• M: months (1M = 1 month from now)
-					- Combinations: 2d 3h 30m (2days, 3hours, 30 minutes from now"`,
+		Example: `	munus add -t "Meeting" -d "Team sync" -n "2025-11-20 14:00
+					
+	Deadline formats:
+	- Absolute: YYYY-MM-DD HH:MM (e.g., 2025-11-16 14:30)
+	- Relative units:
+		• m: minutes (30m = 30 minutes from now)
+		• h: hours (2h = 2 hours from now)
+		• d: days (1d = 1 day from now)
+		• w: weeks (2w = 2 weeks from now)
+		• M: months (1M = 1 month from now)
+	- Combinations: 2d 3h 30m (2days, 3hours, 30 minutes from now)`,
 
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if title == "" || description == "" {
@@ -285,12 +286,12 @@ func NewAddCmd(db *Database) *cobra.Command {
 
 func GetTaskStatus(task *ItemModel) string {
 	if task.Completed {
-		return "✓ DONE"
+		return "\n✓ DONE"
 	}
 	if task.Deadline != nil && time.Now().After(*task.Deadline) {
-		return "⚠ OVERDUE"
+		return "\n⚠ OVERDUE"
 	}
-	return "○ TODO"
+	return "\n○ TODO"
 }
 
 func PrintList(w io.Writer, tasks []*ItemModel) {
@@ -302,8 +303,9 @@ func PrintList(w io.Writer, tasks []*ItemModel) {
 // NewListCmd lists tasks
 func NewListCmd(db *Database) *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "list",
-		Short: "List all tasks",
+		Use:     "list",
+		Short:   "List all tasks",
+		Example: `	munus list`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			tasks, err := db.ListTasks()
 			if err != nil {
@@ -323,7 +325,7 @@ func DeleteTaskCmd(db *Database) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     "delete [task-id]",
 		Short:   "Delete a task",
-		Example: `munus delete 12`,
+		Example: `	munus delete 12`,
 		Args:    cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			taskID, err := strconv.Atoi(args[0])
@@ -360,8 +362,8 @@ func CompleteTaskCmd(db *Database) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "complete [task-id]",
 		Short: "Complete task",
-		Example: `munus complete 12,
-				  munus complete 12 --undo`,
+		Example: `	munus complete 12
+	munus complete 12 --undo`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			taskID, err := strconv.Atoi(args[0])
