@@ -55,9 +55,11 @@ type ListModel struct {
 	currentPage      int
 	showHelp         bool
 	err              error
+	statusMessage    string
 	loading          bool
 	confirmingDelete bool
 	taskToDelete     *ItemModel
+	transfer         *transferState
 	viewportWidth    int
 	viewportHeight   int
 }
@@ -166,6 +168,33 @@ type ImportResult struct {
 	Skipped    int
 	Conflicted int
 	BackupPath string
+}
+
+type transferAction string
+
+const (
+	transferActionExport transferAction = "export"
+	transferActionImport transferAction = "import"
+)
+
+type transferStage string
+
+const (
+	transferStageInput   transferStage = "input"
+	transferStageConfirm transferStage = "confirm"
+)
+
+type transferState struct {
+	action            transferAction
+	stage             transferStage
+	path              string
+	cursor            int
+	includeCompleted  bool
+	importMode        string
+	backup            bool
+	strict            bool
+	plan              *ImportPlan
+	operationError    error
 }
 
 type exportOpts struct {
