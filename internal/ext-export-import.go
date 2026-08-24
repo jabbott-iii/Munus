@@ -29,20 +29,6 @@ import (
 
 //---------------------------------------------types export/import---------------------------------//
 
-func NewTaskServiceAdapterFromEnv() (*TaskServiceAdapter, error) {
-	dbPath := os.Getenv("MUNUS_DB_PATH")
-	if dbPath == "" {
-		dbPath = "munus.db"
-	}
-
-	db, err := NewDatabase(dbPath)
-	if err != nil {
-		return nil, err
-	}
-
-	return &TaskServiceAdapter{storage: db}, nil
-}
-
 func (s *TaskServiceAdapter) ListTasks() ([]Task, error) {
 	items, err := s.storage.ListTasks()
 	if err != nil {
@@ -101,10 +87,6 @@ func (s *TaskServiceAdapter) ReplaceAll(tasks []Task) error {
 // func (s *TaskServiceAdapter) InsertFiles([]Task) error { return nil }
 
 //-----------------------------------Export-------------------------------//
-
-func buildTaskService() (*TaskServiceAdapter, error) {
-	return NewTaskServiceAdapterFromEnv()
-}
 
 func PlanExport(svc *TaskServiceAdapter, f ExportFilter) (ExportPlan, error) {
 	tasks, err := svc.ListTasks()
