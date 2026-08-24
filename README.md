@@ -54,14 +54,14 @@ Usage:
  - munus [command]
 
 Available Commands:
- - add         Create a new task
- - complete    Complete task
- - completion  Generate the autocompletion script for the specified shell
- - delete      Delete a task
- - export      Export tasks to JSON
- - help        Help about any command
- - import      Import tasks from JSON
- - list        List all tasks
+ - add        | Create a new task
+ - complete   | Complete task
+ - completion | Generate the autocompletion script for the specified shell
+ - delete     | Delete a task
+ - export     | Export tasks to JSON
+ - help       | Help about any command
+ - import     | Import tasks from JSON
+ - list       | List all tasks
 
 Flags:
  - -h, --help
@@ -86,10 +86,10 @@ Examples:
 	- Combinations: 2d 3h 30m (2days, 3hours, 30 minutes from now)
 
 Flags:
- - -n, --deadline string      Deadline for the task (formats: YYYY-MM-DD HH:MM | 2d 3h 30m | 1d)
- - -d, --description string   Description of the task
- - -h, --help                 help for add
- - -t, --title string         Title of the task
+ - -n, --deadline string     | Deadline for the task (formats: YYYY-MM-DD HH:MM | 2d 3h 30m | 1d)
+ - -d, --description string  | Description of the task
+ - -h, --help                | help for add
+ - -t, --title string        | Title of the task
 
 _______________________________________________________________________________
 
@@ -116,8 +116,8 @@ Examples:
  -	munus complete 12 --undo
 
 Flags:
- - -h, --help   help for complete
- - -u, --undo   mark incomplete
+ - -h, --help  | help for complete
+ - -u, --undo  | mark incomplete
 
 _______________________________________________________________________________
 
@@ -130,7 +130,7 @@ Examples:
  -	munus delete 12
 
 Flags:
- - -h, --help   help for delete
+ - -h, --help  | help for delete
 
 _______________________________________________________________________________
 
@@ -146,12 +146,12 @@ Examples:
  -	munus export --dry-run
 
 Flags:
-  - -f, --file string         Output JSON file path
-  - -h, --help                help for export
-  - -i, --include-completed   Include completed tasks
-      - --pretty              Pretty-print JSON output (default true)
-      - --stdout              Write JSON to stdout
-	  - --dry-run             Show what would be exported without writing
+  - -f, --file string        | Output JSON file path
+  - -h, --help               | help for export
+  - -i, --include-completed  | Include completed tasks
+      - --pretty             | Pretty-print JSON output (default true)
+      - --stdout             | Write JSON to stdout
+	  - --dry-run            | Show what would be exported without writing
       
 _______________________________________________________________________________
 
@@ -167,15 +167,15 @@ Examples:
  -	munus import -f tasks.json --mode merge --on-conflict rename --id-strategy ict
 
 Flags:
- - -f, --file string          Input JSON file path ('-' for stdin if implemented)
- - -h, --help                 help for import
-     - --id-strategy string   ID policy: preserve|regenerate (default "preserve")
-     - --mode string          Import mode: merge|replace (default "merge")
-     - --on-conflict string   Conflict policy: skip|overwrite|rename (default "overwrite")
-     - --strict               Fail on unknown fields/invalid enums
-     - --backup               Create backup before applying changes
-     - --dry-run              Validate and show plan without applying
- - -y, --yes                  Skip confirmation prompts
+ - -f, --file string         | Input JSON file path ('-' for stdin if implemented)
+ - -h, --help                | help for import
+     - --id-strategy string  | ID policy: preserve|regenerate (default "preserve")
+     - --mode string         | Import mode: merge|replace (default "merge")
+     - --on-conflict string  | Conflict policy: skip|overwrite|rename (default "overwrite")
+     - --strict              | Fail on unknown fields/invalid enums
+     - --backup              | Create backup before applying changes
+     - --dry-run             | Validate and show plan without applying
+ - -y, --yes                 | Skip confirmation prompts
   
 ## Run with Docker:
 
