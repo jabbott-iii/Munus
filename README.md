@@ -133,11 +133,11 @@ Linux:
 chmod +x munus-linux-amd64
 ```
 ```
-chmod +x munus-linux-arm64
-```
- then
-```
 sudo mv munus-linux-amd64 /usr/local/bin/munus
+```
+ or
+```
+chmod +x munus-linux-arm64
 ```
 ```
 sudo mv munus-linux-arm64 /usr/local/bin/munus
@@ -147,11 +147,11 @@ macOS:
 chmod +x munus-macos-arm64
 ```
 ```
-chmod +x munus-macos-amd64
-```
-  then
-```
 sudo mv munus-macos-arm64 /usr/local/bin/munus
+```
+  or
+```
+chmod +x munus-macos-amd64
 ```
 ```
 sudo mv munus-macos-amd64 /usr/local/bin/munus
