@@ -286,17 +286,17 @@ func NewAddCmd(db *Database) *cobra.Command {
 
 func GetTaskStatus(task *ItemModel) string {
 	if task.Completed {
-		return "\n✓ DONE"
+		return "✓ DONE"
 	}
 	if task.Deadline != nil && time.Now().After(*task.Deadline) {
-		return "\n⚠ OVERDUE"
+		return "⚠ OVERDUE"
 	}
-	return "\n○ TODO"
+	return "○ TODO"
 }
 
 func PrintList(w io.Writer, tasks []*ItemModel) {
 	for _, t := range tasks {
-		_, _ = fmt.Fprintf(w, "[%s] ID: %v- %s:\n%s\n -Deadline: %v\n -Complete: %t\n", GetTaskStatus(t), t.ID, t.Title, t.Description, t.Deadline, t.Completed)
+		_, _ = fmt.Fprintf(w, "[%s] ID: %v- %s:\n%s\n -Deadline: %v\n -Complete: %t\n\n", GetTaskStatus(t), t.ID, t.Title, t.Description, t.Deadline, t.Completed)
 	}
 }
 
