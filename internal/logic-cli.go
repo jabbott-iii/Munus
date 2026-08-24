@@ -46,15 +46,15 @@ func NewRootCmd(db *Database) *cobra.Command {
 	cmd.AddCommand(NewListCmd(db))
 	cmd.AddCommand(DeleteTaskCmd(db))
 	cmd.AddCommand(CompleteTaskCmd(db))
-	cmd.AddCommand(NewExportCmd())
-	cmd.AddCommand(NewImportCmd())
+	cmd.AddCommand(NewExportCmd(db))
+	cmd.AddCommand(NewImportCmd(db))
 
 	return cmd
 }
 
 // -------------------------------------- export ------------------------------------------------------------------------------------ //
 
-func NewExportCmd() *cobra.Command {
+func NewExportCmd(db *Database) *cobra.Command {
 	opts := exportOpts{}
 
 	cmd := &cobra.Command{
@@ -76,11 +76,8 @@ func NewExportCmd() *cobra.Command {
 				IncludeCompleted: opts.IncludeCompleted,
 			}
 
-			// service/repo wiring
-			svc, err := buildTaskService()
-			if err != nil {
-				return err
-			}
+			// db connection
+			svc := &TaskServiceAdapter{storage: db}
 
 			plan, err := PlanExport(svc, filter)
 			if err != nil {
@@ -123,7 +120,7 @@ func NewExportCmd() *cobra.Command {
 
 //---------------------------------------------import---------------------------------------------------------------------------//
 
-func NewImportCmd() *cobra.Command {
+func NewImportCmd(db *Database) *cobra.Command {
 	opts := importOpts{}
 
 	cmd := &cobra.Command{
@@ -139,10 +136,7 @@ func NewImportCmd() *cobra.Command {
 				return errors.New("required flag: --file")
 			}
 
-			svc, err := buildTaskService()
-			if err != nil {
-				return err
-			}
+			svc := &TaskServiceAdapter{storage: db}
 
 			cfg := ImportConfig{
 				Mode:       opts.Mode,
@@ -224,7 +218,11 @@ func Confirm(cmd *cobra.Command, prompt string) (bool, error) {
 
 // NewAddCmd adding tasks
 func NewAddCmd(db *Database) *cobra.Command {
-	var title, description, deadline string
+	var (
+		title       string
+		description string
+		deadline    string
+	)
 
 	cmd := &cobra.Command{
 		Use:   "add",
@@ -255,7 +253,7 @@ func NewAddCmd(db *Database) *cobra.Command {
 			if deadline != "" {
 				parsed, err := ParseDeadline(deadline)
 				if err != nil {
-					return err
+					return fmt.Errorf("invalid deadline format %q: %w", deadline, err)
 				}
 				deadlineTime = parsed
 			}
@@ -278,16 +276,26 @@ func NewAddCmd(db *Database) *cobra.Command {
 
 	cmd.Flags().StringVarP(&title, "title", "t", "", "Title of the task")
 	cmd.Flags().StringVarP(&description, "description", "d", "", "Description of the task")
-	cmd.Flags().StringVarP(&deadline, "deadline", "n", "", "Deadline for the task")
+	cmd.Flags().StringVarP(&deadline, "deadline", "n", "", "Deadline for the task (formats: YYYY-MM-DD HH:MM | 2d 3h 30m | 1d)")
 	_ = cmd.MarkFlagRequired("title")
 	_ = cmd.MarkFlagRequired("description")
 
 	return cmd
 }
 
+func GetTaskStatus(task *ItemModel) string {
+	if task.Completed {
+		return "✓ DONE"
+	}
+	if task.Deadline != nil && time.Now().After(*task.Deadline) {
+		return "⚠ OVERDUE"
+	}
+	return "○ TODO"
+}
+
 func PrintList(w io.Writer, tasks []*ItemModel) {
 	for _, t := range tasks {
-		_, _ = fmt.Fprintf(w, " ID: %v- %s:\n%s\n -Deadline: %v\n -Complete: %t\n", t.ID, t.Title, t.Description, t.Deadline, t.Completed)
+		_, _ = fmt.Fprintf(w, "[%s] ID: %v- %s:\n%s\n -Deadline: %v\n -Complete: %t\n", GetTaskStatus(t), t.ID, t.Title, t.Description, t.Deadline, t.Completed)
 	}
 }
 
@@ -316,6 +324,7 @@ func DeleteTaskCmd(db *Database) *cobra.Command {
 		Use:     "delete [task-id]",
 		Short:   "Delete a task",
 		Example: `munus delete 12`,
+		Args:    cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			taskID, err := strconv.Atoi(args[0])
 			if err != nil || taskID <= 0 {
