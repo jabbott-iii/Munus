@@ -281,9 +281,9 @@ func (m *ListModel) View() string {
 	}
 
 	s.WriteString("\n")
-	s.WriteString(helpStyle.Render("Commands:\n"))
-	s.WriteString(helpStyle.Render("shift+tab/↑ | tab/↓: Navigate • e: Expand • c: Complete • d: Delete • n: New • r: Refresh • ctrl+c: Quit\n"))
-	s.WriteString(helpStyle.Render("x: Export to File • i: Import from File"))
+	s.WriteString(helpStyle.Render("Commands:"))
+	s.WriteString(helpStyle.Render("\n\nshift+tab/↑ | tab/↓: Navigate • e: Expand • c: Complete • d: Delete • n: New • r: Refresh • ctrl+c: Quit"))
+	s.WriteString(helpStyle.Render("\nx: Export to File • i: Import from File"))
 
 	if m.statusMessage != "" {
 		s.WriteString("\n")
@@ -450,6 +450,8 @@ func (m *ListModel) ToggleComplete() error {
 	return m.storage.UpdateTask(task)
 }
 
+//------------------------------------------export | import-----------------------------------------------------------------------------------------//
+
 func (m *ListModel) handleTransferKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if m.transfer == nil {
 		return m, nil
@@ -496,11 +498,11 @@ func (m *ListModel) handleTransferKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		state.cursor = 0
 	case "end":
 		state.cursor = len(state.path)
-	case "c":
+	case "alt+c":
 		if state.action == transferActionExport {
 			state.includeCompleted = !state.includeCompleted
 		}
-	case "m":
+	case "alt+m":
 		if state.action == transferActionImport {
 			if state.importMode == "merge" {
 				state.importMode = "replace"
@@ -508,11 +510,11 @@ func (m *ListModel) handleTransferKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				state.importMode = "merge"
 			}
 		}
-	case "b":
+	case "alt+b":
 		if state.action == transferActionImport {
 			state.backup = !state.backup
 		}
-	case "s":
+	case "alt+s":
 		if state.action == transferActionImport {
 			state.strict = !state.strict
 		}
@@ -647,7 +649,7 @@ func (m *ListModel) renderTransferOverlay(baseView string) string {
 		dialog.WriteString("Path:\n")
 		dialog.WriteString(inputStyle.Render(m.addTransferCursor(m.transfer.path)))
 		dialog.WriteString("\n\n")
-		dialog.WriteString(fmt.Sprintf("Include completed: %s (press c to toggle)\n\n", yesNoLabel(m.transfer.includeCompleted)))
+		dialog.WriteString(fmt.Sprintf("Include completed: %s (press alt+c to toggle)\n\n", yesNoLabel(m.transfer.includeCompleted)))
 		dialog.WriteString(helpStyle.Render("[enter] Export  [esc] Cancel"))
 	} else {
 		dialog.WriteString(titleStyle.Render("Import Tasks"))
@@ -672,9 +674,9 @@ func (m *ListModel) renderTransferOverlay(baseView string) string {
 			dialog.WriteString("Path:\n")
 			dialog.WriteString(inputStyle.Render(m.addTransferCursor(m.transfer.path)))
 			dialog.WriteString("\n\n")
-			dialog.WriteString(fmt.Sprintf("Mode: %s (press m to toggle)\n", m.transfer.importMode))
-			dialog.WriteString(fmt.Sprintf("Backup before import: %s (press b to toggle)\n", yesNoLabel(m.transfer.backup)))
-			dialog.WriteString(fmt.Sprintf("Strict parsing: %s (press s to toggle)\n\n", yesNoLabel(m.transfer.strict)))
+			dialog.WriteString(fmt.Sprintf("Mode: %s (press alt+m to toggle)\n", m.transfer.importMode))
+			dialog.WriteString(fmt.Sprintf("Backup before import: %s (press alt+b to toggle)\n", yesNoLabel(m.transfer.backup)))
+			dialog.WriteString(fmt.Sprintf("Strict parsing: %s (press alt+s to toggle)\n\n", yesNoLabel(m.transfer.strict)))
 			dialog.WriteString(helpStyle.Render("[enter] Preview Import  [esc] Cancel"))
 		}
 	}
