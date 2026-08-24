@@ -37,6 +37,7 @@ const (
 const (
 	MaxTitleLength       = 100
 	MaxDescriptionLength = 500
+	MaxDeadlineLength    = 365
 )
 
 // Init initializes the form model
@@ -113,8 +114,10 @@ func (m *FormModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					canAddChar = len(m.fields[titleField]) < MaxTitleLength
 				case descriptionField:
 					canAddChar = len(m.fields[descriptionField]) < MaxDescriptionLength
+				case deadlineField:
+					canAddChar = len(m.fields[deadlineField]) < MaxDeadlineLength
 				default:
-					panic("unhandled default case")
+					canAddChar = false
 				}
 				if canAddChar {
 					field := m.fields[m.currentField]
