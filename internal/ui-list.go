@@ -19,6 +19,7 @@ package internal
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -59,6 +60,10 @@ func (m *ListModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tea.KeyMsg:
+		if m.transfer != nil {
+			return m.handleTransferKey(msg)
+		}
+
 		switch msg.String() {
 		case "q", "ctrl+c", "esc":
 			return m, tea.Quit
@@ -132,6 +137,29 @@ func (m *ListModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.currentPage++
 				m.cursor = 0
 			}
+
+		case "x":
+			m.err = nil
+			m.statusMessage = ""
+			m.transfer = &transferState{
+				action: transferActionExport,
+				stage:  transferStageInput,
+				path:   fmt.Sprintf("munus-export-%s.json", time.Now().Format("20060102")),
+			}
+			m.transfer.cursor = len(m.transfer.path)
+			return m, nil
+
+		case "i":
+			m.err = nil
+			m.statusMessage = ""
+			m.transfer = &transferState{
+				action:     transferActionImport,
+				stage:      transferStageInput,
+				importMode: "merge",
+				backup:     true,
+			}
+			return m, nil
+
 		}
 	}
 
@@ -255,7 +283,15 @@ func (m *ListModel) View() string {
 	s.WriteString("\n")
 	s.WriteString(helpStyle.Render("Commands:\n"))
 	s.WriteString(helpStyle.Render("shift+tab/↑ | tab/↓: Navigate • e: Expand • c: Complete • d: Delete • n: New • r: Refresh • ctrl+c: Quit\n"))
-	s.WriteString(helpStyle.Render("x: Export to File • i: Import from File --- currently WIP"))
+	s.WriteString(helpStyle.Render("x: Export to File • i: Import from File"))
+
+	if m.statusMessage != "" {
+		s.WriteString("\n")
+		s.WriteString(lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#4CAF50")).
+			PaddingLeft(1).
+			Render(m.statusMessage))
+	}
 
 	if m.confirmingDelete && m.taskToDelete != nil {
 		dialogStyle := lipgloss.NewStyle().
@@ -314,6 +350,9 @@ func (m *ListModel) View() string {
 
 		// Draw modal over base by resetting cursor to top-left before modal output.
 		return base + "\x1b[H" + modalLayer
+	}
+	if m.transfer != nil {
+		return m.renderTransferOverlay(s.String())
 	}
 
 	return s.String()
@@ -409,4 +448,284 @@ func (m *ListModel) ToggleComplete() error {
 	}
 
 	return m.storage.UpdateTask(task)
+}
+
+func (m *ListModel) handleTransferKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if m.transfer == nil {
+		return m, nil
+	}
+
+	state := m.transfer
+
+	if state.stage == transferStageConfirm {
+		switch msg.String() {
+		case "esc", "n":
+			m.transfer = nil
+			return m, nil
+		case "y", "enter":
+			return m.applyImportFromTransfer()
+		}
+		return m, nil
+	}
+
+	switch msg.String() {
+	case "ctrl+c":
+		return m, tea.Quit
+	case "esc":
+		m.transfer = nil
+		return m, nil
+	case "enter":
+		if state.action == transferActionExport {
+			return m.exportFromTransfer()
+		}
+		return m.planImportFromTransfer()
+	case "backspace":
+		if state.cursor > 0 {
+			state.path = state.path[:state.cursor-1] + state.path[state.cursor:]
+			state.cursor--
+		}
+	case "left":
+		if state.cursor > 0 {
+			state.cursor--
+		}
+	case "right":
+		if state.cursor < len(state.path) {
+			state.cursor++
+		}
+	case "home":
+		state.cursor = 0
+	case "end":
+		state.cursor = len(state.path)
+	case "c":
+		if state.action == transferActionExport {
+			state.includeCompleted = !state.includeCompleted
+		}
+	case "m":
+		if state.action == transferActionImport {
+			if state.importMode == "merge" {
+				state.importMode = "replace"
+			} else {
+				state.importMode = "merge"
+			}
+		}
+	case "b":
+		if state.action == transferActionImport {
+			state.backup = !state.backup
+		}
+	case "s":
+		if state.action == transferActionImport {
+			state.strict = !state.strict
+		}
+	default:
+		if len(msg.String()) == 1 {
+			state.path = state.path[:state.cursor] + msg.String() + state.path[state.cursor:]
+			state.cursor++
+		}
+	}
+
+	state.operationError = nil
+	return m, nil
+}
+
+func (m *ListModel) exportFromTransfer() (tea.Model, tea.Cmd) {
+	if m.transfer == nil {
+		return m, nil
+	}
+
+	path := strings.TrimSpace(m.transfer.path)
+	if path == "" {
+		m.transfer.operationError = fmt.Errorf("file path is required")
+		return m, nil
+	}
+
+	filter := ExportFilter{IncludeCompleted: m.transfer.includeCompleted}
+	svc := &TaskServiceAdapter{storage: m.storage}
+	plan, err := PlanExport(svc, filter)
+	if err != nil {
+		m.transfer.operationError = err
+		return m, nil
+	}
+	if err := ExportToFile(svc, filter, path, true); err != nil {
+		m.transfer.operationError = err
+		return m, nil
+	}
+
+	m.statusMessage = fmt.Sprintf("✓ Exported %d tasks to %s", plan.Total, path)
+	m.transfer = nil
+	return m, nil
+}
+
+func (m *ListModel) planImportFromTransfer() (tea.Model, tea.Cmd) {
+	if m.transfer == nil {
+		return m, nil
+	}
+
+	path := strings.TrimSpace(m.transfer.path)
+	if path == "" {
+		m.transfer.operationError = fmt.Errorf("file path is required")
+		return m, nil
+	}
+
+	plan, err := PlanImport(&TaskServiceAdapter{storage: m.storage}, path, ImportConfig{
+		Mode:       m.transfer.importMode,
+		OnConflict: "overwrite",
+		IDStrategy: "preserve",
+		Strict:     m.transfer.strict,
+		Backup:     m.transfer.backup,
+	})
+	if err != nil {
+		m.transfer.operationError = err
+		return m, nil
+	}
+
+	m.transfer.path = path
+	m.transfer.cursor = len(path)
+	m.transfer.plan = &plan
+	m.transfer.stage = transferStageConfirm
+	m.transfer.operationError = nil
+	return m, nil
+}
+
+func (m *ListModel) applyImportFromTransfer() (tea.Model, tea.Cmd) {
+	if m.transfer == nil {
+		return m, nil
+	}
+
+	res, err := ApplyImport(&TaskServiceAdapter{storage: m.storage}, m.transfer.path, ImportConfig{
+		Mode:       m.transfer.importMode,
+		OnConflict: "overwrite",
+		IDStrategy: "preserve",
+		Strict:     m.transfer.strict,
+		Backup:     m.transfer.backup,
+	})
+	if err != nil {
+		m.transfer.operationError = err
+		return m, nil
+	}
+
+	status := fmt.Sprintf("✓ Import complete: created=%d updated=%d unchanged=%d skipped=%d", res.Created, res.Updated, res.Unchanged, res.Skipped)
+	if res.BackupPath != "" {
+		status += fmt.Sprintf(" • backup=%s", res.BackupPath)
+	}
+
+	m.statusMessage = status
+	m.transfer = nil
+	m.loading = true
+	m.err = nil
+	return m, m.loadData
+}
+
+func (m *ListModel) renderTransferOverlay(baseView string) string {
+	dialogStyle := lipgloss.NewStyle().
+		Border(lipgloss.NormalBorder()).
+		BorderForeground(lipgloss.Color("#8B5CF6")).
+		Padding(1, 2).
+		Background(lipgloss.Color("#1A1A2E")).
+		Foreground(lipgloss.Color("#FFFFFF"))
+
+	titleStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#f7cf79")).
+		Bold(true)
+
+	helpStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#9CA3AF"))
+
+	errorStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#EF4444"))
+
+	inputStyle := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color("#8B5CF6")).
+		Padding(0, 1).
+		Width(60)
+
+	var dialog strings.Builder
+
+	if m.transfer.action == transferActionExport {
+		dialog.WriteString(titleStyle.Render("Export Tasks"))
+		dialog.WriteString("\n\n")
+		dialog.WriteString("Path:\n")
+		dialog.WriteString(inputStyle.Render(m.addTransferCursor(m.transfer.path)))
+		dialog.WriteString("\n\n")
+		dialog.WriteString(fmt.Sprintf("Include completed: %s (press c to toggle)\n\n", yesNoLabel(m.transfer.includeCompleted)))
+		dialog.WriteString(helpStyle.Render("[enter] Export  [esc] Cancel"))
+	} else {
+		dialog.WriteString(titleStyle.Render("Import Tasks"))
+		dialog.WriteString("\n\n")
+		if m.transfer.stage == transferStageConfirm && m.transfer.plan != nil {
+			dialog.WriteString(fmt.Sprintf("File: %s\n", m.transfer.path))
+			dialog.WriteString(fmt.Sprintf("Mode: %s", m.transfer.importMode))
+			if m.transfer.importMode == "replace" {
+				dialog.WriteString(" (will replace all local tasks)")
+			}
+			dialog.WriteString("\n")
+			dialog.WriteString(fmt.Sprintf("Backup before import: %s\n", yesNoLabel(m.transfer.backup)))
+			dialog.WriteString(fmt.Sprintf("Strict parsing: %s\n\n", yesNoLabel(m.transfer.strict)))
+			dialog.WriteString("Plan:\n")
+			dialog.WriteString(fmt.Sprintf("  Incoming: %d\n", m.transfer.plan.Incoming))
+			dialog.WriteString(fmt.Sprintf("  Current: %d\n", m.transfer.plan.Current))
+			dialog.WriteString(fmt.Sprintf("  Create: %d\n", m.transfer.plan.ToCreate))
+			dialog.WriteString(fmt.Sprintf("  Update: %d\n", m.transfer.plan.ToUpdate))
+			dialog.WriteString(fmt.Sprintf("  Unchanged: %d\n\n", m.transfer.plan.Unchanged))
+			dialog.WriteString(helpStyle.Render("[y] Import  [n] Cancel"))
+		} else {
+			dialog.WriteString("Path:\n")
+			dialog.WriteString(inputStyle.Render(m.addTransferCursor(m.transfer.path)))
+			dialog.WriteString("\n\n")
+			dialog.WriteString(fmt.Sprintf("Mode: %s (press m to toggle)\n", m.transfer.importMode))
+			dialog.WriteString(fmt.Sprintf("Backup before import: %s (press b to toggle)\n", yesNoLabel(m.transfer.backup)))
+			dialog.WriteString(fmt.Sprintf("Strict parsing: %s (press s to toggle)\n\n", yesNoLabel(m.transfer.strict)))
+			dialog.WriteString(helpStyle.Render("[enter] Preview Import  [esc] Cancel"))
+		}
+	}
+
+	if m.transfer.operationError != nil {
+		dialog.WriteString("\n\n")
+		dialog.WriteString(errorStyle.Render("Error: " + m.transfer.operationError.Error()))
+	}
+
+	dialogContent := dialogStyle.Render(dialog.String())
+
+	viewW := m.viewportWidth
+	viewH := m.viewportHeight
+	if viewW <= 0 {
+		viewW = 80
+	}
+	if viewH <= 0 {
+		viewH = 24
+	}
+
+	base := lipgloss.NewStyle().
+		Width(viewW).
+		Height(viewH).
+		Foreground(lipgloss.Color("#6B7280")).
+		Render(baseView)
+
+	modalLayer := lipgloss.Place(
+		viewW,
+		viewH,
+		lipgloss.Center,
+		lipgloss.Center,
+		dialogContent,
+		lipgloss.WithWhitespaceChars(" "),
+	)
+
+	return base + "\x1b[H" + modalLayer
+}
+
+func (m *ListModel) addTransferCursor(text string) string {
+	if m.transfer == nil {
+		return text
+	}
+	if m.transfer.cursor >= len(text) {
+		return text + "█"
+	}
+	return text[:m.transfer.cursor] + "█" + text[m.transfer.cursor:]
+}
+
+func yesNoLabel(value bool) string {
+	if value {
+		return "yes"
+	}
+	return "no"
 }

@@ -60,6 +60,8 @@ type ListModel struct {
 	taskToDelete     *ItemModel
 	viewportWidth    int
 	viewportHeight   int
+	statusMessage    string
+	transfer         *transferState
 }
 
 // FormModel represents the form input model
@@ -191,6 +193,33 @@ type importOpts struct {
 
 type TaskServiceAdapter struct {
 	storage Storage
+}
+
+type transferAction string
+
+const (
+	transferActionExport transferAction = "export"
+	transferActionImport transferAction = "import"
+)
+
+type transferStage string
+
+const (
+	transferStageInput   transferStage = "input"
+	transferStageConfirm transferStage = "confirm"
+)
+
+type transferState struct {
+	action           transferAction
+	stage            transferStage
+	path             string
+	cursor           int
+	includeCompleted bool
+	importMode       string
+	backup           bool
+	strict           bool
+	plan             *ImportPlan
+	operationError   error
 }
 
 //-----------------------------------interface tasks------------------------------------------------------------------------------------------------------//
