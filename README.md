@@ -4,7 +4,7 @@
 - 🗹 Complete tasks to check them off.
 - 🗹 Delete tasks and completed tasks at will.
 - 🗹 Data storage via sqlite.
-- 🗹 Data storage via sqlite.
+- 🗹 Export data to .json and import it back.
 
 ## Planned Features:
 -  Git integration.
