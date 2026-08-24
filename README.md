@@ -146,13 +146,13 @@ Examples:
  -	munus export --dry-run
 
 Flags:
-      - --dry-run             Show what would be exported without writing
   - -f, --file string         Output JSON file path
   - -h, --help                help for export
   - -i, --include-completed   Include completed tasks
       - --pretty              Pretty-print JSON output (default true)
       - --stdout              Write JSON to stdout
-
+	  - --dry-run             Show what would be exported without writing
+      
 _______________________________________________________________________________
 
 Import tasks from a versioned JSON export.
@@ -167,14 +167,14 @@ Examples:
  -	munus import -f tasks.json --mode merge --on-conflict rename --id-strategy ict
 
 Flags:
-     - --backup               Create backup before applying changes
-     - --dry-run              Validate and show plan without applying
  - -f, --file string          Input JSON file path ('-' for stdin if implemented)
  - -h, --help                 help for import
      - --id-strategy string   ID policy: preserve|regenerate (default "preserve")
      - --mode string          Import mode: merge|replace (default "merge")
      - --on-conflict string   Conflict policy: skip|overwrite|rename (default "overwrite")
      - --strict               Fail on unknown fields/invalid enums
+     - --backup               Create backup before applying changes
+     - --dry-run              Validate and show plan without applying
  - -y, --yes                  Skip confirmation prompts
   
 ## Run with Docker:
