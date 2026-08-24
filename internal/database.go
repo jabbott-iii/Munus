@@ -39,7 +39,6 @@ type ItemModel struct {
 	Description string     `gorm:"type:text"`
 	Deadline    *time.Time `gorm:"column:deadline"`
 	Completed   bool       `gorm:"default:false;not null"`
-	Priority    int        `gorm:"column:priority"`
 	CompletedAt *time.Time `gorm:"column:completed_at"`
 	CreatedAt   time.Time  `gorm:"autoCreateTime"`
 	UpdatedAt   time.Time  `gorm:"autoUpdateTime"`
@@ -114,7 +113,6 @@ type TaskDTO struct {
 	ID          string     `json:"id"`
 	Title       string     `json:"title"`
 	Description string     `json:"description,omitempty"`
-	Priority    string     `json:"priority,omitempty"`
 	Completed   bool       `json:"completed"`
 	Deadline    *time.Time `json:"deadline,omitempty"`
 	CreatedAt   time.Time  `json:"created_at"`
@@ -126,7 +124,6 @@ type Task struct {
 	Title       string
 	Description string
 	Completed   bool
-	Priority    string
 	Deadline    *time.Time
 	CreatedAt   time.Time
 	UpdatedAt   time.Time

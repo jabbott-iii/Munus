@@ -55,6 +55,8 @@ func (s *TaskServiceAdapter) ListTasks() ([]Task, error) {
 			ID:          fmt.Sprintf("%d", item.ID),
 			Title:       item.Title,
 			Description: item.Description,
+			Completed:   item.Completed,
+			Deadline:    item.Deadline,
 			CreatedAt:   item.CreatedAt,
 			UpdatedAt:   item.UpdatedAt,
 		})
@@ -101,15 +103,7 @@ func (s *TaskServiceAdapter) ReplaceAll(tasks []Task) error {
 //-----------------------------------Export-------------------------------//
 
 func buildTaskService() (*TaskServiceAdapter, error) {
-	dbPath := os.Getenv("MUNUS_DB_PATH")
-	db, err := NewDatabase(dbPath)
-	if err != nil {
-		return nil, err
-	}
-
-	return &TaskServiceAdapter{
-		storage: db,
-	}, nil
+	return NewTaskServiceAdapterFromEnv()
 }
 
 func PlanExport(svc *TaskServiceAdapter, f ExportFilter) (ExportPlan, error) {
@@ -168,8 +162,8 @@ func toDTO(t Task) TaskDTO {
 		ID:          t.ID,
 		Title:       t.Title,
 		Description: t.Description,
-		Priority:    t.Priority,
 		Deadline:    t.Deadline,
+		Completed:   t.Completed,
 		CreatedAt:   t.CreatedAt,
 		UpdatedAt:   t.UpdatedAt,
 	}
@@ -293,7 +287,6 @@ func fromDTO(d TaskDTO) Task {
 		Title:       d.Title,
 		Description: d.Description,
 		Completed:   d.Completed,
-		Priority:    d.Priority,
 		Deadline:    d.Deadline,
 		CreatedAt:   d.CreatedAt,
 		UpdatedAt:   d.UpdatedAt,
@@ -378,8 +371,7 @@ func writeBackup(tasks []Task) (string, error) {
 func equalTask(a, b Task) bool {
 	return a.Title == b.Title &&
 		a.Description == b.Description &&
-		a.Completed == b.Completed &&
-		a.Priority == b.Priority
+		a.Completed == b.Completed
 }
 
 func filterTasks(in []Task, f ExportFilter) []Task {
