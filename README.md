@@ -117,3 +117,29 @@ Windows:
 Download munus-windows-amd64.exe and add it to your PATH as munus.
 ```
 
+## Docker
+
+### Build
+```bash
+docker build -t munus:latest .
+```
+
+### Run (interactive)
+```bash
+docker run --rm -it munus:latest
+```
+
+### Persist data
+```bash
+mkdir -p ~/.munus
+docker run --rm -it \
+  -v ~/.munus:/root/.munus \
+  munus:latest
+```
+
+### CLI usage
+```bash
+docker run --rm -it munus:latest --help
+docker run --rm -it -v ~/.munus:/root/.munus munus:latest add "Example task"
+docker run --rm -it -v ~/.munus:/root/.munus munus:latest list
+```
