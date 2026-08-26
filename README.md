@@ -19,27 +19,25 @@
 
 Munus is organized into focused command groups:
 
-- munus task — task creation and management
-- munus list — view and filter tasks
+- munus add — task creation and management
+- munus list — display all tasks
 - munus complete — mark tasks as finished
 - munus delete — remove tasks
 - munus export — export tasks to JSON
 - munus import — import tasks from JSON
 
-### task
+### add
 
-- munus task create — create a new task with title and description
-- munus task create --title "Title" --description "Description" — add a task with details
-- munus task create --title "Title" --deadline "2h" — create a task with a deadline
+- munus add --title "Title" --description "Description" — add a task with details
+- munus add --title "Title" --deadline "2h" — create a task with a deadline
 
 Examples:
-- munus task create --title "Feature Review" --description "Review new API endpoints"
-- munus task create --title "Bug Fix" --deadline "1d" --description "Fix login validation"
-- munus task create -t "Meeting" -d "Team sync" -n "2h"
+- munus add --title "Feature Review" --description "Review new API endpoints"
+- munus add --title "Bug Fix" --deadline "1d" --description "Fix login validation"
+- munus add -t "Meeting" -d "Team sync" -n "2h"
 
 ### list
 
-- munus list — display all tasks
 - munus list --pending — show only incomplete tasks
 - munus list --completed — show only completed tasks
 
@@ -66,11 +64,9 @@ Examples:
 
 ### export
 
-- munus export — save all tasks to JSON file
 - munus export --file tasks-backup.json — export to a specific file
 
 Examples:
-- munus export
 - munus export --file my-tasks.json
 
 ### import
