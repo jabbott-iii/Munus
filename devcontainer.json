@@ -8,7 +8,10 @@
     "ghcr.io/duduribeiro/devcontainer-features/neovim:1": {
       "version": "stable"
     },
-    "ghcr.io/devcontainers/features/docker-outside-of-docker:1": {}
+    "ghcr.io/devcontainers/features/docker-outside-of-docker:1": {},
+    "ghcr.io/devcontainers/features/go:1": {
+      "version": "1.26.5"
+    }
   },
   "customizations": {
     "vscode": {
