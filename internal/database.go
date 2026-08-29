@@ -30,6 +30,8 @@ type Database struct {
 	conn *gorm.DB
 }
 
+var ErrTaskNotFound = errors.New("Task not found")
+
 //-----------------------------------------------------------------------------------Models-------------------------------------------------------------------//
 
 // ItemModel Represents an item
@@ -298,6 +300,9 @@ func (d *Database) ReplaceAllTasks(tasks []*ItemModel) error {
 func (d *Database) GetTaskByID(id int) (*ItemModel, error) {
 	var task ItemModel
 	if err := d.conn.First(&task, id).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, fmt.Errorf("%w: %d", ErrTaskNotFound, id)
+		}
 		return nil, err
 	}
 	return &task, nil
