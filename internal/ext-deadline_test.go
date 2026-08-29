@@ -99,17 +99,16 @@ func TestParseDeadline(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		name       string
-		input      string
-		wantErr    bool
-		wantExact  bool
-		wantBefore time.Time
-		wantAfter  time.Time
+		name              string
+		input             string
+		wantErr           bool
+		wantExact         bool
+		relativeDuration  time.Duration // NEW: Store duration instead of absolute time
 	}{
 		{name: "absolute deadline", input: "2025-11-16 14:05", wantExact: true},
-		{name: "relative deadline", input: "1h 30m", wantBefore: time.Now().Add(2 * time.Hour), wantAfter: time.Now().Add(time.Hour)},
-		{name: "trimmed input", input: " 2d ", wantBefore: time.Now().Add(49 * time.Hour), wantAfter: time.Now().Add(47 * time.Hour)},
-		{name: "mixed spacing", input: "\t1h   15m ", wantBefore: time.Now().Add(2 * time.Hour), wantAfter: time.Now().Add(time.Hour)},
+		{name: "relative deadline", input: "1h 30m", relativeDuration: 90 * time.Minute},
+		{name: "trimmed input", input: " 2d ", relativeDuration: 48 * time.Hour},
+		{name: "mixed spacing", input: "\t1h   15m ", relativeDuration: 75 * time.Minute},
 		{name: "empty", input: "", wantErr: true},
 		{name: "invalid format", input: "tomorrow", wantErr: true},
 	}
@@ -148,15 +147,14 @@ func TestParseDeadline(t *testing.T) {
 				return
 			}
 
-			if got.Before(before) || got.After(after.Add(2*time.Second)) {
-				t.Fatalf("ParseDeadline(%q) = %v, want within [%v, %v]", tt.input, got, before, after.Add(2*time.Second))
-			}
-
-			if tt.wantAfter != (time.Time{}) && got.Before(tt.wantAfter) {
-				t.Fatalf("ParseDeadline(%q) = %v, want after %v", tt.input, got, tt.wantAfter)
-			}
-			if tt.wantBefore != (time.Time{}) && got.After(tt.wantBefore) {
-				t.Fatalf("ParseDeadline(%q) = %v, want before %v", tt.input, got, tt.wantBefore)
+			// Calculate bounds dynamically using captured time
+			if tt.relativeDuration > 0 {
+				wantAfter := before.Add(tt.relativeDuration)
+				wantBefore := after.Add(tt.relativeDuration + 2*time.Second)
+				
+				if got.Before(wantAfter) || got.After(wantBefore) {
+					t.Fatalf("ParseDeadline(%q) = %v, want within [%v, %v]", tt.input, got, wantAfter, wantBefore)
+				}
 			}
 		})
 	}
