@@ -639,6 +639,7 @@ func TestListModelViewLoading(t *testing.T) {
 // TestListModelViewError tests view displays error message
 func TestListModelViewError(t *testing.T) {
     list := NewListModel(&MockStorage{})
+	list.loading = false
     list.err = errors.New("test error")
     
     view := list.View()
@@ -651,6 +652,7 @@ func TestListModelViewError(t *testing.T) {
 // TestListModelViewDeleteConfirmation tests delete confirmation dialog rendering
 func TestListModelViewDeleteConfirmation(t *testing.T) {
     list := NewListModel(&MockStorage{})
+	list.loading = false
     list.confirmingDelete = true
     list.taskToDelete = &ItemModel{ID: 1, Title: "Test Task"}
     list.viewportWidth = 80

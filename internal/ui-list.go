@@ -173,16 +173,16 @@ func (m *ListModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 // View renders the list
 func (m *ListModel) View() string {
-	if m.loading {
-		return lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#9333EA")).
-			Render("Loading tasks...")
-	}
-
 	if m.err != nil {
 		return lipgloss.NewStyle().
 			Foreground(lipgloss.Color("#EF4444")).
 			Render("Error: " + m.err.Error())
+	}
+	
+	if m.loading {
+		return lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#9333EA")).
+			Render("Loading tasks...")
 	}
 
 	titleStyle := lipgloss.NewStyle().
