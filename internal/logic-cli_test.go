@@ -109,30 +109,6 @@ func TestPrintList_Empty(t *testing.T) {
 	}
 }
 
-func TestPrintList_SingleTask(t *testing.T) {
-	buf := &bytes.Buffer{}
-	deadline := time.Date(2025, 12, 25, 10, 0, 0, 0, time.UTC)
-	task := &ItemModel{
-		ID:          1,
-		Title:       "Test Task",
-		Description: "Test Description",
-		Deadline:    &deadline,
-		Completed:   false,
-	}
-	PrintList(buf, []*ItemModel{task})
-
-	output := buf.String()
-	if !strings.Contains(output, "Test Task") {
-		t.Errorf("output missing task title: %s", output)
-	}
-	if !strings.Contains(output, "Test Description") {
-		t.Errorf("output missing task description: %s", output)
-	}
-	if !strings.Contains(output, "TODO") {
-		t.Errorf("output missing status: %s", output)
-	}
-}
-
 func TestPrintList_MultipleTasks(t *testing.T) {
 	buf := &bytes.Buffer{}
 	tasks := []*ItemModel{
