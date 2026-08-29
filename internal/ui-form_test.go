@@ -20,27 +20,17 @@ import (
 	"errors"
 	"strings"
 	"testing"
-	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 )
 
-// MockStorage is a mock implementation of Storage for testing
-type MockStorage struct {
-	tasks       []*ItemModel
-	createError error
+type mockCreateErrorStorage struct {
+	MockStorage
+	createErr error
 }
 
-func (m *MockStorage) CreateTask(task *ItemModel) error {
-	if m.createError != nil {
-		return m.createError
-	}
-	m.tasks = append(m.tasks, task)
-	return nil
-}
-
-func (m *MockStorage) ListTasks() ([]*ItemModel, error) {
-	return m.tasks, nil
+func (m *mockCreateErrorStorage) CreateTask(task *ItemModel) error {
+	return m.createErr
 }
 
 func (m *MockStorage) GetTask(id int) (*ItemModel, error) {
@@ -50,26 +40,6 @@ func (m *MockStorage) GetTask(id int) (*ItemModel, error) {
 		}
 	}
 	return nil, errors.New("task not found")
-}
-
-func (m *MockStorage) UpdateTask(task *ItemModel) error {
-	for i, t := range m.tasks {
-		if t.ID == task.ID {
-			m.tasks[i] = task
-			return nil
-		}
-	}
-	return errors.New("task not found")
-}
-
-func (m *MockStorage) DeleteTask(id int) error {
-	for i, t := range m.tasks {
-		if t.ID == id {
-			m.tasks = append(m.tasks[:i], m.tasks[i+1:]...)
-			return nil
-		}
-	}
-	return errors.New("task not found")
 }
 
 // TestFormModelInit tests the Init method
@@ -565,7 +535,7 @@ func TestSubmitFormInvalidDeadline(t *testing.T) {
 
 // TestSubmitFormStorageError tests form submission when storage returns error
 func TestSubmitFormStorageError(t *testing.T) {
-	storage := &MockStorage{createError: errors.New("storage error")}
+	storage := &mockCreateErrorStorage{createErr: errors.New("storage error")}
 	form := NewFormModel(storage)
 	form.fields[titleField] = "Test Task"
 	form.fields[descriptionField] = "Test Description"

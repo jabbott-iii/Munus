@@ -188,19 +188,19 @@ func TestMarkIncomplete(t *testing.T) {
 func TestGetTopUpcomingTasks(t *testing.T) {
 	now := time.Now()
 	tests := []struct {
-		name     string
+		title     string
 		tasks    []*ItemModel
 		limit    int
 		expected int
 	}{
 		{
-			name: "empty task list",
+			title: "empty task list",
 			tasks: []*ItemModel{},
 			limit: 5,
 			expected: 0,
 		},
 		{
-			name: "no incomplete tasks with deadline",
+			title: "no incomplete tasks with deadline",
 			tasks: []*ItemModel{
 				{
 					Completed: true,
@@ -211,7 +211,7 @@ func TestGetTopUpcomingTasks(t *testing.T) {
 			expected: 0,
 		},
 		{
-			name: "all tasks have no deadline",
+			title: "all tasks have no deadline",
 			tasks: []*ItemModel{
 				{
 					Completed: false,
@@ -226,30 +226,30 @@ func TestGetTopUpcomingTasks(t *testing.T) {
 			expected: 0,
 		},
 		{
-			name: "return top 3 of 5 upcoming tasks",
+			title: "return top 3 of 5 upcoming tasks",
 			tasks: []*ItemModel{
 				{
-					Name:      "Task 1",
+					Title:     "Task 1",
 					Completed: false,
 					Deadline:  timePtr(now.Add(96 * time.Hour)), // 4 days
 				},
 				{
-					Name:      "Task 2",
+					Title:     "Task 2",
 					Completed: false,
 					Deadline:  timePtr(now.Add(24 * time.Hour)), // 1 day
 				},
 				{
-					Name:      "Task 3",
+					Title:     "Task 3",
 					Completed: false,
 					Deadline:  timePtr(now.Add(72 * time.Hour)), // 3 days
 				},
 				{
-					Name:      "Task 4",
+					Title:     "Task 4",
 					Completed: false,
 					Deadline:  timePtr(now.Add(48 * time.Hour)), // 2 days
 				},
 				{
-					Name:      "Task 5",
+					Title:     "Task 5",
 					Completed: false,
 					Deadline:  timePtr(now.Add(120 * time.Hour)), // 5 days
 				},
@@ -258,15 +258,15 @@ func TestGetTopUpcomingTasks(t *testing.T) {
 			expected: 3,
 		},
 		{
-			name: "all upcoming tasks when limit exceeds list size",
+			title: "all upcoming tasks when limit exceeds list size",
 			tasks: []*ItemModel{
 				{
-					Name:      "Task 1",
+					Title:     "Task 1",
 					Completed: false,
 					Deadline:  timePtr(now.Add(24 * time.Hour)),
 				},
 				{
-					Name:      "Task 2",
+					Title:     "Task 2",
 					Completed: false,
 					Deadline:  timePtr(now.Add(48 * time.Hour)),
 				},
@@ -277,7 +277,7 @@ func TestGetTopUpcomingTasks(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
+		t.Run(tt.title, func(t *testing.T) {
 			result := GetTopUpcomingTasks(tt.tasks, tt.limit)
 			if len(result) != tt.expected {
 				t.Errorf("GetTopUpcomingTasks() returned %d tasks, expected %d", len(result), tt.expected)
@@ -286,7 +286,7 @@ func TestGetTopUpcomingTasks(t *testing.T) {
 			// Verify tasks are sorted by deadline
 			for i := 1; i < len(result); i++ {
 				if result[i].Deadline.Before(*result[i-1].Deadline) {
-					t.Errorf("GetTopUpcomingTasks() returned tasks in wrong order: %s before %s", result[i].Name, result[i-1].Name)
+					t.Errorf("GetTopUpcomingTasks() returned tasks in wrong order: %s before %s", result[i].Title, result[i-1].Title)
 				}
 			}
 		})
@@ -298,22 +298,22 @@ func TestGetTopUpcomingTasksOrdering(t *testing.T) {
 	now := time.Now()
 	tasks := []*ItemModel{
 		{
-			Name:      "Task D",
+			Title:     "Task D",
 			Completed: false,
 			Deadline:  timePtr(now.Add(96 * time.Hour)), // 4 days
 		},
 		{
-			Name:      "Task A",
+			Title:     "Task A",
 			Completed: false,
 			Deadline:  timePtr(now.Add(24 * time.Hour)), // 1 day
 		},
 		{
-			Name:      "Task C",
+			Title:     "Task C",
 			Completed: false,
 			Deadline:  timePtr(now.Add(72 * time.Hour)), // 3 days
 		},
 		{
-			Name:      "Task B",
+			Title:     "Task B",
 			Completed: false,
 			Deadline:  timePtr(now.Add(48 * time.Hour)), // 2 days
 		},
@@ -323,8 +323,8 @@ func TestGetTopUpcomingTasksOrdering(t *testing.T) {
 
 	expectedOrder := []string{"Task A", "Task B", "Task C", "Task D"}
 	for i, expectedName := range expectedOrder {
-		if result[i].Name != expectedName {
-			t.Errorf("Task at position %d is %s, expected %s", i, result[i].Name, expectedName)
+		if result[i].Title != expectedName {
+			t.Errorf("Task at position %d is %s, expected %s", i, result[i].Title, expectedName)
 		}
 	}
 }
@@ -333,25 +333,25 @@ func TestGetTopUpcomingTasksOrdering(t *testing.T) {
 func TestGetTasksWithoutDeadline(t *testing.T) {
 	now := time.Now()
 	tests := []struct {
-		name     string
+		title    string
 		tasks    []*ItemModel
 		expected int
 	}{
 		{
-			name:     "empty task list",
+			title:    "empty task list",
 			tasks:    []*ItemModel{},
 			expected: 0,
 		},
 		{
-			name: "all tasks have deadlines",
+			title: "all tasks have deadlines",
 			tasks: []*ItemModel{
 				{
-					Name:      "Task 1",
+					Title:     "Task 1",
 					Completed: false,
 					Deadline:  timePtr(now.Add(24 * time.Hour)),
 				},
 				{
-					Name:      "Task 2",
+					Title:     "Task 2",
 					Completed: false,
 					Deadline:  timePtr(now.Add(48 * time.Hour)),
 				},
@@ -359,15 +359,15 @@ func TestGetTasksWithoutDeadline(t *testing.T) {
 			expected: 0,
 		},
 		{
-			name: "all tasks have no deadline",
+			title: "all tasks have no deadline",
 			tasks: []*ItemModel{
 				{
-					Name:      "Task 1",
+					Title:     "Task 1",
 					Completed: false,
 					Deadline:  nil,
 				},
 				{
-					Name:      "Task 2",
+					Title:     "Task 2",
 					Completed: false,
 					Deadline:  nil,
 				},
@@ -375,25 +375,25 @@ func TestGetTasksWithoutDeadline(t *testing.T) {
 			expected: 2,
 		},
 		{
-			name: "mix of tasks with and without deadlines",
+			title: "mix of tasks with and without deadlines",
 			tasks: []*ItemModel{
 				{
-					Name:      "Task 1",
+					Title:     "Task 1",
 					Completed: false,
 					Deadline:  timePtr(now.Add(24 * time.Hour)),
 				},
 				{
-					Name:      "Task 2",
+					Title:     "Task 2",
 					Completed: false,
 					Deadline:  nil,
 				},
 				{
-					Name:      "Task 3",
+					Title:     "Task 3",
 					Completed: false,
 					Deadline:  nil,
 				},
 				{
-					Name:      "Task 4",
+					Title:     "Task 4",
 					Completed: false,
 					Deadline:  timePtr(now.Add(48 * time.Hour)),
 				},
@@ -401,15 +401,15 @@ func TestGetTasksWithoutDeadline(t *testing.T) {
 			expected: 2,
 		},
 		{
-			name: "completed tasks without deadline are excluded",
+			title: "completed tasks without deadline are excluded",
 			tasks: []*ItemModel{
 				{
-					Name:      "Task 1",
+					Title:     "Task 1",
 					Completed: true,
 					Deadline:  nil,
 				},
 				{
-					Name:      "Task 2",
+					Title:     "Task 2",
 					Completed: false,
 					Deadline:  nil,
 				},
@@ -419,7 +419,7 @@ func TestGetTasksWithoutDeadline(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
+		t.Run(tt.title, func(t *testing.T) {
 			result := GetTasksWithoutDeadline(tt.tasks)
 			if len(result) != tt.expected {
 				t.Errorf("GetTasksWithoutDeadline() returned %d tasks, expected %d", len(result), tt.expected)

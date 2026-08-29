@@ -23,6 +23,7 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 )
 
 // TestListModelInit tests the Init method of ListModel
@@ -304,12 +305,9 @@ func TestListModelQuitKeys(t *testing.T) {
 				msg = tea.KeyMsg{Type: tt.keyType}
 			}
 
-			model, cmd := list.Update(msg)
+			_, cmd := list.Update(msg)
 			if cmd == nil {
 				t.Errorf("Expected Quit command for %s", tt.name)
-			} else if cmd != tea.Quit {
-				// tea.Quit is a Cmd, compare by type/value
-				_ = model
 			}
 		})
 	}
@@ -385,7 +383,7 @@ func TestListModelPageDown(t *testing.T) {
 	list.currentPage = 0
 	list.cursor = 0
 
-	msg := tea.KeyMsg{Type: tea.KeyPgDn}
+	msg := tea.KeyMsg{Type: tea.KeyPgDown}
 	_, _ = list.Update(msg)
 
 	if list.currentPage != 1 {
@@ -562,7 +560,6 @@ func TestListModelRenderTask(t *testing.T) {
 	}
 
 	// Create mock styles
-	from "github.com/charmbracelet/lipgloss"
 	selectedStyle := lipgloss.NewStyle()
 	normalStyle := lipgloss.NewStyle()
 	completedStyle := lipgloss.NewStyle()

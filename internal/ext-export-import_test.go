@@ -17,6 +17,7 @@ limitations under the License.
 package internal
 
 import (
+	"bytes"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -199,7 +200,6 @@ func TestReplaceAllNilStorage(t *testing.T) {
 
 // Tests for export functions
 func TestFilterTasks(t *testing.T) {
-	now := time.Now()
 	tasks := []Task{
 		{ID: "1", Title: "Todo Task", Completed: false},
 		{ID: "2", Title: "Done Task", Completed: true},
@@ -484,11 +484,11 @@ func TestReadImportFileValid(t *testing.T) {
 				UpdatedAt:   time.Now(),
 			},
 			{
-				ID:          "2",
-				Title:       "Task 2",
-				Completed:   true,
-				CreatedAt:   time.Now(),
-				UpdatedAt:   time.Now(),
+				ID:        "2",
+				Title:     "Task 2",
+				Completed: true,
+				CreatedAt: time.Now(),
+				UpdatedAt: time.Now(),
 			},
 		},
 	}
@@ -809,9 +809,6 @@ type testError struct{}
 func (e *testError) Error() string {
 	return "test error"
 }
-
-// Import bytes package if not already imported
-var bytes = __bytes__
 
 // This allows us to use bytes.HasPrefix and bytes.Contains
 // If bytes is not available in the test, we can use alternative checks
