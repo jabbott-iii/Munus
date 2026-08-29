@@ -55,8 +55,9 @@ func (m *ListModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case ErrMsg:
-		m.err = msg.error
-		m.loading = false
+		m.err = msg.err
+    	m.loading = false  // Add this line if missing
+    	m.statusMessage = ""
 		return m, nil
 
 	case tea.KeyMsg:
@@ -298,6 +299,7 @@ func (m *ListModel) View() string {
 	}
 
 	if m.confirmingDelete && m.taskToDelete != nil {
+
 		dialogStyle := lipgloss.NewStyle().
 			Border(lipgloss.NormalBorder()).
 			BorderForeground(lipgloss.Color("#FF6B6B")).
@@ -314,7 +316,7 @@ func (m *ListModel) View() string {
 			Bold(true)
 
 		var dialog strings.Builder
-		dialog.WriteString(warningStyle.Render("⚠  Delete Confirmation"))
+		dialog.WriteString(warningStyle.Render("Delete Confirmation"))
 		dialog.WriteString("\n\n")
 		dialog.WriteString("Are you sure you want to delete this task?\n\n")
 		dialog.WriteString(modalTitleStyle.Render("Title: "))

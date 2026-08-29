@@ -156,7 +156,7 @@ func TestListTasks(t *testing.T) {
 }
 
 func TestListTasksError(t *testing.T) {
-	storage := &MockStorage{err: ErrMsg{error: new(testError)}}
+	storage := &MockStorage{err: new(testError)}
 	adapter := NewTestAdapter(storage)
 
 	tasks, err := adapter.ListTasks()
