@@ -37,7 +37,7 @@ type ModelError struct {
 }
 
 func NewMockModel() *MockModel {
-	db, err := NewDatabase("mock")
+	db, err := NewDatabase(":memory:")
 	if err != nil {
 		panic(err)
 	}
