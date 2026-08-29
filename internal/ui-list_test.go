@@ -658,8 +658,14 @@ func TestListModelViewDeleteConfirmation(t *testing.T) {
 
 	view := list.View()
 
-	if !strings.Contains(view, "Delete Confirmation") && !strings.Contains(view, "delete") {
-		t.Errorf("Expected delete confirmation dialog in view")
+	if !strings.Contains(view, "Delete Confirmation") {
+    t.Errorf("Expected delete confirmation dialog in view")
+	}
+	if !strings.Contains(view, "Are you sure you want to delete this task?") {
+    t.Errorf("Expected delete confirmation prompt in view")
+	}
+	if !strings.Contains(view, "[y] Yes") || !strings.Contains(view, "[n] No") {
+    t.Errorf("Expected delete confirmation actions in view")
 	}
 }
 
