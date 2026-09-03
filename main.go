@@ -19,7 +19,7 @@ package main
 import (
 	"log"
 	"os"
-	
+
 	"github.com/jabbott-iii/Munus/internal"
 )
 
