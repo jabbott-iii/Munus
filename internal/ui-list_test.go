@@ -638,39 +638,39 @@ func TestListModelViewLoading(t *testing.T) {
 
 // TestListModelViewError tests view displays error message
 func TestListModelViewError(t *testing.T) {
-    list := NewListModel(&MockStorage{})
+	list := NewListModel(&MockStorage{})
 	list.loading = false
-    list.err = errors.New("test error")
-    
-    view := list.View()
-    
-    if !strings.Contains(view, "Error:") || !strings.Contains(view, "test error") {
-        t.Errorf("Expected error message in view, got: %s", view)
-    }
+	list.err = errors.New("test error")
+
+	view := list.View()
+
+	if !strings.Contains(view, "Error:") || !strings.Contains(view, "test error") {
+		t.Errorf("Expected error message in view, got: %s", view)
+	}
 }
 
 // TestListModelViewDeleteConfirmation tests delete confirmation dialog rendering
 func TestListModelViewDeleteConfirmation(t *testing.T) {
-    list := NewListModel(&MockStorage{})
+	list := NewListModel(&MockStorage{})
 	list.loading = false
-    list.confirmingDelete = true
-    list.taskToDelete = &ItemModel{ID: 1, Title: "Test Task"}
-    list.viewportWidth = 80
-    list.viewportHeight = 24
-    
-    view := list.View()
-    
-    // Check for the warning emoji variant and confirmation prompt
-    if !strings.Contains(view, "Delete Confirmation") {
-        t.Errorf("Expected delete confirmation dialog in view")
-    }
-    if !strings.Contains(view, "Are you sure you want to delete this task?") {
-        t.Errorf("Expected delete confirmation prompt in view")
-    }
-    // Check for action buttons - they're rendered via lipgloss with colors
-    if !strings.Contains(view, "[y]") || !strings.Contains(view, "[n]") {
-        t.Errorf("Expected delete confirmation actions in view")
-    }
+	list.confirmingDelete = true
+	list.taskToDelete = &ItemModel{ID: 1, Title: "Test Task"}
+	list.viewportWidth = 80
+	list.viewportHeight = 24
+
+	view := list.View()
+
+	// Check for the warning emoji variant and confirmation prompt
+	if !strings.Contains(view, "Delete Confirmation") {
+		t.Errorf("Expected delete confirmation dialog in view")
+	}
+	if !strings.Contains(view, "Are you sure you want to delete this task?") {
+		t.Errorf("Expected delete confirmation prompt in view")
+	}
+	// Check for action buttons - they're rendered via lipgloss with colors
+	if !strings.Contains(view, "[y]") || !strings.Contains(view, "[n]") {
+		t.Errorf("Expected delete confirmation actions in view")
+	}
 }
 
 // TestListModelHandleTransferKeyEscape tests escape key in transfer mode

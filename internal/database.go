@@ -82,8 +82,9 @@ type DataLoadedMsg struct {
 	tasks []*ItemModel
 }
 
-type ErrMsg struct{ 
-	err error }
+type ErrMsg struct {
+	err error
+}
 
 // NewFormModel creates a new form model
 func NewFormModel(storage Storage) *FormModel {

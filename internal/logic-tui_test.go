@@ -163,7 +163,7 @@ func TestMarkComplete(t *testing.T) {
 func TestMarkIncomplete(t *testing.T) {
 	now := time.Now()
 	item := &ItemModel{
-		Completed:  true,
+		Completed:   true,
 		CompletedAt: &now,
 	}
 
@@ -188,15 +188,15 @@ func TestMarkIncomplete(t *testing.T) {
 func TestGetTopUpcomingTasks(t *testing.T) {
 	now := time.Now()
 	tests := []struct {
-		title     string
+		title    string
 		tasks    []*ItemModel
 		limit    int
 		expected int
 	}{
 		{
-			title: "empty task list",
-			tasks: []*ItemModel{},
-			limit: 5,
+			title:    "empty task list",
+			tasks:    []*ItemModel{},
+			limit:    5,
 			expected: 0,
 		},
 		{

@@ -56,8 +56,8 @@ func (m *ListModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case ErrMsg:
 		m.err = msg.err
-    	m.loading = false  // Add this line if missing
-    	m.statusMessage = ""
+		m.loading = false // Add this line if missing
+		m.statusMessage = ""
 		return m, nil
 
 	case tea.KeyMsg:
@@ -76,14 +76,14 @@ func (m *ListModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 
 		case "down", "tab":
-    		if len(m.GetVisibleTasks()) == 0 && len(m.tasks) > 0 {
-			m.cursor = min(m.cursor+1, len(m.tasks)-1)
+			if len(m.GetVisibleTasks()) == 0 && len(m.tasks) > 0 {
+				m.cursor = min(m.cursor+1, len(m.tasks)-1)
 				return m, nil
- 		   }
-    		if m.cursor < len(m.GetVisibleTasks())-1 {
-			m.cursor++
-			m.EnsureCursorVisible()
-    		}
+			}
+			if m.cursor < len(m.GetVisibleTasks())-1 {
+				m.cursor++
+				m.EnsureCursorVisible()
+			}
 
 		case "e":
 			m.expanded[m.cursor] = !m.expanded[m.cursor]
@@ -178,7 +178,7 @@ func (m *ListModel) View() string {
 			Foreground(lipgloss.Color("#EF4444")).
 			Render("Error: " + m.err.Error())
 	}
-	
+
 	if m.loading {
 		return lipgloss.NewStyle().
 			Foreground(lipgloss.Color("#9333EA")).
@@ -408,19 +408,19 @@ func (m *ListModel) RenderTask(task *ItemModel, index int, isSelected bool,
 }
 
 func (m *ListModel) GetVisibleTasks() []*ItemModel {
-    if len(m.topUpcoming) == 0 && len(m.tasksNoDeadline) == 0 && len(m.tasks) > 0 {
-        return m.tasks
-    }
+	if len(m.topUpcoming) == 0 && len(m.tasksNoDeadline) == 0 && len(m.tasks) > 0 {
+		return m.tasks
+	}
 
-    var visible []*ItemModel
-    visible = append(visible, m.topUpcoming...)
-    visible = append(visible, m.tasksNoDeadline...)
-    for _, task := range m.tasks {
-        if task.Completed {
-            visible = append(visible, task)
-        }
-    }
-    return visible
+	var visible []*ItemModel
+	visible = append(visible, m.topUpcoming...)
+	visible = append(visible, m.tasksNoDeadline...)
+	for _, task := range m.tasks {
+		if task.Completed {
+			visible = append(visible, task)
+		}
+	}
+	return visible
 }
 
 func (m *ListModel) EnsureCursorVisible() {

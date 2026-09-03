@@ -99,11 +99,11 @@ func TestParseDeadline(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		name              string
-		input             string
-		wantErr           bool
-		wantExact         bool
-		relativeDuration  time.Duration // NEW: Store duration instead of absolute time
+		name             string
+		input            string
+		wantErr          bool
+		wantExact        bool
+		relativeDuration time.Duration // NEW: Store duration instead of absolute time
 	}{
 		{name: "absolute deadline", input: "2025-11-16 14:05", wantExact: true},
 		{name: "relative deadline", input: "1h 30m", relativeDuration: 90 * time.Minute},
@@ -151,7 +151,7 @@ func TestParseDeadline(t *testing.T) {
 			if tt.relativeDuration > 0 {
 				wantAfter := before.Add(tt.relativeDuration)
 				wantBefore := after.Add(tt.relativeDuration + 2*time.Second)
-				
+
 				if got.Before(wantAfter) || got.After(wantBefore) {
 					t.Fatalf("ParseDeadline(%q) = %v, want within [%v, %v]", tt.input, got, wantAfter, wantBefore)
 				}

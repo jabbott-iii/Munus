@@ -318,12 +318,12 @@ func TestUpdateBackspace(t *testing.T) {
 // TestUpdateCursorMovement tests cursor movement
 func TestUpdateCursorMovement(t *testing.T) {
 	tests := []struct {
-		name          string
-		key           string
-		startCursor   int
-		fieldContent  string
-		expectedCur   int
-		testFn        func(tea.KeyMsg) tea.KeyMsg
+		name         string
+		key          string
+		startCursor  int
+		fieldContent string
+		expectedCur  int
+		testFn       func(tea.KeyMsg) tea.KeyMsg
 	}{
 		{
 			name:         "left moves cursor left",

@@ -267,8 +267,8 @@ func TestUpdateTaskWithZeroIDReturnsError(t *testing.T) {
 	defer cleanup()
 
 	task := &ItemModel{
-		Title:   "No ID Task",
-		ID:      0,
+		Title:     "No ID Task",
+		ID:        0,
 		Completed: false,
 	}
 
@@ -491,8 +491,8 @@ func TestItemModelMarkIncomplete(t *testing.T) {
 	defer cleanup()
 
 	task := &ItemModel{
-		Title:     "Task to Reopen",
-		Completed: true,
+		Title:       "Task to Reopen",
+		Completed:   true,
 		CompletedAt: ptrTime(time.Now()),
 	}
 	db.CreateTask(task)
