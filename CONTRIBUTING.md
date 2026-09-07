@@ -3,3 +3,4 @@
 - If the issue item is already existing, comment on it before making a pull request to address the issue item.
 - Confirmation of a pitched concept is required on the applicable issue before making a pull request to modify the code base.
 - License header must be maintained on every source file.
+- Must run `gofmt -s -w .` at root directory before making a pull request.
