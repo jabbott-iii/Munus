@@ -14,8 +14,11 @@ permissions:
 
 jobs:
   test:
-    name: Lint, Build, and Test
-    runs-on: ubuntu-latest
+    name: Comprehensive CI testing
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
 
     steps:
       - name: Checkout code
@@ -26,6 +29,7 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
+          cache-dependency-path: go.sum
 
       - name: Verify dependencies
         run: go mod tidy && git diff --exit-code
@@ -34,8 +38,21 @@ jobs:
       - name: Run go vet
         run: go vet ./...
 
-      - name: Run tests
-        run: go test -v ./...
+      - name: Run golangci-lint
+        uses: golangci/golangci-lint-action@v3
+        with:
+          version: latest
 
-      - name: Build
-        run: go build ./...
+      - name: Run tests with coverage
+        run: go test -v -coverprofile=coverage.out ./...
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v3
+        with:
+          files: ./coverage.out
+
+      - name: Build multi-platform binaries
+        run: |
+          GOOS=linux GOARCH=amd64 go build -o cryptare-linux-amd64
+          GOOS=darwin GOARCH=amd64 go build -o cryptare-darwin-amd64
+          GOOS=windows GOARCH=amd64 go build -o cryptare-windows-amd64.exe
