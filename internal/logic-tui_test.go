@@ -31,7 +31,7 @@ func TestIsOverdue(t *testing.T) {
 		{
 			name: "overdue task with past deadline",
 			item: &ItemModel{
-				Deadline:  timePtr(time.Now().Add(-24 * time.Hour)),
+				Deadline:  new(time.Now().Add(-24 * time.Hour)),
 				Completed: false,
 			},
 			expected: true,
@@ -39,7 +39,7 @@ func TestIsOverdue(t *testing.T) {
 		{
 			name: "not overdue task with future deadline",
 			item: &ItemModel{
-				Deadline:  timePtr(time.Now().Add(24 * time.Hour)),
+				Deadline:  new(time.Now().Add(24 * time.Hour)),
 				Completed: false,
 			},
 			expected: false,
@@ -47,7 +47,7 @@ func TestIsOverdue(t *testing.T) {
 		{
 			name: "completed task is not overdue",
 			item: &ItemModel{
-				Deadline:  timePtr(time.Now().Add(-24 * time.Hour)),
+				Deadline:  new(time.Now().Add(-24 * time.Hour)),
 				Completed: true,
 			},
 			expected: false,
@@ -83,7 +83,7 @@ func TestDaysUntilDeadline(t *testing.T) {
 		{
 			name: "deadline in 5 days",
 			item: &ItemModel{
-				Deadline: timePtr(time.Now().Add(5 * 24 * time.Hour)),
+				Deadline: new(time.Now().Add(5 * 24 * time.Hour)),
 			},
 			checkFn: func(days int) bool {
 				return days >= 4 && days <= 5 // Allow for timing variance
@@ -93,7 +93,7 @@ func TestDaysUntilDeadline(t *testing.T) {
 		{
 			name: "deadline in 1 day",
 			item: &ItemModel{
-				Deadline: timePtr(time.Now().Add(24 * time.Hour)),
+				Deadline: new(time.Now().Add(24 * time.Hour)),
 			},
 			checkFn: func(days int) bool {
 				return days >= 0 && days <= 1
@@ -103,7 +103,7 @@ func TestDaysUntilDeadline(t *testing.T) {
 		{
 			name: "deadline in the past",
 			item: &ItemModel{
-				Deadline: timePtr(time.Now().Add(-24 * time.Hour)),
+				Deadline: new(time.Now().Add(-24 * time.Hour)),
 			},
 			checkFn: func(days int) bool {
 				return days < 0
@@ -204,7 +204,7 @@ func TestGetTopUpcomingTasks(t *testing.T) {
 			tasks: []*ItemModel{
 				{
 					Completed: true,
-					Deadline:  timePtr(now.Add(24 * time.Hour)),
+					Deadline:  new(now.Add(24 * time.Hour)),
 				},
 			},
 			limit:    5,
@@ -231,27 +231,27 @@ func TestGetTopUpcomingTasks(t *testing.T) {
 				{
 					Title:     "Task 1",
 					Completed: false,
-					Deadline:  timePtr(now.Add(96 * time.Hour)), // 4 days
+					Deadline:  new(now.Add(96 * time.Hour)), // 4 days
 				},
 				{
 					Title:     "Task 2",
 					Completed: false,
-					Deadline:  timePtr(now.Add(24 * time.Hour)), // 1 day
+					Deadline:  new(now.Add(24 * time.Hour)), // 1 day
 				},
 				{
 					Title:     "Task 3",
 					Completed: false,
-					Deadline:  timePtr(now.Add(72 * time.Hour)), // 3 days
+					Deadline:  new(now.Add(72 * time.Hour)), // 3 days
 				},
 				{
 					Title:     "Task 4",
 					Completed: false,
-					Deadline:  timePtr(now.Add(48 * time.Hour)), // 2 days
+					Deadline:  new(now.Add(48 * time.Hour)), // 2 days
 				},
 				{
 					Title:     "Task 5",
 					Completed: false,
-					Deadline:  timePtr(now.Add(120 * time.Hour)), // 5 days
+					Deadline:  new(now.Add(120 * time.Hour)), // 5 days
 				},
 			},
 			limit:    3,
@@ -263,12 +263,12 @@ func TestGetTopUpcomingTasks(t *testing.T) {
 				{
 					Title:     "Task 1",
 					Completed: false,
-					Deadline:  timePtr(now.Add(24 * time.Hour)),
+					Deadline:  new(now.Add(24 * time.Hour)),
 				},
 				{
 					Title:     "Task 2",
 					Completed: false,
-					Deadline:  timePtr(now.Add(48 * time.Hour)),
+					Deadline:  new(now.Add(48 * time.Hour)),
 				},
 			},
 			limit:    5,
@@ -300,22 +300,22 @@ func TestGetTopUpcomingTasksOrdering(t *testing.T) {
 		{
 			Title:     "Task D",
 			Completed: false,
-			Deadline:  timePtr(now.Add(96 * time.Hour)), // 4 days
+			Deadline:  new(now.Add(96 * time.Hour)), // 4 days
 		},
 		{
 			Title:     "Task A",
 			Completed: false,
-			Deadline:  timePtr(now.Add(24 * time.Hour)), // 1 day
+			Deadline:  new(now.Add(24 * time.Hour)), // 1 day
 		},
 		{
 			Title:     "Task C",
 			Completed: false,
-			Deadline:  timePtr(now.Add(72 * time.Hour)), // 3 days
+			Deadline:  new(now.Add(72 * time.Hour)), // 3 days
 		},
 		{
 			Title:     "Task B",
 			Completed: false,
-			Deadline:  timePtr(now.Add(48 * time.Hour)), // 2 days
+			Deadline:  new(now.Add(48 * time.Hour)), // 2 days
 		},
 	}
 
@@ -348,12 +348,12 @@ func TestGetTasksWithoutDeadline(t *testing.T) {
 				{
 					Title:     "Task 1",
 					Completed: false,
-					Deadline:  timePtr(now.Add(24 * time.Hour)),
+					Deadline:  new(now.Add(24 * time.Hour)),
 				},
 				{
 					Title:     "Task 2",
 					Completed: false,
-					Deadline:  timePtr(now.Add(48 * time.Hour)),
+					Deadline:  new(now.Add(48 * time.Hour)),
 				},
 			},
 			expected: 0,
@@ -380,7 +380,7 @@ func TestGetTasksWithoutDeadline(t *testing.T) {
 				{
 					Title:     "Task 1",
 					Completed: false,
-					Deadline:  timePtr(now.Add(24 * time.Hour)),
+					Deadline:  new(now.Add(24 * time.Hour)),
 				},
 				{
 					Title:     "Task 2",
@@ -395,7 +395,7 @@ func TestGetTasksWithoutDeadline(t *testing.T) {
 				{
 					Title:     "Task 4",
 					Completed: false,
-					Deadline:  timePtr(now.Add(48 * time.Hour)),
+					Deadline:  new(now.Add(48 * time.Hour)),
 				},
 			},
 			expected: 2,
@@ -426,9 +426,4 @@ func TestGetTasksWithoutDeadline(t *testing.T) {
 			}
 		})
 	}
-}
-
-// Helper function to create a time pointer
-func timePtr(t time.Time) *time.Time {
-	return &t
 }

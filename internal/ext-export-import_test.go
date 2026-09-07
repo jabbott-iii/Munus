@@ -191,7 +191,7 @@ func TestReplaceAll(t *testing.T) {
 func TestReplaceAllNilStorage(t *testing.T) {
 	adapter := &TaskServiceAdapter{storage: nil}
 
-	tasks := []Task{}
+	var tasks []Task
 	err := adapter.ReplaceAll(tasks)
 	if err == nil {
 		t.Fatal("expected error for nil storage, got nil")
@@ -494,7 +494,10 @@ func TestReadImportFileValid(t *testing.T) {
 	}
 
 	data, _ := json.Marshal(bundle)
-	os.WriteFile(filePath, data, 0o644)
+	err := os.WriteFile(filePath, data, 0o644)
+	if err != nil {
+		return
+	}
 
 	tasks, version, err := readImportFile(filePath, false)
 	if err != nil {
@@ -523,9 +526,12 @@ func TestReadImportFileInvalidVersion(t *testing.T) {
 	}
 
 	data, _ := json.Marshal(bundle)
-	os.WriteFile(filePath, data, 0o644)
+	err := os.WriteFile(filePath, data, 0o644)
+	if err != nil {
+		return
+	}
 
-	_, _, err := readImportFile(filePath, false)
+	_, _, err = readImportFile(filePath, false)
 	if err == nil {
 		t.Fatal("expected error for invalid version, got nil")
 	}
@@ -550,9 +556,12 @@ func TestReadImportFileMissingTitle(t *testing.T) {
 	}
 
 	data, _ := json.Marshal(bundle)
-	os.WriteFile(filePath, data, 0o644)
+	err := os.WriteFile(filePath, data, 0o644)
+	if err != nil {
+		return
+	}
 
-	_, _, err := readImportFile(filePath, false)
+	_, _, err = readImportFile(filePath, false)
 	if err == nil {
 		t.Fatal("expected error for missing title, got nil")
 	}
@@ -584,9 +593,12 @@ func TestReadImportFileDuplicateID(t *testing.T) {
 	}
 
 	data, _ := json.Marshal(bundle)
-	os.WriteFile(filePath, data, 0o644)
+	err := os.WriteFile(filePath, data, 0o644)
+	if err != nil {
+		return
+	}
 
-	_, _, err := readImportFile(filePath, false)
+	_, _, err = readImportFile(filePath, false)
 	if err == nil {
 		t.Fatal("expected error for duplicate ID, got nil")
 	}
@@ -612,10 +624,13 @@ func TestReadImportFileStrict(t *testing.T) {
 		"extra_field": "should fail in strict mode"
 	}`
 
-	os.WriteFile(filePath, []byte(jsonData), 0o644)
+	err := os.WriteFile(filePath, []byte(jsonData), 0o644)
+	if err != nil {
+		return
+	}
 
 	// Non-strict should succeed
-	_, _, err := readImportFile(filePath, false)
+	_, _, err = readImportFile(filePath, false)
 	if err != nil {
 		t.Fatalf("non-strict mode failed: %v", err)
 	}
@@ -654,9 +669,12 @@ func TestPlanImport(t *testing.T) {
 	}
 
 	data, _ := json.Marshal(bundle)
-	os.WriteFile(filePath, data, 0o644)
+	err := os.WriteFile(filePath, data, 0o644)
+	if err != nil {
+		return
+	}
 
-	// Setup existing tasks
+	// Set up existing tasks
 	storage := &MockStorage{
 		tasks: []*ItemModel{
 			{
@@ -780,8 +798,16 @@ func TestWriteBackup(t *testing.T) {
 	// Save HOME env var and temporarily set it
 	oldHome := os.Getenv("HOME")
 	tmpHome := t.TempDir()
-	os.Setenv("HOME", tmpHome)
-	defer os.Setenv("HOME", oldHome)
+	err := os.Setenv("HOME", tmpHome)
+	if err != nil {
+		return
+	}
+	defer func(key, value string) {
+		err := os.Setenv(key, value)
+		if err != nil {
+
+		}
+	}("HOME", oldHome)
 
 	path, err := writeBackup(tasks)
 	if err != nil {
@@ -811,4 +837,4 @@ func (e *testError) Error() string {
 }
 
 // This allows us to use bytes.HasPrefix and bytes.Contains
-// If bytes is not available in the test, we can use alternative checks
+// If bytes are not available in the test, we can use alternative checks

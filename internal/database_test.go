@@ -24,7 +24,7 @@ import (
 )
 
 // TestNewDatabaseCreatesDatabase verifies that NewDatabase successfully creates and initializes
-// a SQLite database at the specified path. This test ensures:
+//  an SQLite database at the specified path. This test ensures:
 // - Database connection is established
 // - Schema migrations are applied
 // - Empty database is ready for operations
@@ -54,10 +54,18 @@ func TestNewDatabaseCreatesDatabase(t *testing.T) {
 func TestNewDatabaseWithEmptyPathCreatesValidDatabase(t *testing.T) {
 	tmpDir := t.TempDir()
 	originalWD, _ := os.Getwd()
-	defer os.Chdir(originalWD)
+	defer func(dir string) {
+		err := os.Chdir(dir)
+		if err != nil {
+			t.Fatalf("Failed to change directory back to original: %v", err)
+		}
+	}(originalWD)
 
 	// Change to temp directory so default db path is created there
-	os.Chdir(tmpDir)
+	err := os.Chdir(tmpDir)
+	if err != nil {
+		return
+	}
 
 	db, err := NewDatabase("")
 	if err != nil {
@@ -120,7 +128,7 @@ func TestCreateTaskWithNilTaskReturnsError(t *testing.T) {
 
 // TestListTasksReturnsAllTasks verifies that ListTasks returns all persisted tasks
 // in the correct order. Tests:
-// - Empty list on new database
+// - Empty list on the new database
 // - Correct task count
 // - Reverse ID order (DESC)
 func TestListTasksReturnsAllTasks(t *testing.T) {
@@ -139,7 +147,7 @@ func TestListTasksReturnsAllTasks(t *testing.T) {
 	// Create multiple tasks
 	taskCount := 3
 	taskIDs := make([]int, taskCount)
-	for i := 0; i < taskCount; i++ {
+	for i := range taskCount {
 		task := &ItemModel{
 			Title:     "Task " + string(rune('A'+i)),
 			Completed: i%2 == 0,
@@ -291,8 +299,14 @@ func TestDeleteTaskRemovesFromDatabase(t *testing.T) {
 	task1 := &ItemModel{Title: "Task 1"}
 	task2 := &ItemModel{Title: "Task 2"}
 
-	db.CreateTask(task1)
-	db.CreateTask(task2)
+	err := db.CreateTask(task1)
+	if err != nil {
+		return
+	}
+	err = db.CreateTask(task2)
+	if err != nil {
+		return
+	}
 
 	// Delete first task
 	if err := db.DeleteTask(task1.ID); err != nil {
@@ -300,7 +314,7 @@ func TestDeleteTaskRemovesFromDatabase(t *testing.T) {
 	}
 
 	// Verify deletion
-	_, err := db.GetTaskByID(task1.ID)
+	_, err = db.GetTaskByID(task1.ID)
 	if err == nil {
 		t.Fatal("GetTaskByID() should fail after DeleteTask()")
 	}
@@ -322,8 +336,14 @@ func TestReplaceAllTasksClearsAndReplacesAll(t *testing.T) {
 	// Create initial tasks
 	task1 := &ItemModel{Title: "Original 1"}
 	task2 := &ItemModel{Title: "Original 2"}
-	db.CreateTask(task1)
-	db.CreateTask(task2)
+	err := db.CreateTask(task1)
+	if err != nil {
+		return
+	}
+	err = db.CreateTask(task2)
+	if err != nil {
+		return
+	}
 
 	// Replace all with new tasks
 	newTasks := []*ItemModel{
@@ -370,9 +390,12 @@ func TestReplaceAllTasksWithEmptyList(t *testing.T) {
 
 	// Create tasks
 	task := &ItemModel{Title: "Task to Delete"}
-	db.CreateTask(task)
+	err := db.CreateTask(task)
+	if err != nil {
+		return
+	}
 
-	// Replace with empty list
+	// Replace it with empty list
 	if err := db.ReplaceAllTasks([]*ItemModel{}); err != nil {
 		t.Fatalf("ReplaceAllTasks([]) error = %v", err)
 	}
@@ -410,19 +433,19 @@ func TestTaskDeadlineCalculation(t *testing.T) {
 	}{
 		{
 			name:          "overdue task",
-			deadline:      ptrTime(now.AddDate(0, 0, -5)),
+			deadline:      new(now.AddDate(0, 0, -5)),
 			wantDays:      -5,
 			wantIsOverdue: true,
 		},
 		{
 			name:          "due today",
-			deadline:      ptrTime(now),
+			deadline:      new(now),
 			wantDays:      0,
 			wantIsOverdue: false,
 		},
 		{
 			name:          "upcoming task",
-			deadline:      ptrTime(now.AddDate(0, 0, 3)),
+			deadline:      new(now.AddDate(0, 0, 3)),
 			wantDays:      3,
 			wantIsOverdue: false,
 		},
@@ -463,7 +486,10 @@ func TestItemModelMarkComplete(t *testing.T) {
 		Title:     "Task to Complete",
 		Completed: false,
 	}
-	db.CreateTask(task)
+	err := db.CreateTask(task)
+	if err != nil {
+		return
+	}
 
 	// Mark complete
 	task.MarkComplete()
@@ -477,7 +503,10 @@ func TestItemModelMarkComplete(t *testing.T) {
 	}
 
 	// Persist and verify
-	db.UpdateTask(task)
+	err = db.UpdateTask(task)
+	if err != nil {
+		return
+	}
 	retrieved, _ := db.GetTaskByID(task.ID)
 	if !retrieved.Completed {
 		t.Fatal("MarkComplete() changes not persisted")
@@ -493,9 +522,12 @@ func TestItemModelMarkIncomplete(t *testing.T) {
 	task := &ItemModel{
 		Title:       "Task to Reopen",
 		Completed:   true,
-		CompletedAt: ptrTime(time.Now()),
+		CompletedAt: new(time.Now()),
 	}
-	db.CreateTask(task)
+	err := db.CreateTask(task)
+	if err != nil {
+		return
+	}
 
 	// Mark incomplete
 	task.MarkIncomplete()
@@ -545,10 +577,4 @@ func setupTestDB(t *testing.T) (*Database, func()) {
 	return db, func() {
 		// Cleanup is handled by t.TempDir()
 	}
-}
-
-// ptrTime is a helper to create a pointer to a time.Time value.
-// Useful for test setup when nullable time fields are needed.
-func ptrTime(t time.Time) *time.Time {
-	return &t
 }

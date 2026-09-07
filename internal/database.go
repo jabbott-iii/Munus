@@ -30,7 +30,7 @@ type Database struct {
 	conn *gorm.DB
 }
 
-var ErrTaskNotFound = errors.New("Task not found")
+var ErrTaskNotFound = errors.New("task not found")
 
 //-----------------------------------------------------------------------------------Models-------------------------------------------------------------------//
 

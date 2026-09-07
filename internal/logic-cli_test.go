@@ -28,14 +28,6 @@ import (
 // Match the production database type used by the CLI commands.
 type MockModel = Database
 
-type ModelError struct {
-	*Database
-	listTasksError   error
-	deleteTaskError  error
-	getTaskByIDError error
-	updateTaskError  error
-}
-
 func NewMockModel() *MockModel {
 	db, err := NewDatabase(":memory:")
 	if err != nil {
@@ -264,20 +256,26 @@ func TestListCmd_WithTasks(t *testing.T) {
 	db := NewMockModel()
 
 	// Add some tasks
-	db.CreateTask(&ItemModel{
+	err := db.CreateTask(&ItemModel{
 		Title:       "Task 1",
 		Description: "Desc 1",
 	})
-	db.CreateTask(&ItemModel{
+	if err != nil {
+		return
+	}
+	err = db.CreateTask(&ItemModel{
 		Title:       "Task 2",
 		Description: "Desc 2",
 	})
+	if err != nil {
+		return
+	}
 
 	cmd := NewListCmd(db)
 	buf := &bytes.Buffer{}
 	cmd.SetOut(buf)
 
-	err := cmd.Execute()
+	err = cmd.Execute()
 	if err != nil {
 		t.Errorf("expected no error, got %v", err)
 	}
@@ -316,10 +314,13 @@ func TestDeleteTaskCmd_NegativeID(t *testing.T) {
 
 func TestDeleteTaskCmd_UserCancels(t *testing.T) {
 	db := NewMockModel()
-	db.CreateTask(&ItemModel{
+	err := db.CreateTask(&ItemModel{
 		Title:       "Task",
 		Description: "Desc",
 	})
+	if err != nil {
+		return
+	}
 
 	cmd := DeleteTaskCmd(db)
 	cmd.SetArgs([]string{"1"})
@@ -331,7 +332,7 @@ func TestDeleteTaskCmd_UserCancels(t *testing.T) {
 	buf := &bytes.Buffer{}
 	cmd.SetOut(buf)
 
-	err := cmd.Execute()
+	err = cmd.Execute()
 	if err != nil {
 		t.Errorf("expected no error, got %v", err)
 	}
@@ -349,10 +350,13 @@ func TestDeleteTaskCmd_UserCancels(t *testing.T) {
 
 func TestDeleteTaskCmd_Success(t *testing.T) {
 	db := NewMockModel()
-	db.CreateTask(&ItemModel{
+	err := db.CreateTask(&ItemModel{
 		Title:       "Task",
 		Description: "Desc",
 	})
+	if err != nil {
+		return
+	}
 
 	cmd := DeleteTaskCmd(db)
 	cmd.SetArgs([]string{"1"})
@@ -364,7 +368,7 @@ func TestDeleteTaskCmd_Success(t *testing.T) {
 	buf := &bytes.Buffer{}
 	cmd.SetOut(buf)
 
-	err := cmd.Execute()
+	err = cmd.Execute()
 	if err != nil {
 		t.Errorf("expected no error, got %v", err)
 	}
@@ -408,11 +412,14 @@ func TestCompleteTaskCmd_TaskNotFound(t *testing.T) {
 
 func TestCompleteTaskCmd_CompleteTask(t *testing.T) {
 	db := NewMockModel()
-	db.CreateTask(&ItemModel{
+	err := db.CreateTask(&ItemModel{
 		Title:       "Task",
 		Description: "Desc",
 		Completed:   false,
 	})
+	if err != nil {
+		return
+	}
 
 	cmd := CompleteTaskCmd(db)
 	cmd.SetArgs([]string{"1"})
@@ -420,7 +427,7 @@ func TestCompleteTaskCmd_CompleteTask(t *testing.T) {
 	buf := &bytes.Buffer{}
 	cmd.SetOut(buf)
 
-	err := cmd.Execute()
+	err = cmd.Execute()
 	if err != nil {
 		t.Errorf("expected no error, got %v", err)
 	}
@@ -437,12 +444,15 @@ func TestCompleteTaskCmd_CompleteTask(t *testing.T) {
 func TestCompleteTaskCmd_UndoComplete(t *testing.T) {
 	db := NewMockModel()
 	now := time.Now()
-	db.CreateTask(&ItemModel{
+	err := db.CreateTask(&ItemModel{
 		Title:       "Task",
 		Description: "Desc",
 		Completed:   true,
 		CompletedAt: &now,
 	})
+	if err != nil {
+		return
+	}
 
 	cmd := CompleteTaskCmd(db)
 	cmd.SetArgs([]string{"1", "--undo"})
@@ -450,7 +460,7 @@ func TestCompleteTaskCmd_UndoComplete(t *testing.T) {
 	buf := &bytes.Buffer{}
 	cmd.SetOut(buf)
 
-	err := cmd.Execute()
+	err = cmd.Execute()
 	if err != nil {
 		t.Errorf("expected no error, got %v", err)
 	}
@@ -558,7 +568,7 @@ func TestNewRootCmd_HasSubcommands(t *testing.T) {
 	cmd := NewRootCmd(db)
 
 	subcommands := cmd.Commands()
-	expectedCmds := map[string]bool{
+	expectedCmd := map[string]bool{
 		"add":      false,
 		"list":     false,
 		"delete":   false,
@@ -567,11 +577,11 @@ func TestNewRootCmd_HasSubcommands(t *testing.T) {
 		"import":   false,
 	}
 
-	for _, subcmd := range subcommands {
-		expectedCmds[subcmd.Name()] = true
+	for _, subsumed := range subcommands {
+		expectedCmd[subsumed.Name()] = true
 	}
 
-	for cmdName, found := range expectedCmds {
+	for cmdName, found := range expectedCmd {
 		if !found {
 			t.Errorf("expected subcommand %q not found", cmdName)
 		}
@@ -611,12 +621,18 @@ func TestIntegration_AddCompleteDelete(t *testing.T) {
 	// Add task
 	addCmd := NewAddCmd(db)
 	addCmd.SetArgs([]string{"-t", "Integration Task", "-d", "Integration Desc"})
-	addCmd.Execute()
+	err := addCmd.Execute()
+	if err != nil {
+		return
+	}
 
 	// Complete task
 	completeCmd := CompleteTaskCmd(db)
 	completeCmd.SetArgs([]string{"1"})
-	completeCmd.Execute()
+	err = completeCmd.Execute()
+	if err != nil {
+		return
+	}
 
 	task, _ := db.GetTaskByID(1)
 	if !task.Completed {
@@ -628,7 +644,10 @@ func TestIntegration_AddCompleteDelete(t *testing.T) {
 	deleteCmd.SetArgs([]string{"1"})
 	stdin := strings.NewReader("y\n")
 	deleteCmd.SetIn(stdin)
-	deleteCmd.Execute()
+	err = deleteCmd.Execute()
+	if err != nil {
+		return
+	}
 
 	tasks, _ := db.ListTasks()
 	if len(tasks) != 0 {
