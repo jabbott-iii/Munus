@@ -35,3 +35,8 @@ jobs:
 
       - name: Analyze
         uses: github/codeql-action/analyze@v3
+
+      - name: Run Gosec security scanner
+        uses: securego/gosec@master
+        with:
+          args: '-no-fail -fmt sarif -out results.sarif ./...'
