@@ -24,7 +24,9 @@ import (
 )
 
 // TestNewDatabaseCreatesDatabase verifies that NewDatabase successfully creates and initializes
-//  an SQLite database at the specified path. This test ensures:
+//
+//	an SQLite database at the specified path. This test ensures:
+//
 // - Database connection is established
 // - Schema migrations are applied
 // - Empty database is ready for operations
