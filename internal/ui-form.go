@@ -108,7 +108,7 @@ func (m *FormModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		default:
 			if len(msg.String()) == 1 {
-				canAddChar := true
+				var canAddChar bool
 				switch m.currentField {
 				case titleField:
 					canAddChar = len(m.fields[titleField]) < MaxTitleLength
@@ -127,7 +127,6 @@ func (m *FormModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 	}
-
 	return m, nil
 }
 

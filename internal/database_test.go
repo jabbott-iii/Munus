@@ -478,7 +478,7 @@ func TestTaskDeadlineCalculation(t *testing.T) {
 	}
 }
 
-// TestItemModelMarkComplete verifies that MarkComplete() correctly updates task state.
+// TestItemModelMarkComplete verifies that MarkComplete() correctly updates the task state.
 // This tests the business logic for marking tasks as completed.
 func TestItemModelMarkComplete(t *testing.T) {
 	db, cleanup := setupTestDB(t)
@@ -565,7 +565,7 @@ func TestConnReturnsValidGormConnection(t *testing.T) {
 // Helper Functions
 // ============================================================================
 
-// setupTestDB creates a temporary database for testing and returns cleanup function.
+// setupTestDB creates a temporary database for testing and returns a cleanup function.
 // This helper abstracts common test setup logic.
 func setupTestDB(t *testing.T) (*Database, func()) {
 	tmpDir := t.TempDir()

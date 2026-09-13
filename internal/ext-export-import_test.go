@@ -184,7 +184,7 @@ func TestReplaceAll(t *testing.T) {
 
 	err := adapter.ReplaceAll(tasks)
 	if err == nil {
-		// Expected - mock storage allows ReplaceAll
+		t.Fatalf("ReplaceAll failed: %v", err)
 	}
 }
 
@@ -236,7 +236,7 @@ func TestToDTO(t *testing.T) {
 		UpdatedAt:   updatedAt,
 	}
 
-	dto := toDTO(task)
+	dto := toDTO(TaskDTO(task))
 
 	if dto.ID != "123" {
 		t.Errorf("expected ID '123', got %q", dto.ID)
@@ -344,8 +344,8 @@ func TestExportToBytesPretty(t *testing.T) {
 	}
 
 	// Pretty format should contain whitespace
-	if bytes.Contains(data, []byte("\n")) || bytes.Contains(data, []byte("  ")) {
-		// Expected - pretty format
+	if !bytes.Contains(data, []byte("\n")) && !bytes.Contains(data, []byte("  ")) {
+		t.Fatal("expected pretty format with whitespace")
 	}
 }
 
@@ -399,7 +399,7 @@ func TestFromDTO(t *testing.T) {
 		UpdatedAt:   updatedAt,
 	}
 
-	task := fromDTO(dto)
+	task := fromDTO(Task(dto))
 
 	if task.ID != "456" {
 		t.Errorf("expected ID '456', got %q", task.ID)
@@ -805,7 +805,7 @@ func TestWriteBackup(t *testing.T) {
 	defer func(key, value string) {
 		err := os.Setenv(key, value)
 		if err != nil {
-
+			t.Fatalf("os.Setenv failed: %v", err)
 		}
 	}("HOME", oldHome)
 

@@ -655,14 +655,23 @@ func (m *ListModel) renderTransferOverlay(baseView string) string {
 		dialog.WriteString("Path:\n")
 		dialog.WriteString(inputStyle.Render(m.addTransferCursor(m.transfer.path)))
 		dialog.WriteString("\n\n")
-		dialog.WriteString(fmt.Sprintf("Include completed: %s (press alt+c to toggle)\n\n", yesNoLabel(m.transfer.includeCompleted)))
+		_, err := fmt.Fprintf(&dialog, "Include completed: %s (press alt+c to toggle)\n\n", yesNoLabel(m.transfer.includeCompleted))
+		if err != nil {
+			return ""
+		}
 		dialog.WriteString(helpStyle.Render("[enter] Export  [esc] Cancel"))
 	} else {
 		dialog.WriteString(titleStyle.Render("Import Tasks"))
 		dialog.WriteString("\n\n")
 		if m.transfer.stage == transferStageConfirm && m.transfer.plan != nil {
-			dialog.WriteString(fmt.Sprintf("File: %s\n", m.transfer.path))
-			dialog.WriteString(fmt.Sprintf("Mode: %s", m.transfer.importMode))
+			_, err := fmt.Fprintf(&dialog, "File: %s\n", m.transfer.path)
+			if err != nil {
+				return ""
+			}
+			_, err = fmt.Fprintf(&dialog, "Mode: %s", m.transfer.importMode)
+			if err != nil {
+				return ""
+			}
 			if m.transfer.importMode == "replace" {
 				dialog.WriteString(" (will replace all local tasks)")
 			}

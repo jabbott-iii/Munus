@@ -118,7 +118,7 @@ func ExportToBytes(svc *TaskServiceAdapter, f ExportFilter, pretty bool) ([]byte
 		Tasks:      make([]TaskDTO, 0, len(filtered)),
 	}
 	for _, t := range filtered {
-		out.Tasks = append(out.Tasks, toDTO(t))
+		out.Tasks = append(out.Tasks, toDTO(TaskDTO(t)))
 	}
 
 	if pretty {
@@ -139,7 +139,7 @@ func ExportToFile(svc *TaskServiceAdapter, f ExportFilter, path string, pretty b
 	return os.Rename(tmp, path)
 }
 
-func toDTO(t Task) TaskDTO {
+func toDTO(t TaskDTO) TaskDTO {
 	return TaskDTO{
 		ID:          t.ID,
 		Title:       t.Title,
@@ -258,12 +258,12 @@ func readImportFile(path string, strict bool) ([]Task, int, error) {
 			}
 			seen[dto.ID] = struct{}{}
 		}
-		out = append(out, fromDTO(dto))
+		out = append(out, fromDTO(Task(dto)))
 	}
 	return out, bundle.Version, nil
 }
 
-func fromDTO(d TaskDTO) Task {
+func fromDTO(d Task) Task {
 	return Task{
 		ID:          d.ID,
 		Title:       d.Title,
@@ -335,7 +335,7 @@ func writeBackup(tasks []Task) (string, error) {
 		Tasks:      make([]TaskDTO, 0, len(tasks)),
 	}
 	for _, t := range tasks {
-		bundle.Tasks = append(bundle.Tasks, toDTO(t))
+		bundle.Tasks = append(bundle.Tasks, toDTO(TaskDTO(t)))
 	}
 	b, err := json.MarshalIndent(bundle, "", "  ")
 	if err != nil {

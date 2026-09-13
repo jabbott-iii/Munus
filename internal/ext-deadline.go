@@ -55,8 +55,6 @@ func ParseDeadline(input string) (*time.Time, error) {
 func ParseRelativeTime(input string) (time.Duration, error) {
 	originalInput := input
 
-	input = strings.ToLower(input)
-
 	months := 0
 
 	monthMatches := monthRegex.FindAllStringSubmatch(originalInput, -1)
