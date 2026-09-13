@@ -676,10 +676,19 @@ func (m *ListModel) renderTransferOverlay(baseView string) string {
 				dialog.WriteString(" (will replace all local tasks)")
 			}
 			dialog.WriteString("\n")
-			dialog.WriteString(fmt.Sprintf("Backup before import: %s\n", yesNoLabel(m.transfer.backup)))
-			dialog.WriteString(fmt.Sprintf("Strict parsing: %s\n\n", yesNoLabel(m.transfer.strict)))
+			_, err = fmt.Fprintf(&dialog, "Backup before import: %s\n", yesNoLabel(m.transfer.backup))
+			if err != nil {
+				return ""
+			}
+			_, err = fmt.Fprintf(&dialog, "Strict parsing: %s\n\n", yesNoLabel(m.transfer.strict))
+			if err != nil {
+				return ""
+			}
 			dialog.WriteString("Plan:\n")
-			dialog.WriteString(fmt.Sprintf("  Incoming: %d\n", m.transfer.plan.Incoming))
+			_, err = fmt.Fprintf(&dialog, "  Incoming: %d\n", m.transfer.plan.Incoming)
+			if err != nil {
+				return ""
+			}
 			dialog.WriteString(fmt.Sprintf("  Current: %d\n", m.transfer.plan.Current))
 			dialog.WriteString(fmt.Sprintf("  Create: %d\n", m.transfer.plan.ToCreate))
 			dialog.WriteString(fmt.Sprintf("  Update: %d\n", m.transfer.plan.ToUpdate))
