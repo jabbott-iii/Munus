@@ -714,9 +714,18 @@ func (m *ListModel) renderTransferOverlay(baseView string) string {
 			dialog.WriteString("Path:\n")
 			dialog.WriteString(inputStyle.Render(m.addTransferCursor(m.transfer.path)))
 			dialog.WriteString("\n\n")
-			dialog.WriteString(fmt.Sprintf("Mode: %s (press alt+m to toggle)\n", m.transfer.importMode))
-			dialog.WriteString(fmt.Sprintf("Backup before import: %s (press alt+b to toggle)\n", yesNoLabel(m.transfer.backup)))
-			dialog.WriteString(fmt.Sprintf("Strict parsing: %s (press alt+s to toggle)\n\n", yesNoLabel(m.transfer.strict)))
+			_, err := fmt.Fprintf(&dialog, "Mode: %s (press alt+m to toggle)\n", m.transfer.importMode)
+			if err != nil {
+				return ""
+			}
+			_, err = fmt.Fprintf(&dialog, "Backup before import: %s (press alt+b to toggle)\n", yesNoLabel(m.transfer.backup))
+			if err != nil {
+				return ""
+			}
+			_, err = fmt.Fprintf(&dialog, "Strict parsing: %s (press alt+s to toggle)\n\n", yesNoLabel(m.transfer.strict))
+			if err != nil {
+				return ""
+			}
 			dialog.WriteString(helpStyle.Render("[enter] Preview Import  [esc] Cancel"))
 		}
 	}
