@@ -44,7 +44,8 @@ jobs:
           version: v2.13.2
 
       - name: Run tests with coverage
-        run: go test -v -coverprofile=coverage.out ./...
+        shell: bash
+        run: go test -v -coverprofile=coverage.out './...'
 
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v3
