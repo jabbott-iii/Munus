@@ -689,10 +689,26 @@ func (m *ListModel) renderTransferOverlay(baseView string) string {
 			if err != nil {
 				return ""
 			}
-			dialog.WriteString(fmt.Sprintf("  Current: %d\n", m.transfer.plan.Current))
-			dialog.WriteString(fmt.Sprintf("  Create: %d\n", m.transfer.plan.ToCreate))
-			dialog.WriteString(fmt.Sprintf("  Update: %d\n", m.transfer.plan.ToUpdate))
-			dialog.WriteString(fmt.Sprintf("  Unchanged: %d\n\n", m.transfer.plan.Unchanged))
+
+			_, err = fmt.Fprintf(&dialog, "  Current: %d\n", m.transfer.plan.Current)
+			if err != nil {
+				return ""
+			}
+
+			_, err = fmt.Fprintf(&dialog, "  Create: %d\n", m.transfer.plan.ToCreate)
+			if err != nil {
+				return ""
+			}
+
+			_, err = fmt.Fprintf(&dialog, "  Update: %d\n", m.transfer.plan.ToUpdate)
+			if err != nil {
+				return ""
+			}
+
+			_, err = fmt.Fprintf(&dialog, "  Unchanged: %d\n\n", m.transfer.plan.Unchanged)
+			if err != nil {
+				return ""
+			}
 			dialog.WriteString(helpStyle.Render("[y] Import  [n] Cancel"))
 		} else {
 			dialog.WriteString("Path:\n")
