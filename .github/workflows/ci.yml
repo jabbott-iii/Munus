@@ -53,6 +53,7 @@ jobs:
           files: ./coverage.out
 
       - name: Build multi-platform binaries
+        shell: bash
         run: |
           GOOS=linux GOARCH=amd64 go build -o cryptare-linux-amd64
           GOOS=darwin GOARCH=amd64 go build -o cryptare-darwin-amd64
