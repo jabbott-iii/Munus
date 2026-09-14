@@ -17,6 +17,7 @@ limitations under the License.
 package internal
 
 import (
+	"database/sql"
 	"errors"
 	"fmt"
 	"time"
@@ -27,7 +28,8 @@ import (
 
 // Database owns the gorm connection for internal data access.
 type Database struct {
-	conn *gorm.DB
+	conn  *gorm.DB
+	sqlDB *sql.DB
 }
 
 var ErrTaskNotFound = errors.New("task not found")
@@ -249,12 +251,19 @@ func NewDatabase(path string) (*Database, error) {
 		return nil, fmt.Errorf("open sqlite database: %w", err)
 	}
 
-	// Persistence structs
 	if err := conn.AutoMigrate(&ItemModel{}); err != nil {
 		return nil, fmt.Errorf("auto-migrate schema: %w", err)
 	}
 
-	return &Database{conn: conn}, nil
+	sqlDB, _ := conn.DB()
+	return &Database{conn: conn, sqlDB: sqlDB}, nil
+}
+
+func (d *Database) Close() error {
+	if d.sqlDB != nil {
+		return d.sqlDB.Close()
+	}
+	return nil
 }
 
 // Conn exposes the raw gorm handle for advanced queries/transactions.

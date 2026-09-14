@@ -49,6 +49,13 @@ func TestNewDatabaseCreatesDatabase(t *testing.T) {
 	if _, err := os.Stat(dbPath); os.IsNotExist(err) {
 		t.Fatalf("Database file not created at %s", dbPath)
 	}
+
+	defer func(db *Database) {
+		err := db.Close()
+		if err != nil {
+			t.Fatalf("Failed to close database: %v", err)
+		}
+	}(db)
 }
 
 // TestNewDatabaseWithEmptyPathUsesDefault verifies that an empty path parameter is handled
@@ -420,6 +427,13 @@ func TestReplaceAllTasksWithNilDatabaseReturnsError(t *testing.T) {
 	if err == nil {
 		t.Fatal("ReplaceAllTasks on nil database should return an error")
 	}
+
+	defer func(db *Database) {
+		err := db.Close()
+		if err != nil {
+			t.Fatalf("Failed to close database: %v", err)
+		}
+	}(db)
 }
 
 // TestTaskDeadlineCalculation verifies that ItemModel methods correctly calculate
@@ -576,7 +590,13 @@ func setupTestDB(t *testing.T) (*Database, func()) {
 		t.Fatalf("Failed to create test database: %v", err)
 	}
 
+	defer func(db *Database) {
+		err := db.Close()
+		if err != nil {
+			t.Fatalf("Failed to close database: %v", err)
+		}
+	}(db)
+
 	return db, func() {
-		// Cleanup is handled by t.TempDir()
 	}
 }

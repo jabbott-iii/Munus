@@ -34,6 +34,7 @@ func NewMockModel() *MockModel {
 		panic(err)
 	}
 	return db
+
 }
 
 // ============================================ GetTaskStatus Tests ============================================

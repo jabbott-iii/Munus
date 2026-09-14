@@ -90,6 +90,7 @@ func (m *MockStorage) ReplaceAllTasks(tasks []*ItemModel) error {
 	}
 	m.tasks = tasks
 	return nil
+
 }
 
 // Helper function to create a test adapter
