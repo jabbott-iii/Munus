@@ -260,6 +260,9 @@ func NewDatabase(path string) (*Database, error) {
 }
 
 func (d *Database) Close() error {
+	if d == nil {
+		return nil
+	}
 	if d.sqlDB != nil {
 		return d.sqlDB.Close()
 	}

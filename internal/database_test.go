@@ -590,13 +590,9 @@ func setupTestDB(t *testing.T) (*Database, func()) {
 		t.Fatalf("Failed to create test database: %v", err)
 	}
 
-	defer func(db *Database) {
-		err := db.Close()
-		if err != nil {
+	return db, func() {
+		if err := db.Close(); err != nil {
 			t.Fatalf("Failed to close database: %v", err)
 		}
-	}(db)
-
-	return db, func() {
 	}
 }
