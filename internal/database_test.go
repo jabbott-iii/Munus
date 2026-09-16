@@ -84,6 +84,17 @@ func TestNewDatabaseWithEmptyPathCreatesValidDatabase(t *testing.T) {
 	if db == nil {
 		t.Fatal("NewDatabase(\"\") returned nil")
 	}
+
+	if _, err := os.Stat(filepath.Join(tmpDir, "munus.db")); os.IsNotExist(err) {
+		t.Fatal("NewDatabase(\"\") did not create the default database file")
+	}
+
+	defer func(db *Database) {
+		err := db.Close()
+		if err != nil {
+			t.Fatalf("Failed to close database: %v", err)
+		}
+	}(db)
 }
 
 // TestCreateTaskPersistsTaskToDatabase verifies that CreateTask stores a new ItemModel
@@ -582,10 +593,7 @@ func TestConnReturnsValidGormConnection(t *testing.T) {
 // setupTestDB creates a temporary database for testing and returns a cleanup function.
 // This helper abstracts common test setup logic.
 func setupTestDB(t *testing.T) (*Database, func()) {
-	tmpDir := t.TempDir()
-	dbPath := filepath.Join(tmpDir, "test.db")
-
-	db, err := NewDatabase(dbPath)
+	db, err := NewDatabase(":memory:")
 	if err != nil {
 		t.Fatalf("Failed to create test database: %v", err)
 	}
