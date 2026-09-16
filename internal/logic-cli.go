@@ -128,6 +128,7 @@ func NewImportCmd(db *Database) *cobra.Command {
 		Short: "Import tasks from JSON",
 		Long:  "Import tasks from a versioned JSON export.",
 		Example: `	munus import -f tasks.json
+	munus import -f tasks.json --skip-existing
 	munus import -f tasks.json --mode replace --yes --backup
 	munus import -f tasks.json --dry-run --strict
 	munus import -f tasks.json --mode merge --on-conflict rename --id-strategy ict`,
@@ -135,17 +136,22 @@ func NewImportCmd(db *Database) *cobra.Command {
 			if opts.File == "" {
 				return errors.New("required flag: --file")
 			}
+			if opts.SkipExisting && cmd.Flags().Changed("on-conflict") {
+				return errors.New("--skip-existing cannot be combined with --on-conflict")
+			}
 
 			svc := &TaskServiceAdapter{storage: db}
 
 			cfg := ImportConfig{
-				Mode:       opts.Mode,
-				OnConflict: opts.OnConflict,
-				IDStrategy: opts.IDStrategy,
-				Strict:     opts.Strict,
-				DryRun:     opts.DryRun,
-				Backup:     opts.Backup,
+				Mode:         opts.Mode,
+				OnConflict:   opts.OnConflict,
+				SkipExisting: opts.SkipExisting,
+				IDStrategy:   opts.IDStrategy,
+				Strict:       opts.Strict,
+				DryRun:       opts.DryRun,
+				Backup:       opts.Backup,
 			}
+			conflictPolicy := effectiveOnConflict(cfg)
 
 			plan, err := PlanImport(svc, opts.File, cfg)
 			if err != nil {
@@ -153,9 +159,12 @@ func NewImportCmd(db *Database) *cobra.Command {
 			}
 
 			_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Importing: %s\nSchema: v%d\nIncoming tasks: %d\nMode: %s (conflict=%s, ids=%s)\n\n",
-				opts.File, plan.SchemaVersion, plan.Incoming, opts.Mode, opts.OnConflict, opts.IDStrategy)
+				opts.File, plan.SchemaVersion, plan.Incoming, opts.Mode, conflictPolicy, opts.IDStrategy)
 			_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Plan:\n  Create: %d\n  Update: %d\n  Unchanged: %d\n  Conflicts: %d\n\n",
 				plan.ToCreate, plan.ToUpdate, plan.Unchanged, plan.Conflicts)
+			if len(plan.ConflictIDs) > 0 {
+				_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Conflicting task IDs: %s\n\n", formatTaskIDs(plan.ConflictIDs))
+			}
 
 			if opts.DryRun {
 				_, _ = fmt.Fprintln(cmd.OutOrStdout(), "Dry-run only. No changes applied.")
@@ -186,6 +195,9 @@ func NewImportCmd(db *Database) *cobra.Command {
 			_, _ = fmt.Fprintf(cmd.OutOrStdout(),
 				"✓ Import complete: created=%d updated=%d unchanged=%d skipped=%d conflicted=%d\n",
 				res.Created, res.Updated, res.Unchanged, res.Skipped, res.Conflicted)
+			if len(res.SkippedIDs) > 0 {
+				_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Skipped existing task IDs: %s\n", formatTaskIDs(res.SkippedIDs))
+			}
 
 			return nil
 		},
@@ -194,6 +206,7 @@ func NewImportCmd(db *Database) *cobra.Command {
 	cmd.Flags().StringVarP(&opts.File, "file", "f", "", "Input JSON file path ('-' for stdin if implemented)")
 	cmd.Flags().StringVar(&opts.Mode, "mode", "merge", "Import mode: merge|replace")
 	cmd.Flags().StringVar(&opts.OnConflict, "on-conflict", "overwrite", "Conflict policy: skip|overwrite|rename")
+	cmd.Flags().BoolVar(&opts.SkipExisting, "skip-existing", false, "Keep existing tasks when imported task IDs collide")
 	cmd.Flags().StringVar(&opts.IDStrategy, "id-strategy", "preserve", "ID policy: preserve|regenerate")
 	cmd.Flags().BoolVar(&opts.DryRun, "dry-run", false, "Validate and show plan without applying")
 	cmd.Flags().BoolVarP(&opts.Yes, "yes", "y", false, "Skip confirmation prompts")

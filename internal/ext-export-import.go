@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"gorm.io/gorm"
@@ -173,6 +174,7 @@ func PlanImport(svc *TaskServiceAdapter, file string, cfg ImportConfig) (ImportP
 		Incoming:      len(incoming),
 		Current:       len(current),
 	}
+	conflictPolicy := effectiveOnConflict(cfg)
 
 	for _, t := range incoming {
 		if old, ok := currByID[t.ID]; !ok {
@@ -180,7 +182,15 @@ func PlanImport(svc *TaskServiceAdapter, file string, cfg ImportConfig) (ImportP
 		} else if equalTask(old, t) {
 			plan.Unchanged++
 		} else {
-			plan.ToUpdate++
+			plan.Conflicts++
+			plan.ConflictIDs = append(plan.ConflictIDs, t.ID)
+			switch conflictPolicy {
+			case "rename":
+				plan.ToCreate++
+			case "skip":
+			default:
+				plan.ToUpdate++
+			}
 		}
 	}
 	return plan, nil
@@ -277,6 +287,7 @@ func fromDTO(d Task) Task {
 
 func merge(current, incoming []Task, cfg ImportConfig) ([]Task, ImportResult) {
 	res := ImportResult{}
+	conflictPolicy := effectiveOnConflict(cfg)
 	byID := map[string]Task{}
 	order := make([]string, 0, len(current))
 
@@ -305,9 +316,13 @@ func merge(current, incoming []Task, cfg ImportConfig) ([]Task, ImportResult) {
 			continue
 		}
 
-		switch cfg.OnConflict {
+		res.Conflicted++
+		res.ConflictIDs = append(res.ConflictIDs, id)
+
+		switch conflictPolicy {
 		case "skip":
 			res.Skipped++
+			res.SkippedIDs = append(res.SkippedIDs, id)
 		case "rename":
 			in.ID = newID()
 			byID[in.ID] = in
@@ -326,6 +341,23 @@ func merge(current, incoming []Task, cfg ImportConfig) ([]Task, ImportResult) {
 		}
 	}
 	return merged, res
+}
+
+func effectiveOnConflict(cfg ImportConfig) string {
+	if cfg.SkipExisting && (cfg.OnConflict == "" || cfg.OnConflict == "overwrite") {
+		return "skip"
+	}
+	if cfg.OnConflict == "" {
+		return "overwrite"
+	}
+	return cfg.OnConflict
+}
+
+func formatTaskIDs(ids []string) string {
+	if len(ids) == 0 {
+		return ""
+	}
+	return strings.Join(ids, ", ")
 }
 
 func writeBackup(tasks []Task) (string, error) {
