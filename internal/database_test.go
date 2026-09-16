@@ -85,8 +85,11 @@ func TestNewDatabaseWithEmptyPathCreatesValidDatabase(t *testing.T) {
 		t.Fatal("NewDatabase(\"\") returned nil")
 	}
 
-	if _, err := os.Stat(filepath.Join(tmpDir, "munus.db")); os.IsNotExist(err) {
-		t.Fatal("NewDatabase(\"\") did not create the default database file")
+	if _, err := os.Stat(filepath.Join(tmpDir, "munus.db")); err != nil {
+		if os.IsNotExist(err) {
+			t.Fatal("NewDatabase(\"\") did not create the default database file")
+		}
+		t.Fatalf("Failed to stat default database file: %v", err)
 	}
 
 	defer func(db *Database) {
