@@ -435,8 +435,28 @@ func TestListModelImportInitiate(t *testing.T) {
 	if list.transfer.importMode != "merge" {
 		t.Errorf("Expected importMode to be merge")
 	}
+	if list.transfer.skipExisting {
+		t.Errorf("Expected skipExisting to be false")
+	}
 	if !list.transfer.backup {
 		t.Errorf("Expected backup to be true")
+	}
+}
+
+func TestListModelHandleTransferKeyToggleSkipExisting(t *testing.T) {
+	list := NewListModel(&MockStorage{})
+	list.transfer = &transferState{
+		action:       transferActionImport,
+		stage:        transferStageInput,
+		importMode:   "merge",
+		skipExisting: false,
+	}
+
+	msg := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("o"), Alt: true}
+	_, _ = list.handleTransferKey(msg)
+
+	if !list.transfer.skipExisting {
+		t.Errorf("Expected skipExisting to be toggled on")
 	}
 }
 

@@ -180,7 +180,16 @@ func PlanImport(svc *TaskServiceAdapter, file string, cfg ImportConfig) (ImportP
 		} else if equalTask(old, t) {
 			plan.Unchanged++
 		} else {
-			plan.ToUpdate++
+			plan.Conflicts++
+			plan.ConflictIDs = append(plan.ConflictIDs, t.ID)
+			switch importConflictPolicy(cfg) {
+			case "skip":
+				plan.ToSkip++
+			case "rename":
+				plan.ToCreate++
+			default:
+				plan.ToUpdate++
+			}
 		}
 	}
 	return plan, nil
@@ -305,9 +314,11 @@ func merge(current, incoming []Task, cfg ImportConfig) ([]Task, ImportResult) {
 			continue
 		}
 
-		switch cfg.OnConflict {
+		res.Conflicted++
+		switch importConflictPolicy(cfg) {
 		case "skip":
 			res.Skipped++
+			res.SkippedIDs = append(res.SkippedIDs, id)
 		case "rename":
 			in.ID = newID()
 			byID[in.ID] = in
@@ -326,6 +337,16 @@ func merge(current, incoming []Task, cfg ImportConfig) ([]Task, ImportResult) {
 		}
 	}
 	return merged, res
+}
+
+func importConflictPolicy(cfg ImportConfig) string {
+	if cfg.SkipExisting {
+		return "skip"
+	}
+	if cfg.OnConflict == "" {
+		return "overwrite"
+	}
+	return cfg.OnConflict
 }
 
 func writeBackup(tasks []Task) (string, error) {

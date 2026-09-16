@@ -562,6 +562,154 @@ func TestConfirm_CaseInsensitive(t *testing.T) {
 	}
 }
 
+func TestImportCmdSkipExistingFlagReportsSkippedIDs(t *testing.T) {
+	db, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	now := time.Now()
+	if err := db.CreateTask(&ItemModel{
+		Title:       "Existing Task",
+		Description: "Current description",
+		CreatedAt:   now,
+		UpdatedAt:   now,
+	}); err != nil {
+		t.Fatalf("CreateTask failed: %v", err)
+	}
+
+	filePath := writeImportBundle(t, ExportBundle{
+		Version:    1,
+		ExportedAt: now,
+		Tasks: []TaskDTO{
+			{
+				ID:          "1",
+				Title:       "Existing Task",
+				Description: "Imported description",
+				Completed:   true,
+				CreatedAt:   now,
+				UpdatedAt:   now,
+			},
+			{
+				ID:        "2",
+				Title:     "New Task",
+				Completed: false,
+				CreatedAt: now,
+				UpdatedAt: now,
+			},
+		},
+	})
+
+	cmd := NewImportCmd(db)
+	cmd.SetArgs([]string{"--file", filePath, "--skip-existing", "--yes"})
+	buf := &bytes.Buffer{}
+	cmd.SetOut(buf)
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("import command failed: %v", err)
+	}
+
+	output := buf.String()
+	if !strings.Contains(output, "skip-existing=yes") {
+		t.Errorf("expected skip-existing flag in output, got %s", output)
+	}
+	if !strings.Contains(output, "Conflict IDs: 1") {
+		t.Errorf("expected conflict IDs in output, got %s", output)
+	}
+	if !strings.Contains(output, "skipped=1") {
+		t.Errorf("expected skipped count in output, got %s", output)
+	}
+	if !strings.Contains(output, "Skipped existing task IDs: 1") {
+		t.Errorf("expected skipped ID details in output, got %s", output)
+	}
+
+	tasks, err := db.ListTasks()
+	if err != nil {
+		t.Fatalf("ListTasks failed: %v", err)
+	}
+	if len(tasks) != 2 {
+		t.Fatalf("expected 2 tasks after import, got %d", len(tasks))
+	}
+	foundExisting := false
+	foundNew := false
+	for _, task := range tasks {
+		switch task.Title {
+		case "Existing Task":
+			foundExisting = true
+			if task.Description != "Current description" || task.Completed {
+				t.Errorf("expected existing task to remain unchanged, got %+v", task)
+			}
+		case "New Task":
+			foundNew = true
+		}
+	}
+	if !foundExisting {
+		t.Errorf("expected existing task to remain after import, got %+v", tasks)
+	}
+	if !foundNew {
+		t.Errorf("expected new task to be imported, got %+v", tasks)
+	}
+}
+
+func TestImportCmdDefaultOverwriteBehavior(t *testing.T) {
+	db, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	now := time.Now()
+	if err := db.CreateTask(&ItemModel{
+		Title:       "Existing Task",
+		Description: "Current description",
+		CreatedAt:   now,
+		UpdatedAt:   now,
+	}); err != nil {
+		t.Fatalf("CreateTask failed: %v", err)
+	}
+
+	filePath := writeImportBundle(t, ExportBundle{
+		Version:    1,
+		ExportedAt: now,
+		Tasks: []TaskDTO{
+			{
+				ID:          "1",
+				Title:       "Existing Task",
+				Description: "Imported description",
+				Completed:   true,
+				CreatedAt:   now,
+				UpdatedAt:   now,
+			},
+		},
+	})
+
+	cmd := NewImportCmd(db)
+	cmd.SetArgs([]string{"--file", filePath, "--yes"})
+	buf := &bytes.Buffer{}
+	cmd.SetOut(buf)
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("import command failed: %v", err)
+	}
+
+	output := buf.String()
+	if !strings.Contains(output, "skip-existing=no") {
+		t.Errorf("expected default skip-existing=no in output, got %s", output)
+	}
+	if !strings.Contains(output, "updated=1") {
+		t.Errorf("expected updated count in output, got %s", output)
+	}
+	if strings.Contains(output, "Skipped existing task IDs:") {
+		t.Errorf("did not expect skipped ID output, got %s", output)
+	}
+
+	tasks, err := db.ListTasks()
+	if err != nil {
+		t.Fatalf("ListTasks failed: %v", err)
+	}
+	if len(tasks) != 1 {
+		t.Fatalf("expected 1 task after import, got %d", len(tasks))
+	}
+	if tasks[0].Description != "Imported description" || !tasks[0].Completed {
+		t.Errorf("expected existing task to be overwritten, got %+v", tasks[0])
+	}
+}
+
 // ============================================ NewRootCmd Tests ============================================
 
 func TestNewRootCmd_HasSubcommands(t *testing.T) {

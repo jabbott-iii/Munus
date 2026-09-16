@@ -131,6 +131,20 @@ func createSampleItemModels() []*ItemModel {
 	}
 }
 
+func writeImportBundle(t *testing.T, bundle ExportBundle) string {
+	t.Helper()
+
+	filePath := filepath.Join(t.TempDir(), "import.json")
+	data, err := json.Marshal(bundle)
+	if err != nil {
+		t.Fatalf("json.Marshal failed: %v", err)
+	}
+	if err := os.WriteFile(filePath, data, 0o644); err != nil {
+		t.Fatalf("os.WriteFile failed: %v", err)
+	}
+	return filePath
+}
+
 // Tests for ListTasks
 func TestListTasks(t *testing.T) {
 	storage := &MockStorage{
@@ -644,11 +658,8 @@ func TestReadImportFileStrict(t *testing.T) {
 }
 
 func TestPlanImport(t *testing.T) {
-	tmpDir := t.TempDir()
-	filePath := filepath.Join(tmpDir, "import.json")
-
 	now := time.Now()
-	bundle := ExportBundle{
+	filePath := writeImportBundle(t, ExportBundle{
 		Version:    1,
 		ExportedAt: now,
 		Tasks: []TaskDTO{
@@ -667,13 +678,7 @@ func TestPlanImport(t *testing.T) {
 				UpdatedAt: now,
 			},
 		},
-	}
-
-	data, _ := json.Marshal(bundle)
-	err := os.WriteFile(filePath, data, 0o644)
-	if err != nil {
-		return
-	}
+	})
 
 	// Set up existing tasks
 	storage := &MockStorage{
@@ -703,6 +708,66 @@ func TestPlanImport(t *testing.T) {
 	}
 	if plan.Unchanged != 1 {
 		t.Errorf("expected 1 unchanged task, got %d", plan.Unchanged)
+	}
+}
+
+func TestPlanImportSkipExistingReportsConflicts(t *testing.T) {
+	now := time.Now()
+	filePath := writeImportBundle(t, ExportBundle{
+		Version:    1,
+		ExportedAt: now,
+		Tasks: []TaskDTO{
+			{
+				ID:          "1",
+				Title:       "Existing Task",
+				Description: "Imported update",
+				Completed:   false,
+				CreatedAt:   now,
+				UpdatedAt:   now,
+			},
+			{
+				ID:        "2",
+				Title:     "New Task",
+				Completed: false,
+				CreatedAt: now,
+				UpdatedAt: now,
+			},
+		},
+	})
+
+	storage := &MockStorage{
+		tasks: []*ItemModel{
+			{
+				ID:          1,
+				Title:       "Existing Task",
+				Description: "Current description",
+				Completed:   false,
+				CreatedAt:   now,
+				UpdatedAt:   now,
+			},
+		},
+	}
+	adapter := NewTestAdapter(storage)
+
+	plan, err := PlanImport(adapter, filePath, ImportConfig{Mode: "merge", SkipExisting: true})
+	if err != nil {
+		t.Fatalf("PlanImport failed: %v", err)
+	}
+
+	if plan.ToCreate != 1 {
+		t.Errorf("expected 1 task to create, got %d", plan.ToCreate)
+	}
+	if plan.ToUpdate != 0 {
+		t.Errorf("expected 0 tasks to update, got %d", plan.ToUpdate)
+	}
+	if plan.ToSkip != 1 {
+		t.Errorf("expected 1 task to skip, got %d", plan.ToSkip)
+	}
+	if plan.Conflicts != 1 {
+		t.Errorf("expected 1 conflict, got %d", plan.Conflicts)
+	}
+	if len(plan.ConflictIDs) != 1 || plan.ConflictIDs[0] != "1" {
+		t.Errorf("expected conflict IDs [1], got %v", plan.ConflictIDs)
 	}
 }
 
@@ -743,8 +808,47 @@ func TestMergeConflictSkip(t *testing.T) {
 	if len(merged) != 1 {
 		t.Errorf("expected 1 merged task, got %d", len(merged))
 	}
+	if merged[0].Description != "Current" {
+		t.Errorf("expected existing task to remain unchanged, got %q", merged[0].Description)
+	}
 	if result.Skipped != 1 {
 		t.Errorf("expected 1 skipped, got %d", result.Skipped)
+	}
+	if result.Conflicted != 1 {
+		t.Errorf("expected 1 conflicted, got %d", result.Conflicted)
+	}
+	if len(result.SkippedIDs) != 1 || result.SkippedIDs[0] != "1" {
+		t.Errorf("expected skipped IDs [1], got %v", result.SkippedIDs)
+	}
+}
+
+func TestMergeDefaultOverwriteUpdatesExistingTask(t *testing.T) {
+	now := time.Now()
+	current := []Task{
+		{ID: "1", Title: "Task 1", Description: "Current", Completed: false, CreatedAt: now, UpdatedAt: now},
+	}
+
+	incoming := []Task{
+		{ID: "1", Title: "Task 1", Description: "Updated", Completed: true, CreatedAt: now, UpdatedAt: now},
+	}
+
+	cfg := ImportConfig{Mode: "merge", OnConflict: "overwrite"}
+	merged, result := merge(current, incoming, cfg)
+
+	if len(merged) != 1 {
+		t.Errorf("expected 1 merged task, got %d", len(merged))
+	}
+	if merged[0].Description != "Updated" || !merged[0].Completed {
+		t.Errorf("expected imported task to overwrite existing task, got %+v", merged[0])
+	}
+	if result.Updated != 1 {
+		t.Errorf("expected 1 updated, got %d", result.Updated)
+	}
+	if result.Skipped != 0 {
+		t.Errorf("expected 0 skipped, got %d", result.Skipped)
+	}
+	if result.Conflicted != 1 {
+		t.Errorf("expected 1 conflicted, got %d", result.Conflicted)
 	}
 }
 

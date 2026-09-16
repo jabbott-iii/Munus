@@ -74,9 +74,11 @@ Examples:
 ### import
 
 - munus import --file tasks-backup.json — restore tasks from JSON file
+- munus import --file tasks-backup.json --skip-existing — keep local tasks when imported task IDs already exist
 
 Examples:
 - munus import --file my-tasks.json
+- munus import --file my-tasks.json --skip-existing
 
 ### Interactive TUI
 
