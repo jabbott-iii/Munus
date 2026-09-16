@@ -98,6 +98,32 @@ func NewTestAdapter(storage Storage) *TaskServiceAdapter {
 	return &TaskServiceAdapter{storage: storage}
 }
 
+func writeTestImportBundle(t *testing.T, bundle ExportBundle) string {
+	t.Helper()
+
+	tmpDir := t.TempDir()
+	filePath := filepath.Join(tmpDir, "import.json")
+
+	data, err := json.Marshal(bundle)
+	if err != nil {
+		t.Fatalf("failed to marshal import bundle: %v", err)
+	}
+	if err := os.WriteFile(filePath, data, 0o644); err != nil {
+		t.Fatalf("failed to write import bundle: %v", err)
+	}
+
+	return filePath
+}
+
+func findTaskByTitle(tasks []*ItemModel, title string) *ItemModel {
+	for _, task := range tasks {
+		if task.Title == title {
+			return task
+		}
+	}
+	return nil
+}
+
 // Helper function to create sample tasks
 func createSampleItemModels() []*ItemModel {
 	now := time.Now()
@@ -644,11 +670,8 @@ func TestReadImportFileStrict(t *testing.T) {
 }
 
 func TestPlanImport(t *testing.T) {
-	tmpDir := t.TempDir()
-	filePath := filepath.Join(tmpDir, "import.json")
-
 	now := time.Now()
-	bundle := ExportBundle{
+	filePath := writeTestImportBundle(t, ExportBundle{
 		Version:    1,
 		ExportedAt: now,
 		Tasks: []TaskDTO{
@@ -667,13 +690,7 @@ func TestPlanImport(t *testing.T) {
 				UpdatedAt: now,
 			},
 		},
-	}
-
-	data, _ := json.Marshal(bundle)
-	err := os.WriteFile(filePath, data, 0o644)
-	if err != nil {
-		return
-	}
+	})
 
 	// Set up existing tasks
 	storage := &MockStorage{
@@ -703,6 +720,62 @@ func TestPlanImport(t *testing.T) {
 	}
 	if plan.Unchanged != 1 {
 		t.Errorf("expected 1 unchanged task, got %d", plan.Unchanged)
+	}
+}
+
+func TestPlanImportSkipExistingShowsConflicts(t *testing.T) {
+	now := time.Now()
+	filePath := writeTestImportBundle(t, ExportBundle{
+		Version:    1,
+		ExportedAt: now,
+		Tasks: []TaskDTO{
+			{
+				ID:          "1",
+				Title:       "Existing Task",
+				Description: "Imported",
+				Completed:   false,
+				CreatedAt:   now,
+				UpdatedAt:   now,
+			},
+			{
+				ID:        "2",
+				Title:     "New Task",
+				Completed: false,
+				CreatedAt: now,
+				UpdatedAt: now,
+			},
+		},
+	})
+
+	storage := &MockStorage{
+		tasks: []*ItemModel{
+			{
+				ID:          1,
+				Title:       "Existing Task",
+				Description: "Local",
+				Completed:   false,
+				CreatedAt:   now,
+				UpdatedAt:   now,
+			},
+		},
+	}
+
+	plan, err := PlanImport(NewTestAdapter(storage), filePath, ImportConfig{Mode: "merge", SkipExisting: true})
+	if err != nil {
+		t.Fatalf("PlanImport failed: %v", err)
+	}
+
+	if plan.ToCreate != 1 {
+		t.Errorf("expected 1 task to create, got %d", plan.ToCreate)
+	}
+	if plan.ToUpdate != 0 {
+		t.Errorf("expected 0 tasks to update, got %d", plan.ToUpdate)
+	}
+	if plan.Conflicts != 1 {
+		t.Errorf("expected 1 conflict, got %d", plan.Conflicts)
+	}
+	if len(plan.ConflictIDs) != 1 || plan.ConflictIDs[0] != "1" {
+		t.Errorf("expected conflict ID [1], got %v", plan.ConflictIDs)
 	}
 }
 
@@ -746,6 +819,12 @@ func TestMergeConflictSkip(t *testing.T) {
 	if result.Skipped != 1 {
 		t.Errorf("expected 1 skipped, got %d", result.Skipped)
 	}
+	if result.Conflicted != 1 {
+		t.Errorf("expected 1 conflicted, got %d", result.Conflicted)
+	}
+	if len(result.SkippedIDs) != 1 || result.SkippedIDs[0] != "1" {
+		t.Errorf("expected skipped IDs [1], got %v", result.SkippedIDs)
+	}
 }
 
 func TestMergeConflictRename(t *testing.T) {
@@ -766,6 +845,134 @@ func TestMergeConflictRename(t *testing.T) {
 	}
 	if result.Created != 1 {
 		t.Errorf("expected 1 created (renamed), got %d", result.Created)
+	}
+	if result.Conflicted != 1 {
+		t.Errorf("expected 1 conflicted, got %d", result.Conflicted)
+	}
+}
+
+func TestApplyImportDefaultOverwrite(t *testing.T) {
+	db, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	if err := db.CreateTask(&ItemModel{Title: "Existing Task", Description: "Local"}); err != nil {
+		t.Fatalf("failed to seed task: %v", err)
+	}
+
+	now := time.Now()
+	filePath := writeTestImportBundle(t, ExportBundle{
+		Version:    1,
+		ExportedAt: now,
+		Tasks: []TaskDTO{
+			{
+				ID:          "1",
+				Title:       "Existing Task",
+				Description: "Imported",
+				Completed:   true,
+				CreatedAt:   now,
+				UpdatedAt:   now,
+			},
+			{
+				ID:          "2",
+				Title:       "New Task",
+				Description: "New Description",
+				Completed:   false,
+				CreatedAt:   now,
+				UpdatedAt:   now,
+			},
+		},
+	})
+
+	res, err := ApplyImport(&TaskServiceAdapter{storage: db}, filePath, ImportConfig{Mode: "merge"})
+	if err != nil {
+		t.Fatalf("ApplyImport failed: %v", err)
+	}
+
+	if res.Created != 1 || res.Updated != 1 || res.Skipped != 0 || res.Conflicted != 1 {
+		t.Errorf("unexpected import result: %+v", res)
+	}
+
+	tasks, err := db.ListTasks()
+	if err != nil {
+		t.Fatalf("ListTasks failed: %v", err)
+	}
+	if len(tasks) != 2 {
+		t.Fatalf("expected 2 tasks after import, got %d", len(tasks))
+	}
+
+	existing := findTaskByTitle(tasks, "Existing Task")
+	if existing == nil {
+		t.Fatal("expected existing task to remain present")
+	}
+	if existing.Description != "Imported" || !existing.Completed {
+		t.Errorf("expected existing task to be overwritten, got %+v", existing)
+	}
+	if findTaskByTitle(tasks, "New Task") == nil {
+		t.Fatal("expected new task to be imported")
+	}
+}
+
+func TestApplyImportSkipExisting(t *testing.T) {
+	db, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	if err := db.CreateTask(&ItemModel{Title: "Existing Task", Description: "Local"}); err != nil {
+		t.Fatalf("failed to seed task: %v", err)
+	}
+
+	now := time.Now()
+	filePath := writeTestImportBundle(t, ExportBundle{
+		Version:    1,
+		ExportedAt: now,
+		Tasks: []TaskDTO{
+			{
+				ID:          "1",
+				Title:       "Existing Task",
+				Description: "Imported",
+				Completed:   true,
+				CreatedAt:   now,
+				UpdatedAt:   now,
+			},
+			{
+				ID:          "2",
+				Title:       "New Task",
+				Description: "New Description",
+				Completed:   false,
+				CreatedAt:   now,
+				UpdatedAt:   now,
+			},
+		},
+	})
+
+	res, err := ApplyImport(&TaskServiceAdapter{storage: db}, filePath, ImportConfig{Mode: "merge", SkipExisting: true})
+	if err != nil {
+		t.Fatalf("ApplyImport failed: %v", err)
+	}
+
+	if res.Created != 1 || res.Updated != 0 || res.Skipped != 1 || res.Conflicted != 1 {
+		t.Errorf("unexpected import result: %+v", res)
+	}
+	if len(res.SkippedIDs) != 1 || res.SkippedIDs[0] != "1" {
+		t.Errorf("expected skipped IDs [1], got %v", res.SkippedIDs)
+	}
+
+	tasks, err := db.ListTasks()
+	if err != nil {
+		t.Fatalf("ListTasks failed: %v", err)
+	}
+	if len(tasks) != 2 {
+		t.Fatalf("expected 2 tasks after import, got %d", len(tasks))
+	}
+
+	existing := findTaskByTitle(tasks, "Existing Task")
+	if existing == nil {
+		t.Fatal("expected existing task to remain present")
+	}
+	if existing.Description != "Local" || existing.Completed {
+		t.Errorf("expected existing task to be preserved, got %+v", existing)
+	}
+	if findTaskByTitle(tasks, "New Task") == nil {
+		t.Fatal("expected new task to be imported")
 	}
 }
 

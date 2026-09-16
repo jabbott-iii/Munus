@@ -18,6 +18,8 @@ package internal
 
 import (
 	"bytes"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -586,6 +588,77 @@ func TestNewRootCmd_HasSubcommands(t *testing.T) {
 		if !found {
 			t.Errorf("expected subcommand %q not found", cmdName)
 		}
+	}
+}
+
+func TestImportCmdSkipExistingReportsSkippedIDs(t *testing.T) {
+	db := NewMockModel()
+	if err := db.CreateTask(&ItemModel{Title: "Existing Task", Description: "Local"}); err != nil {
+		t.Fatalf("failed to seed task: %v", err)
+	}
+
+	now := time.Now()
+	filePath := writeTestImportBundle(t, ExportBundle{
+		Version:    1,
+		ExportedAt: now,
+		Tasks: []TaskDTO{
+			{
+				ID:          "1",
+				Title:       "Existing Task",
+				Description: "Imported",
+				Completed:   false,
+				CreatedAt:   now,
+				UpdatedAt:   now,
+			},
+			{
+				ID:          "2",
+				Title:       "New Task",
+				Description: "New Description",
+				Completed:   false,
+				CreatedAt:   now,
+				UpdatedAt:   now,
+			},
+		},
+	})
+
+	cmd := NewImportCmd(db)
+	cmd.SetArgs([]string{"--file", filePath, "--skip-existing"})
+	buf := &bytes.Buffer{}
+	cmd.SetOut(buf)
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("import command failed: %v", err)
+	}
+
+	output := buf.String()
+	if !strings.Contains(output, "Conflicts: 1") {
+		t.Errorf("expected conflict count in output, got %q", output)
+	}
+	if !strings.Contains(output, "Conflicting task IDs: 1") {
+		t.Errorf("expected conflict IDs in output, got %q", output)
+	}
+	if !strings.Contains(output, "Skipped existing task IDs: 1") {
+		t.Errorf("expected skipped IDs in output, got %q", output)
+	}
+}
+
+func TestImportCmdRejectsAmbiguousConflictFlags(t *testing.T) {
+	db := NewMockModel()
+	cmd := NewImportCmd(db)
+
+	tmpDir := t.TempDir()
+	filePath := filepath.Join(tmpDir, "import.json")
+	if err := os.WriteFile(filePath, []byte(`{"version":1,"tasks":[]}`), 0o644); err != nil {
+		t.Fatalf("failed to write import file: %v", err)
+	}
+
+	cmd.SetArgs([]string{"--file", filePath, "--skip-existing", "--on-conflict", "rename"})
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("expected error when combining --skip-existing with --on-conflict")
+	}
+	if !strings.Contains(err.Error(), "--skip-existing cannot be combined with --on-conflict") {
+		t.Errorf("unexpected error: %v", err)
 	}
 }
 

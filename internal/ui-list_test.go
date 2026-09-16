@@ -435,6 +435,9 @@ func TestListModelImportInitiate(t *testing.T) {
 	if list.transfer.importMode != "merge" {
 		t.Errorf("Expected importMode to be merge")
 	}
+	if list.transfer.skipExisting {
+		t.Errorf("Expected skipExisting to default to false")
+	}
 	if !list.transfer.backup {
 		t.Errorf("Expected backup to be true")
 	}
@@ -758,6 +761,56 @@ func TestListModelHandleTransferKeyCharacterInput(t *testing.T) {
 
 	if list.transfer.path != "export.json" {
 		t.Errorf("Expected path 'export.json', got %q", list.transfer.path)
+	}
+}
+
+func TestListModelHandleTransferKeyToggleSkipExisting(t *testing.T) {
+	list := NewListModel(&MockStorage{})
+	list.transfer = &transferState{
+		action: transferActionImport,
+		stage:  transferStageInput,
+	}
+
+	msg := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'o'}}
+	msg.Alt = true
+	_, _ = list.handleTransferKey(msg)
+
+	if !list.transfer.skipExisting {
+		t.Errorf("Expected skipExisting to toggle on")
+	}
+}
+
+func TestListModelRenderTransferOverlayShowsSkipExistingAndConflicts(t *testing.T) {
+	list := NewListModel(&MockStorage{})
+	list.viewportWidth = 100
+	list.viewportHeight = 30
+	list.transfer = &transferState{
+		action:       transferActionImport,
+		stage:        transferStageConfirm,
+		path:         "import.json",
+		importMode:   "merge",
+		skipExisting: true,
+		backup:       true,
+		plan: &ImportPlan{
+			Incoming:    2,
+			Current:     1,
+			ToCreate:    1,
+			ToUpdate:    0,
+			Unchanged:   0,
+			Conflicts:   1,
+			ConflictIDs: []string{"1"},
+		},
+	}
+
+	view := list.renderTransferOverlay("base")
+	if !strings.Contains(view, "Skip existing ID collisions: yes") {
+		t.Errorf("expected skip-existing setting in overlay, got %q", view)
+	}
+	if !strings.Contains(view, "Conflicts: 1") {
+		t.Errorf("expected conflict count in overlay, got %q", view)
+	}
+	if !strings.Contains(view, "Conflict IDs: 1") {
+		t.Errorf("expected conflict IDs in overlay, got %q", view)
 	}
 }
 

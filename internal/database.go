@@ -149,12 +149,13 @@ type ExportPlan struct {
 }
 
 type ImportConfig struct {
-	Mode       string
-	OnConflict string
-	IDStrategy string
-	Strict     bool
-	DryRun     bool
-	Backup     bool
+	Mode         string
+	OnConflict   string
+	SkipExisting bool
+	IDStrategy   string
+	Strict       bool
+	DryRun       bool
+	Backup       bool
 }
 
 type ImportPlan struct {
@@ -165,15 +166,18 @@ type ImportPlan struct {
 	ToUpdate      int
 	Unchanged     int
 	Conflicts     int
+	ConflictIDs   []string
 }
 
 type ImportResult struct {
-	Created    int
-	Updated    int
-	Unchanged  int
-	Skipped    int
-	Conflicted int
-	BackupPath string
+	Created     int
+	Updated     int
+	Unchanged   int
+	Skipped     int
+	Conflicted  int
+	ConflictIDs []string
+	SkippedIDs  []string
+	BackupPath  string
 }
 
 type exportOpts struct {
@@ -187,14 +191,15 @@ type exportOpts struct {
 }
 
 type importOpts struct {
-	File       string
-	Mode       string // merge|replace
-	OnConflict string // skip|overwrite|rename
-	IDStrategy string // preserve|regenerate
-	DryRun     bool
-	Yes        bool
-	Strict     bool
-	Backup     bool
+	File         string
+	Mode         string // merge|replace
+	OnConflict   string // skip|overwrite|rename
+	SkipExisting bool
+	IDStrategy   string // preserve|regenerate
+	DryRun       bool
+	Yes          bool
+	Strict       bool
+	Backup       bool
 }
 
 type TaskServiceAdapter struct {
@@ -222,6 +227,7 @@ type transferState struct {
 	cursor           int
 	includeCompleted bool
 	importMode       string
+	skipExisting     bool
 	backup           bool
 	strict           bool
 	plan             *ImportPlan

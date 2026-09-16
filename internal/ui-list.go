@@ -158,10 +158,11 @@ func (m *ListModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.err = nil
 			m.statusMessage = ""
 			m.transfer = &transferState{
-				action:     transferActionImport,
-				stage:      transferStageInput,
-				importMode: "merge",
-				backup:     true,
+				action:       transferActionImport,
+				stage:        transferStageInput,
+				importMode:   "merge",
+				skipExisting: false,
+				backup:       true,
 			}
 			return m, nil
 
@@ -520,6 +521,10 @@ func (m *ListModel) handleTransferKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if state.action == transferActionImport {
 			state.backup = !state.backup
 		}
+	case "alt+o":
+		if state.action == transferActionImport {
+			state.skipExisting = !state.skipExisting
+		}
 	case "alt+s":
 		if state.action == transferActionImport {
 			state.strict = !state.strict
@@ -575,11 +580,12 @@ func (m *ListModel) planImportFromTransfer() (tea.Model, tea.Cmd) {
 	}
 
 	plan, err := PlanImport(&TaskServiceAdapter{storage: m.storage}, path, ImportConfig{
-		Mode:       m.transfer.importMode,
-		OnConflict: "overwrite",
-		IDStrategy: "preserve",
-		Strict:     m.transfer.strict,
-		Backup:     m.transfer.backup,
+		Mode:         m.transfer.importMode,
+		SkipExisting: m.transfer.skipExisting,
+		OnConflict:   "overwrite",
+		IDStrategy:   "preserve",
+		Strict:       m.transfer.strict,
+		Backup:       m.transfer.backup,
 	})
 	if err != nil {
 		m.transfer.operationError = err
@@ -600,18 +606,22 @@ func (m *ListModel) applyImportFromTransfer() (tea.Model, tea.Cmd) {
 	}
 
 	res, err := ApplyImport(&TaskServiceAdapter{storage: m.storage}, m.transfer.path, ImportConfig{
-		Mode:       m.transfer.importMode,
-		OnConflict: "overwrite",
-		IDStrategy: "preserve",
-		Strict:     m.transfer.strict,
-		Backup:     m.transfer.backup,
+		Mode:         m.transfer.importMode,
+		SkipExisting: m.transfer.skipExisting,
+		OnConflict:   "overwrite",
+		IDStrategy:   "preserve",
+		Strict:       m.transfer.strict,
+		Backup:       m.transfer.backup,
 	})
 	if err != nil {
 		m.transfer.operationError = err
 		return m, nil
 	}
 
-	status := fmt.Sprintf("✓ Import complete: created=%d updated=%d unchanged=%d skipped=%d", res.Created, res.Updated, res.Unchanged, res.Skipped)
+	status := fmt.Sprintf("✓ Import complete: created=%d updated=%d unchanged=%d skipped=%d conflicted=%d", res.Created, res.Updated, res.Unchanged, res.Skipped, res.Conflicted)
+	if len(res.SkippedIDs) > 0 {
+		status += fmt.Sprintf(" • skipped IDs=%s", formatTaskIDs(res.SkippedIDs))
+	}
 	if res.BackupPath != "" {
 		status += fmt.Sprintf(" • backup=%s", res.BackupPath)
 	}
@@ -676,6 +686,10 @@ func (m *ListModel) renderTransferOverlay(baseView string) string {
 				dialog.WriteString(" (will replace all local tasks)")
 			}
 			dialog.WriteString("\n")
+			_, err = fmt.Fprintf(&dialog, "Skip existing ID collisions: %s\n", yesNoLabel(m.transfer.skipExisting))
+			if err != nil {
+				return ""
+			}
 			_, err = fmt.Fprintf(&dialog, "Backup before import: %s\n", yesNoLabel(m.transfer.backup))
 			if err != nil {
 				return ""
@@ -705,16 +719,32 @@ func (m *ListModel) renderTransferOverlay(baseView string) string {
 				return ""
 			}
 
-			_, err = fmt.Fprintf(&dialog, "  Unchanged: %d\n\n", m.transfer.plan.Unchanged)
+			_, err = fmt.Fprintf(&dialog, "  Unchanged: %d\n", m.transfer.plan.Unchanged)
 			if err != nil {
 				return ""
 			}
+
+			_, err = fmt.Fprintf(&dialog, "  Conflicts: %d\n", m.transfer.plan.Conflicts)
+			if err != nil {
+				return ""
+			}
+			if len(m.transfer.plan.ConflictIDs) > 0 {
+				_, err = fmt.Fprintf(&dialog, "  Conflict IDs: %s\n", formatTaskIDs(m.transfer.plan.ConflictIDs))
+				if err != nil {
+					return ""
+				}
+			}
+			dialog.WriteString("\n")
 			dialog.WriteString(helpStyle.Render("[y] Import  [n] Cancel"))
 		} else {
 			dialog.WriteString("Path:\n")
 			dialog.WriteString(inputStyle.Render(m.addTransferCursor(m.transfer.path)))
 			dialog.WriteString("\n\n")
 			_, err := fmt.Fprintf(&dialog, "Mode: %s (press alt+m to toggle)\n", m.transfer.importMode)
+			if err != nil {
+				return ""
+			}
+			_, err = fmt.Fprintf(&dialog, "Skip existing ID collisions: %s (press alt+o to toggle)\n", yesNoLabel(m.transfer.skipExisting))
 			if err != nil {
 				return ""
 			}
