@@ -85,7 +85,7 @@ func (m *ListModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 		switch msg.String() {
-		case "q", "ctrl+c", "esc":
+		case "q", "ctrl+c":
 			return m, tea.Quit
 
 		case "up", "shift+tab", "k":
@@ -328,7 +328,7 @@ func (m *ListModel) View() string {
 
 	s.WriteString("\n")
 	s.WriteString(helpStyle.Render("Commands:"))
-	s.WriteString(helpStyle.Render("\n\nshift+tab/↑/k | tab/↓/j: Navigate • g/G: Top/Bottom • e/l: Expand • c: Complete • d or dd: Delete • n: New • r: Refresh • ctrl+c: Quit"))
+	s.WriteString(helpStyle.Render("\n\nshift+tab/↑/k | tab/↓/j: Navigate • g/G: Top/Bottom • e/l: Expand • c: Complete • d: Delete prompt • y or dd: Confirm delete • n/esc: Cancel delete • r: Refresh • ctrl+c: Quit"))
 	s.WriteString(helpStyle.Render("\n?: Help • x: Export to File • i: Import from File"))
 
 	if m.statusMessage != "" {

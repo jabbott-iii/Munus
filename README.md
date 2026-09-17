@@ -83,8 +83,8 @@ Examples:
 ### Interactive TUI
 
 - Running munus with no subcommand launches the terminal UI for interactive task management.
-- Default navigation remains available: `tab`/`shift+tab` and `↑`/`↓` move through the task list, `e` expands a task, `d` opens delete confirmation, and `?` shows help text in-app.
-- Additive Vim-style task-list navigation is also supported in normal/list mode: `j`/`k` move down/up, `g`/`G` jump to the top/bottom, `l` expands the selected task, and pressing `d` again while delete confirmation is open works like a `dd`-style delete confirm.
+- Default navigation remains available: `tab`/`shift+tab` and `↑`/`↓` move through the task list, `e` expands a task, `d` opens delete confirmation, `y` confirms deletion, `n` or `Esc` cancels the delete prompt, and `?` shows help text in-app.
+- Additive Vim-style task-list navigation is also supported in normal/list mode: `j`/`k` move down/up, `g`/`G` jump to the top/bottom, `l` expands the selected task, and pressing `d` again immediately after `d` works like a `dd`-style delete confirm.
 - Vim-style bindings are disabled while typing into editable fields such as the new-task form and import/export path prompt, so keys like `j`, `k`, `g`, `h`, and `l` are inserted as normal text during editing.
 
 ## Install:

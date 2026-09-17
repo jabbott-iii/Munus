@@ -433,7 +433,6 @@ func TestListModelQuitKeys(t *testing.T) {
 	}{
 		{"q key", tea.KeyRunes, "q"},
 		{"ctrl+c", tea.KeyCtrlC, ""},
-		{"esc", tea.KeyEsc, ""},
 	}
 
 	for _, tt := range tests {
@@ -453,6 +452,15 @@ func TestListModelQuitKeys(t *testing.T) {
 				t.Errorf("Expected Quit command for %s", tt.name)
 			}
 		})
+	}
+}
+
+func TestListModelEscapeDoesNotQuitOutsideDeleteConfirmation(t *testing.T) {
+	list := NewListModel(&MockStorage{})
+
+	_, cmd := list.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	if cmd != nil {
+		t.Fatalf("Expected escape to be a no-op outside cancel flows")
 	}
 }
 
@@ -543,7 +551,7 @@ func TestListModelViewDocumentsVimBindings(t *testing.T) {
 	list.loading = false
 
 	view := list.View()
-	for _, expected := range []string{"↑/k", "↓/j", "g/G", "e/l", "d or dd", "?: Help"} {
+	for _, expected := range []string{"↑/k", "↓/j", "g/G", "e/l", "d: Delete prompt", "y or dd: Confirm delete", "n/esc: Cancel delete", "?: Help"} {
 		if !strings.Contains(view, expected) {
 			t.Errorf("Expected view to contain %q, got %q", expected, view)
 		}
