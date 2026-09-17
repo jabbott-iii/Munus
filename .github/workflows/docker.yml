@@ -1,0 +1,31 @@
+name: Docker
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  docker-smoke-test:
+    name: Build and smoke test Docker image
+    runs-on: ubuntu-latest
+
+    env:
+      IMAGE_NAME: munus:${{ github.sha }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build Docker image
+        run: docker build --tag "$IMAGE_NAME" --file Dockerfile .
+
+      - name: Smoke test CLI help
+        run: docker run --rm "$IMAGE_NAME" --help
