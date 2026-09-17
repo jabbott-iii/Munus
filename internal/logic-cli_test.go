@@ -589,6 +589,10 @@ func TestNewRootCmd_HasSubcommands(t *testing.T) {
 			t.Errorf("expected subcommand %q not found", cmdName)
 		}
 	}
+
+	if flag := cmd.Flags().Lookup("vim"); flag == nil {
+		t.Fatal("expected --vim flag to be registered on root command")
+	}
 }
 
 func TestImportCmdSkipExistingReportsSkippedIDs(t *testing.T) {

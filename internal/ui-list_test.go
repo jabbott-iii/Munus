@@ -26,6 +26,10 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
+func newVimListModel(storage Storage) *ListModel {
+	return NewListModelWithOptions(storage, tuiOptions{vimEnabled: true})
+}
+
 // TestListModelInit tests the Init method of ListModel
 func TestListModelInit(t *testing.T) {
 	storage := &MockStorage{}
@@ -136,6 +140,42 @@ func TestListModelNavigationDown(t *testing.T) {
 
 	if list.cursor != 1 {
 		t.Errorf("Expected cursor 1 after down, got %d", list.cursor)
+	}
+}
+
+func TestListModelNavigationVimJK(t *testing.T) {
+	storage := &MockStorage{tasks: []*ItemModel{
+		{ID: 1, Title: "Task 1"},
+		{ID: 2, Title: "Task 2"},
+		{ID: 3, Title: "Task 3"},
+	}}
+	list := newVimListModel(storage)
+	list.tasks = storage.tasks
+	list.loading = false
+
+	_, _ = list.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}})
+	if list.cursor != 1 {
+		t.Fatalf("Expected cursor 1 after j, got %d", list.cursor)
+	}
+
+	_, _ = list.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'k'}})
+	if list.cursor != 0 {
+		t.Fatalf("Expected cursor 0 after k, got %d", list.cursor)
+	}
+}
+
+func TestListModelDefaultModeIgnoresVimNavigation(t *testing.T) {
+	storage := &MockStorage{tasks: []*ItemModel{
+		{ID: 1, Title: "Task 1"},
+		{ID: 2, Title: "Task 2"},
+	}}
+	list := NewListModel(storage)
+	list.tasks = storage.tasks
+	list.loading = false
+
+	_, _ = list.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}})
+	if list.cursor != 0 {
+		t.Fatalf("Expected cursor to remain at 0 when vim mode is disabled, got %d", list.cursor)
 	}
 }
 
@@ -263,6 +303,32 @@ func TestListModelDeleteCancel(t *testing.T) {
 	}
 }
 
+func TestListModelDeleteCancelWithEscape(t *testing.T) {
+	storage := &MockStorage{tasks: []*ItemModel{
+		{ID: 1, Title: "Task 1"},
+	}}
+	list := NewListModel(storage)
+	list.tasks = storage.tasks
+	list.confirmingDelete = true
+	list.deletePrimed = true
+	list.taskToDelete = &ItemModel{ID: 1, Title: "Task 1"}
+
+	_, cmd := list.Update(tea.KeyMsg{Type: tea.KeyEsc})
+
+	if list.confirmingDelete {
+		t.Errorf("Expected confirmingDelete to be false")
+	}
+	if list.deletePrimed {
+		t.Errorf("Expected deletePrimed to be false")
+	}
+	if list.taskToDelete != nil {
+		t.Errorf("Expected taskToDelete to be nil")
+	}
+	if cmd != nil {
+		t.Errorf("Expected no quit command on escape during delete confirmation")
+	}
+}
+
 // TestListModelDeleteConfirm tests deleting confirmation with the 'y' key
 func TestListModelDeleteConfirm(t *testing.T) {
 	storage := &MockStorage{tasks: []*ItemModel{
@@ -281,6 +347,102 @@ func TestListModelDeleteConfirm(t *testing.T) {
 	}
 }
 
+func TestListModelDeleteConfirmWithYAfterD(t *testing.T) {
+	storage := &MockStorage{tasks: []*ItemModel{
+		{ID: 1, Title: "Task 1"},
+	}}
+	list := NewListModel(storage)
+	list.tasks = storage.tasks
+	list.loading = false
+	list.cursor = 0
+
+	_, _ = list.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'d'}})
+	_, _ = list.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'y'}})
+
+	if list.confirmingDelete {
+		t.Fatalf("Expected confirmingDelete to be false after d then y")
+	}
+	if list.taskToDelete != nil {
+		t.Fatalf("Expected taskToDelete to be cleared after d then y")
+	}
+}
+
+func TestListModelDeleteConfirmWithSecondD(t *testing.T) {
+	storage := &MockStorage{tasks: []*ItemModel{
+		{ID: 1, Title: "Task 1"},
+	}}
+	list := newVimListModel(storage)
+	list.tasks = storage.tasks
+	list.loading = false
+	list.cursor = 0
+
+	_, _ = list.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'d'}})
+	if !list.confirmingDelete {
+		t.Fatalf("Expected confirmingDelete to be true after first d")
+	}
+
+	_, _ = list.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'d'}})
+	if list.confirmingDelete {
+		t.Errorf("Expected confirmingDelete to be false after second d")
+	}
+}
+
+func TestListModelDeleteConfirmWithSecondDKeepsConfirmationOnError(t *testing.T) {
+	deleteErr := errors.New("delete failed")
+	storage := &MockStorage{
+		tasks: []*ItemModel{{ID: 1, Title: "Task 1"}},
+		err:   deleteErr,
+	}
+	list := newVimListModel(storage)
+	list.tasks = storage.tasks
+	list.loading = false
+	list.cursor = 0
+
+	_, _ = list.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'d'}})
+	_, cmd := list.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'d'}})
+
+	if !list.confirmingDelete {
+		t.Fatalf("Expected confirmingDelete to remain true after failed second d")
+	}
+	if list.taskToDelete == nil || list.taskToDelete.ID != 1 {
+		t.Fatalf("Expected taskToDelete to remain set after failed second d, got %+v", list.taskToDelete)
+	}
+	if !errors.Is(list.err, deleteErr) {
+		t.Fatalf("Expected delete error to be stored, got %v", list.err)
+	}
+	if cmd != nil {
+		t.Fatalf("Expected no reload command after failed second d")
+	}
+}
+
+func TestListModelDeleteConfirmRequiresConsecutiveD(t *testing.T) {
+	storage := &MockStorage{tasks: []*ItemModel{
+		{ID: 1, Title: "Task 1"},
+	}}
+	list := newVimListModel(storage)
+	list.tasks = storage.tasks
+	list.loading = false
+	list.cursor = 0
+
+	_, _ = list.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'d'}})
+	_, _ = list.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'h'}})
+
+	if !list.confirmingDelete {
+		t.Fatalf("Expected confirmation to remain open after h")
+	}
+
+	_, cmd := list.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'d'}})
+	if cmd != nil {
+		t.Fatalf("Expected first d after interruption to re-prime, not delete")
+	}
+	if !list.confirmingDelete {
+		t.Fatalf("Expected confirmation to remain open after non-consecutive d")
+	}
+	if list.taskToDelete == nil || list.taskToDelete.ID != 1 {
+		t.Fatalf("Expected taskToDelete to remain set, got %+v", list.taskToDelete)
+	}
+}
+
 // TestListModelQuitKeys tests quit key bindings
 func TestListModelQuitKeys(t *testing.T) {
 	tests := []struct {
@@ -290,7 +452,6 @@ func TestListModelQuitKeys(t *testing.T) {
 	}{
 		{"q key", tea.KeyRunes, "q"},
 		{"ctrl+c", tea.KeyCtrlC, ""},
-		{"esc", tea.KeyEsc, ""},
 	}
 
 	for _, tt := range tests {
@@ -310,6 +471,15 @@ func TestListModelQuitKeys(t *testing.T) {
 				t.Errorf("Expected Quit command for %s", tt.name)
 			}
 		})
+	}
+}
+
+func TestListModelEscapeDoesNotQuitOutsideDeleteConfirmation(t *testing.T) {
+	list := NewListModel(&MockStorage{})
+
+	_, cmd := list.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	if cmd != nil {
+		t.Fatalf("Expected escape to be a no-op outside cancel flows")
 	}
 }
 
@@ -348,6 +518,62 @@ func TestListModelHelpToggle(t *testing.T) {
 
 	if list.showHelp {
 		t.Errorf("Expected showHelp to be false after toggle")
+	}
+}
+
+func TestListModelVimJumpTopBottom(t *testing.T) {
+	tasks := make([]*ItemModel, 25)
+	for i := range 25 {
+		tasks[i] = &ItemModel{ID: i + 1, Title: "Task"}
+	}
+
+	list := newVimListModel(&MockStorage{tasks: tasks})
+	list.tasks = tasks
+	list.loading = false
+	list.cursor = 5
+
+	_, _ = list.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'G'}})
+	if list.cursor != len(list.GetVisibleTasks())-1 {
+		t.Fatalf("Expected cursor at last task after G, got %d", list.cursor)
+	}
+	expectedPage := (len(list.GetVisibleTasks()) - 1) / pageSize
+	if list.currentPage != expectedPage {
+		t.Fatalf("Expected currentPage %d after G, got %d", expectedPage, list.currentPage)
+	}
+
+	_, _ = list.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'g'}})
+	if list.cursor != 0 {
+		t.Fatalf("Expected cursor 0 after g, got %d", list.cursor)
+	}
+	if list.currentPage != 0 {
+		t.Fatalf("Expected currentPage 0 after g, got %d", list.currentPage)
+	}
+}
+
+func TestListModelVimExpand(t *testing.T) {
+	storage := &MockStorage{tasks: []*ItemModel{
+		{ID: 1, Title: "Task 1", Description: "Desc 1"},
+	}}
+	list := newVimListModel(storage)
+	list.tasks = storage.tasks
+	list.loading = false
+	list.cursor = 0
+
+	_, _ = list.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'l'}})
+	if !list.expanded[0] {
+		t.Fatalf("Expected selected task to expand after l")
+	}
+}
+
+func TestListModelViewDocumentsVimBindings(t *testing.T) {
+	list := newVimListModel(&MockStorage{})
+	list.loading = false
+
+	view := list.View()
+	for _, expected := range []string{"Vim mode: j/k navigate", "g/G top/bottom", "dd or y confirms", "?: Help"} {
+		if !strings.Contains(view, expected) {
+			t.Errorf("Expected view to contain %q, got %q", expected, view)
+		}
 	}
 }
 
@@ -761,6 +987,24 @@ func TestListModelHandleTransferKeyCharacterInput(t *testing.T) {
 
 	if list.transfer.path != "export.json" {
 		t.Errorf("Expected path 'export.json', got %q", list.transfer.path)
+	}
+}
+
+func TestListModelTransferInputKeepsVimRunesLiteral(t *testing.T) {
+	list := newVimListModel(&MockStorage{})
+	list.transfer = &transferState{
+		action: transferActionExport,
+		stage:  transferStageInput,
+		path:   "",
+		cursor: 0,
+	}
+
+	for _, r := range []rune{'j', 'k', 'g', 'G', 'l', 'd'} {
+		_, _ = list.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+	}
+
+	if list.transfer.path != "jkgGld" {
+		t.Fatalf("Expected Vim runes to be inserted literally in transfer input, got %q", list.transfer.path)
 	}
 }
 

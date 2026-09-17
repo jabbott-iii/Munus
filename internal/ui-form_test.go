@@ -24,6 +24,10 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 )
 
+func newVimFormModel(storage Storage) *FormModel {
+	return NewFormModelWithOptions(storage, tuiOptions{vimEnabled: true})
+}
+
 type mockCreateErrorStorage struct {
 	MockStorage
 	createErr error
@@ -250,6 +254,112 @@ func TestUpdateCharacterInput(t *testing.T) {
 	}
 	if form.cursor != 1 {
 		t.Errorf("Expected cursor to be 1, got %d", form.cursor)
+	}
+}
+
+func TestUpdateVimKeysRemainLiteralInputInForm(t *testing.T) {
+	storage := &MockStorage{}
+	form := NewFormModel(storage)
+	form.currentField = titleField
+
+	for _, r := range []rune{'j', 'k', 'g', 'G', 'h', 'l'} {
+		form.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+	}
+
+	if form.fields[titleField] != "jkgGhl" {
+		t.Errorf("Expected literal Vim characters in title field, got %q", form.fields[titleField])
+	}
+	if form.currentField != titleField {
+		t.Errorf("Expected currentField to stay on titleField, got %v", form.currentField)
+	}
+}
+
+func TestVimFormEscSwitchesToNormalMode(t *testing.T) {
+	form := newVimFormModel(&MockStorage{})
+
+	model, cmd := form.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	updated := model.(*FormModel)
+
+	if cmd != nil {
+		t.Fatalf("Expected no command when switching to normal mode")
+	}
+	if updated.formMode != formModeNormal {
+		t.Fatalf("Expected form mode normal after esc, got %v", updated.formMode)
+	}
+}
+
+func TestVimFormNormalModeNavigationAndInsertReturn(t *testing.T) {
+	form := newVimFormModel(&MockStorage{})
+	form.formMode = formModeNormal
+
+	model, _ := form.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}})
+	updated := model.(*FormModel)
+	if updated.currentField != descriptionField {
+		t.Fatalf("Expected description field after j, got %v", updated.currentField)
+	}
+
+	model, _ = updated.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'o'}})
+	updated = model.(*FormModel)
+	if updated.currentField != deadlineField {
+		t.Fatalf("Expected deadline field after o, got %v", updated.currentField)
+	}
+	if updated.formMode != formModeInsert {
+		t.Fatalf("Expected insert mode after o, got %v", updated.formMode)
+	}
+}
+
+func TestVimFormNormalModeDoesNotInsertText(t *testing.T) {
+	form := newVimFormModel(&MockStorage{})
+	form.fields[titleField] = "task"
+	form.cursor = len(form.fields[titleField])
+	form.formMode = formModeNormal
+
+	model, _ := form.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'x'}})
+	updated := model.(*FormModel)
+
+	if updated.fields[titleField] != "task" {
+		t.Fatalf("Expected field contents unchanged in normal mode, got %q", updated.fields[titleField])
+	}
+}
+
+func TestVimFormNormalModeCanReturnToList(t *testing.T) {
+	form := newVimFormModel(&MockStorage{})
+	form.formMode = formModeNormal
+
+	model, cmd := form.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'h'}})
+	list, ok := model.(*ListModel)
+	if !ok {
+		t.Fatalf("Expected list model after h in normal mode, got %T", model)
+	}
+	if !list.vimEnabled {
+		t.Fatal("Expected returned list to preserve vim mode")
+	}
+	if cmd == nil {
+		t.Fatal("Expected list init command when returning to list")
+	}
+}
+
+func TestVimFormSubmitReturnsToList(t *testing.T) {
+	storage := &MockStorage{}
+	form := newVimFormModel(storage)
+	form.fields[titleField] = "Task"
+	form.fields[descriptionField] = "Description"
+	form.currentField = deadlineField
+	form.formMode = formModeNormal
+
+	model, cmd := form.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'l'}})
+	list, ok := model.(*ListModel)
+	if !ok {
+		t.Fatalf("Expected list model after vim submit, got %T", model)
+	}
+	if cmd == nil {
+		t.Fatal("Expected list init command after vim submit")
+	}
+	if list.statusMessage == "" {
+		t.Fatal("Expected success status message on list after vim submit")
+	}
+	if len(storage.tasks) != 1 {
+		t.Fatalf("Expected one stored task after vim submit, got %d", len(storage.tasks))
 	}
 }
 

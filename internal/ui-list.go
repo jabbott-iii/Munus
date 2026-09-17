@@ -62,15 +62,40 @@ func (m *ListModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tea.KeyMsg:
 		if m.transfer != nil {
+			// Transfer input is its own text-entry mode, so list-level bindings such
+			// as j/k/g/G/l must never intercept typed characters here.
 			return m.handleTransferKey(msg)
 		}
 
+		if m.confirmingDelete && msg.String() == "esc" {
+			m.confirmingDelete = false
+			m.deletePrimed = false
+			m.taskToDelete = nil
+			return m, nil
+		}
+
+		if m.confirmingDelete {
+			switch msg.String() {
+			case "d", "y", "n", "esc":
+			default:
+				m.deletePrimed = false
+			}
+		} else if msg.String() != "d" {
+			m.deletePrimed = false
+		}
+
 		switch msg.String() {
-		case "q", "ctrl+c", "esc":
+		case "q", "ctrl+c":
 			return m, tea.Quit
 
 		case "up", "shift+tab":
 			if m.cursor > 0 {
+				m.cursor--
+				m.EnsureCursorVisible()
+			}
+
+		case "k":
+			if m.vimEnabled && m.cursor > 0 {
 				m.cursor--
 				m.EnsureCursorVisible()
 			}
@@ -85,8 +110,39 @@ func (m *ListModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.EnsureCursorVisible()
 			}
 
+		case "j":
+			if !m.vimEnabled {
+				return m, nil
+			}
+			if len(m.GetVisibleTasks()) == 0 && len(m.tasks) > 0 {
+				m.cursor = min(m.cursor+1, len(m.tasks)-1)
+				return m, nil
+			}
+			if m.cursor < len(m.GetVisibleTasks())-1 {
+				m.cursor++
+				m.EnsureCursorVisible()
+			}
+
 		case "e":
 			m.expanded[m.cursor] = !m.expanded[m.cursor]
+
+		case "l":
+			if m.vimEnabled && m.GetCurrentTask() != nil {
+				m.expanded[m.cursor] = true
+			}
+
+		case "g":
+			if m.vimEnabled && len(m.GetVisibleTasks()) > 0 {
+				m.cursor = 0
+				m.EnsureCursorVisible()
+			}
+
+		case "G":
+			visibleTasks := m.GetVisibleTasks()
+			if m.vimEnabled && len(visibleTasks) > 0 {
+				m.cursor = len(visibleTasks) - 1
+				m.EnsureCursorVisible()
+			}
 
 		case "c":
 			if err := m.ToggleComplete(); err != nil {
@@ -95,31 +151,36 @@ func (m *ListModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, m.loadData
 
 		case "d":
+			if m.vimEnabled && m.confirmingDelete && m.taskToDelete != nil && m.deletePrimed {
+				m.deletePrimed = false
+				return m.confirmDelete()
+			}
 			if !m.confirmingDelete {
 				task := m.GetCurrentTask()
 				if task != nil {
 					m.confirmingDelete = true
 					m.taskToDelete = task
+					m.deletePrimed = m.vimEnabled
 				}
+				return m, nil
+			}
+			if m.vimEnabled {
+				m.deletePrimed = true
 			}
 			return m, nil
 
 		case "n":
 			if m.confirmingDelete {
 				m.confirmingDelete = false
+				m.deletePrimed = false
 				m.taskToDelete = nil
 				return m, nil
 			}
-			return NewFormModel(m.storage), nil
+			return NewFormModelWithOptions(m.storage, tuiOptions{vimEnabled: m.vimEnabled}), nil
 
 		case "y":
 			if m.confirmingDelete && m.taskToDelete != nil {
-				if err := m.storage.DeleteTask(m.taskToDelete.ID); err != nil {
-					m.err = err
-				}
-				m.confirmingDelete = false
-				m.taskToDelete = nil
-				return m, m.loadData
+				return m.confirmDelete()
 			}
 			return m, nil
 
@@ -288,8 +349,13 @@ func (m *ListModel) View() string {
 
 	s.WriteString("\n")
 	s.WriteString(helpStyle.Render("Commands:"))
-	s.WriteString(helpStyle.Render("\n\nshift+tab/↑ | tab/↓: Navigate • e: Expand • c: Complete • d: Delete • n: New • r: Refresh • ctrl+c: Quit"))
-	s.WriteString(helpStyle.Render("\nx: Export to File • i: Import from File"))
+	if m.vimEnabled {
+		s.WriteString(helpStyle.Render("\n\nVim mode: j/k navigate • g/G top/bottom • l expand • d opens delete • dd or y confirms • n/esc cancels delete"))
+		s.WriteString(helpStyle.Render("\nshift+tab/↑ | tab/↓: Navigate • e: Expand • c: Complete • n: New • r: Refresh • ctrl+c: Quit"))
+	} else {
+		s.WriteString(helpStyle.Render("\n\nshift+tab/↑ | tab/↓: Navigate • e: Expand • c: Complete • d: Delete prompt • y: Confirm delete • esc: Cancel delete • n: New/No • r: Refresh • ctrl+c: Quit"))
+	}
+	s.WriteString(helpStyle.Render("\n?: Help • x: Export to File • i: Import from File"))
 
 	if m.statusMessage != "" {
 		s.WriteString("\n")
@@ -455,6 +521,22 @@ func (m *ListModel) ToggleComplete() error {
 	}
 
 	return m.storage.UpdateTask(task)
+}
+
+func (m *ListModel) confirmDelete() (tea.Model, tea.Cmd) {
+	if m.taskToDelete == nil {
+		return m, nil
+	}
+
+	if err := m.storage.DeleteTask(m.taskToDelete.ID); err != nil {
+		m.err = err
+		return m, nil
+	}
+
+	m.confirmingDelete = false
+	m.deletePrimed = false
+	m.taskToDelete = nil
+	return m, m.loadData
 }
 
 //------------------------------------------export | import-----------------------------------------------------------------------------------------//
