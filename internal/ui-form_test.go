@@ -253,6 +253,23 @@ func TestUpdateCharacterInput(t *testing.T) {
 	}
 }
 
+func TestUpdateVimKeysRemainLiteralInputInForm(t *testing.T) {
+	storage := &MockStorage{}
+	form := NewFormModel(storage)
+	form.currentField = titleField
+
+	for _, r := range []rune{'j', 'k', 'g', 'G', 'h', 'l'} {
+		form.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+	}
+
+	if form.fields[titleField] != "jkgGhl" {
+		t.Errorf("Expected literal Vim characters in title field, got %q", form.fields[titleField])
+	}
+	if form.currentField != titleField {
+		t.Errorf("Expected currentField to stay on titleField, got %v", form.currentField)
+	}
+}
+
 // TestUpdateCharacterInputMaxLength tests that characters can't exceed max length
 func TestUpdateCharacterInputMaxLength(t *testing.T) {
 	tests := []struct {

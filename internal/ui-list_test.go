@@ -139,6 +139,27 @@ func TestListModelNavigationDown(t *testing.T) {
 	}
 }
 
+func TestListModelNavigationVimJK(t *testing.T) {
+	storage := &MockStorage{tasks: []*ItemModel{
+		{ID: 1, Title: "Task 1"},
+		{ID: 2, Title: "Task 2"},
+		{ID: 3, Title: "Task 3"},
+	}}
+	list := NewListModel(storage)
+	list.tasks = storage.tasks
+	list.loading = false
+
+	_, _ = list.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}})
+	if list.cursor != 1 {
+		t.Fatalf("Expected cursor 1 after j, got %d", list.cursor)
+	}
+
+	_, _ = list.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'k'}})
+	if list.cursor != 0 {
+		t.Fatalf("Expected cursor 0 after k, got %d", list.cursor)
+	}
+}
+
 // TestListModelNavigationUpAtStart tests up navigation at start doesn't go negative
 func TestListModelNavigationUpAtStart(t *testing.T) {
 	storage := &MockStorage{tasks: []*ItemModel{
@@ -281,6 +302,26 @@ func TestListModelDeleteConfirm(t *testing.T) {
 	}
 }
 
+func TestListModelDeleteConfirmWithSecondD(t *testing.T) {
+	storage := &MockStorage{tasks: []*ItemModel{
+		{ID: 1, Title: "Task 1"},
+	}}
+	list := NewListModel(storage)
+	list.tasks = storage.tasks
+	list.loading = false
+	list.cursor = 0
+
+	_, _ = list.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'d'}})
+	if !list.confirmingDelete {
+		t.Fatalf("Expected confirmingDelete to be true after first d")
+	}
+
+	_, _ = list.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'d'}})
+	if list.confirmingDelete {
+		t.Errorf("Expected confirmingDelete to be false after second d")
+	}
+}
+
 // TestListModelQuitKeys tests quit key bindings
 func TestListModelQuitKeys(t *testing.T) {
 	tests := []struct {
@@ -348,6 +389,66 @@ func TestListModelHelpToggle(t *testing.T) {
 
 	if list.showHelp {
 		t.Errorf("Expected showHelp to be false after toggle")
+	}
+}
+
+func TestListModelVimJumpTopBottom(t *testing.T) {
+	tasks := make([]*ItemModel, 25)
+	for i := range 25 {
+		tasks[i] = &ItemModel{ID: i + 1, Title: "Task"}
+	}
+
+	list := NewListModel(&MockStorage{tasks: tasks})
+	list.tasks = tasks
+	list.loading = false
+	list.cursor = 5
+
+	_, _ = list.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'G'}})
+	if list.cursor != len(list.GetVisibleTasks())-1 {
+		t.Fatalf("Expected cursor at last task after G, got %d", list.cursor)
+	}
+	if list.currentPage != 2 {
+		t.Fatalf("Expected currentPage 2 after G, got %d", list.currentPage)
+	}
+
+	_, _ = list.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'g'}})
+	if list.cursor != 0 {
+		t.Fatalf("Expected cursor 0 after g, got %d", list.cursor)
+	}
+	if list.currentPage != 0 {
+		t.Fatalf("Expected currentPage 0 after g, got %d", list.currentPage)
+	}
+}
+
+func TestListModelVimExpandCollapse(t *testing.T) {
+	storage := &MockStorage{tasks: []*ItemModel{
+		{ID: 1, Title: "Task 1", Description: "Desc 1"},
+	}}
+	list := NewListModel(storage)
+	list.tasks = storage.tasks
+	list.loading = false
+	list.cursor = 0
+
+	_, _ = list.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'l'}})
+	if !list.expanded[0] {
+		t.Fatalf("Expected selected task to expand after l")
+	}
+
+	_, _ = list.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'h'}})
+	if list.expanded[0] {
+		t.Errorf("Expected selected task to collapse after h")
+	}
+}
+
+func TestListModelViewDocumentsVimBindings(t *testing.T) {
+	list := NewListModel(&MockStorage{})
+	list.loading = false
+
+	view := list.View()
+	for _, expected := range []string{"↑/k", "↓/j", "g/G", "e/l", "d or dd", "?: Help"} {
+		if !strings.Contains(view, expected) {
+			t.Errorf("Expected view to contain %q, got %q", expected, view)
+		}
 	}
 }
 

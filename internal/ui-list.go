@@ -69,13 +69,13 @@ func (m *ListModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "q", "ctrl+c", "esc":
 			return m, tea.Quit
 
-		case "up", "shift+tab":
+		case "up", "shift+tab", "k":
 			if m.cursor > 0 {
 				m.cursor--
 				m.EnsureCursorVisible()
 			}
 
-		case "down", "tab":
+		case "down", "tab", "j":
 			if len(m.GetVisibleTasks()) == 0 && len(m.tasks) > 0 {
 				m.cursor = min(m.cursor+1, len(m.tasks)-1)
 				return m, nil
@@ -88,6 +88,24 @@ func (m *ListModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "e":
 			m.expanded[m.cursor] = !m.expanded[m.cursor]
 
+		case "l":
+			if m.GetCurrentTask() != nil {
+				m.expanded[m.cursor] = true
+			}
+
+		case "g":
+			if len(m.GetVisibleTasks()) > 0 {
+				m.cursor = 0
+				m.EnsureCursorVisible()
+			}
+
+		case "G":
+			visibleTasks := m.GetVisibleTasks()
+			if len(visibleTasks) > 0 {
+				m.cursor = len(visibleTasks) - 1
+				m.EnsureCursorVisible()
+			}
+
 		case "c":
 			if err := m.ToggleComplete(); err != nil {
 				m.err = err
@@ -95,6 +113,14 @@ func (m *ListModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, m.loadData
 
 		case "d":
+			if m.confirmingDelete && m.taskToDelete != nil {
+				if err := m.storage.DeleteTask(m.taskToDelete.ID); err != nil {
+					m.err = err
+				}
+				m.confirmingDelete = false
+				m.taskToDelete = nil
+				return m, m.loadData
+			}
 			if !m.confirmingDelete {
 				task := m.GetCurrentTask()
 				if task != nil {
@@ -127,7 +153,14 @@ func (m *ListModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.loading = true
 			return m, m.loadData
 
-		case "?", "h":
+		case "?":
+			m.showHelp = !m.showHelp
+
+		case "h":
+			if m.expanded[m.cursor] {
+				m.expanded[m.cursor] = false
+				return m, nil
+			}
 			m.showHelp = !m.showHelp
 
 		case "pgup", "b":
@@ -288,8 +321,8 @@ func (m *ListModel) View() string {
 
 	s.WriteString("\n")
 	s.WriteString(helpStyle.Render("Commands:"))
-	s.WriteString(helpStyle.Render("\n\nshift+tab/↑ | tab/↓: Navigate • e: Expand • c: Complete • d: Delete • n: New • r: Refresh • ctrl+c: Quit"))
-	s.WriteString(helpStyle.Render("\nx: Export to File • i: Import from File"))
+	s.WriteString(helpStyle.Render("\n\nshift+tab/↑/k | tab/↓/j: Navigate • g/G: Top/Bottom • e/l: Expand • h: Collapse • c: Complete • d or dd: Delete • n: New • r: Refresh • ctrl+c: Quit"))
+	s.WriteString(helpStyle.Render("\n?: Help • x: Export to File • i: Import from File"))
 
 	if m.statusMessage != "" {
 		s.WriteString("\n")

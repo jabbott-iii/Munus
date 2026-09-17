@@ -233,6 +233,7 @@ func (m *FormModel) View() string {
 
 	s.WriteString("\n")
 	s.WriteString(helpStyle.Render("shift+tab/↑ | tab/↓: Navigation • Enter: Submit • ctrl+l: List • ctrl+c: Quit"))
+	s.WriteString(helpStyle.Render("\nTyping is always literal in form fields; list-only Vim navigation is disabled while editing."))
 
 	return s.String()
 }
