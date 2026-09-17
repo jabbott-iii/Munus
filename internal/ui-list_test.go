@@ -302,6 +302,26 @@ func TestListModelDeleteConfirm(t *testing.T) {
 	}
 }
 
+func TestListModelDeleteConfirmWithYAfterD(t *testing.T) {
+	storage := &MockStorage{tasks: []*ItemModel{
+		{ID: 1, Title: "Task 1"},
+	}}
+	list := NewListModel(storage)
+	list.tasks = storage.tasks
+	list.loading = false
+	list.cursor = 0
+
+	_, _ = list.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'d'}})
+	_, _ = list.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'y'}})
+
+	if list.confirmingDelete {
+		t.Fatalf("Expected confirmingDelete to be false after d then y")
+	}
+	if list.taskToDelete != nil {
+		t.Fatalf("Expected taskToDelete to be cleared after d then y")
+	}
+}
+
 func TestListModelDeleteConfirmWithSecondD(t *testing.T) {
 	storage := &MockStorage{tasks: []*ItemModel{
 		{ID: 1, Title: "Task 1"},

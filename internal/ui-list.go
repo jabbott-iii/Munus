@@ -65,7 +65,13 @@ func (m *ListModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.handleTransferKey(msg)
 		}
 
-		if msg.String() != "d" {
+		if m.confirmingDelete {
+			switch msg.String() {
+			case "d", "y", "n", "esc":
+			default:
+				m.deletePrimed = false
+			}
+		} else if msg.String() != "d" {
 			m.deletePrimed = false
 		}
 
