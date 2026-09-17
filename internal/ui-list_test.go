@@ -18,6 +18,8 @@ package internal
 
 import (
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -1022,6 +1024,319 @@ func TestListModelHandleTransferKeyToggleSkipExisting(t *testing.T) {
 	if !list.transfer.skipExisting {
 		t.Errorf("Expected skipExisting to toggle on")
 	}
+}
+
+func TestListModelLoadData(t *testing.T) {
+	t.Run("success", func(t *testing.T) {
+		storage := &MockStorage{tasks: []*ItemModel{{ID: 1, Title: "Task 1"}}}
+		list := NewListModel(storage)
+
+		msg := list.loadData()
+		loaded, ok := msg.(DataLoadedMsg)
+		if !ok {
+			t.Fatalf("expected DataLoadedMsg, got %T", msg)
+		}
+		if len(loaded.tasks) != 1 {
+			t.Fatalf("expected 1 task, got %d", len(loaded.tasks))
+		}
+	})
+
+	t.Run("error", func(t *testing.T) {
+		storageErr := errors.New("storage unavailable")
+		storage := &MockStorage{err: storageErr}
+		list := NewListModel(storage)
+
+		msg := list.loadData()
+		errMsg, ok := msg.(ErrMsg)
+		if !ok {
+			t.Fatalf("expected ErrMsg, got %T", msg)
+		}
+		if !errors.Is(errMsg.err, storageErr) {
+			t.Fatalf("expected %v, got %v", storageErr, errMsg.err)
+		}
+	})
+}
+
+func TestListModelExportFromTransfer(t *testing.T) {
+	t.Run("nil transfer", func(t *testing.T) {
+		list := NewListModel(&MockStorage{})
+		_, cmd := list.exportFromTransfer()
+		if cmd != nil {
+			t.Fatalf("expected nil command")
+		}
+	})
+
+	t.Run("empty path", func(t *testing.T) {
+		list := NewListModel(&MockStorage{})
+		list.transfer = &transferState{
+			action: transferActionExport,
+			stage:  transferStageInput,
+			path:   "   ",
+		}
+
+		list.exportFromTransfer()
+		if list.transfer.operationError == nil {
+			t.Fatalf("expected operation error for empty path")
+		}
+	})
+
+	t.Run("plan export error", func(t *testing.T) {
+		list := NewListModel(&MockStorage{err: errors.New("list failed")})
+		list.transfer = &transferState{
+			action: transferActionExport,
+			stage:  transferStageInput,
+			path:   filepath.Join(t.TempDir(), "export.json"),
+		}
+
+		list.exportFromTransfer()
+		if list.transfer.operationError == nil {
+			t.Fatalf("expected operation error")
+		}
+	})
+
+	t.Run("export write error", func(t *testing.T) {
+		list := NewListModel(&MockStorage{tasks: []*ItemModel{{ID: 1, Title: "Task 1", Description: "Desc"}}})
+		list.transfer = &transferState{
+			action: transferActionExport,
+			stage:  transferStageInput,
+			path:   t.TempDir(), // directory path should fail
+		}
+
+		list.exportFromTransfer()
+		if list.transfer.operationError == nil {
+			t.Fatalf("expected operation error")
+		}
+	})
+
+	t.Run("success", func(t *testing.T) {
+		list := NewListModel(&MockStorage{tasks: []*ItemModel{
+			{ID: 1, Title: "Task 1", Description: "Desc 1"},
+			{ID: 2, Title: "Task 2", Description: "Desc 2"},
+		}})
+		outPath := filepath.Join(t.TempDir(), "export.json")
+		list.transfer = &transferState{
+			action:           transferActionExport,
+			stage:            transferStageInput,
+			path:             outPath,
+			includeCompleted: true,
+		}
+
+		list.exportFromTransfer()
+		if list.transfer != nil {
+			t.Fatalf("expected transfer state cleared after export")
+		}
+		if !strings.Contains(list.statusMessage, "Exported 2 tasks") {
+			t.Fatalf("expected success status, got %q", list.statusMessage)
+		}
+		data, err := os.ReadFile(outPath)
+		if err != nil {
+			t.Fatalf("expected export file, got error: %v", err)
+		}
+		if !strings.Contains(string(data), `"tasks"`) {
+			t.Fatalf("expected tasks JSON payload, got %q", string(data))
+		}
+	})
+}
+
+func TestListModelPlanImportFromTransfer(t *testing.T) {
+	t.Run("nil transfer", func(t *testing.T) {
+		list := NewListModel(&MockStorage{})
+		_, cmd := list.planImportFromTransfer()
+		if cmd != nil {
+			t.Fatalf("expected nil command")
+		}
+	})
+
+	t.Run("empty path", func(t *testing.T) {
+		list := NewListModel(&MockStorage{})
+		list.transfer = &transferState{
+			action: transferActionImport,
+			stage:  transferStageInput,
+			path:   " ",
+		}
+		list.planImportFromTransfer()
+		if list.transfer.operationError == nil {
+			t.Fatalf("expected operation error for empty path")
+		}
+	})
+
+	t.Run("plan error", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		badFile := filepath.Join(tmpDir, "bad.json")
+		if err := os.WriteFile(badFile, []byte("{"), 0o644); err != nil {
+			t.Fatalf("failed to write bad file: %v", err)
+		}
+
+		list := NewListModel(&MockStorage{})
+		list.transfer = &transferState{
+			action:     transferActionImport,
+			stage:      transferStageInput,
+			path:       badFile,
+			importMode: "merge",
+		}
+		list.planImportFromTransfer()
+		if list.transfer.operationError == nil {
+			t.Fatalf("expected operation error")
+		}
+	})
+
+	t.Run("success", func(t *testing.T) {
+		now := time.Now()
+		filePath := writeTestImportBundle(t, ExportBundle{
+			Version:    1,
+			ExportedAt: now,
+			Tasks: []TaskDTO{
+				{
+					ID:          "1",
+					Title:       "Imported Task",
+					Description: "Desc",
+					CreatedAt:   now,
+					UpdatedAt:   now,
+				},
+			},
+		})
+
+		list := NewListModel(&MockStorage{})
+		list.transfer = &transferState{
+			action:     transferActionImport,
+			stage:      transferStageInput,
+			path:       "  " + filePath + "  ",
+			importMode: "merge",
+		}
+
+		list.planImportFromTransfer()
+		if list.transfer.plan == nil {
+			t.Fatalf("expected plan to be populated")
+		}
+		if list.transfer.stage != transferStageConfirm {
+			t.Fatalf("expected confirm stage, got %v", list.transfer.stage)
+		}
+		if list.transfer.path != filePath {
+			t.Fatalf("expected trimmed path %q, got %q", filePath, list.transfer.path)
+		}
+	})
+}
+
+func TestListModelApplyImportFromTransfer(t *testing.T) {
+	t.Run("nil transfer", func(t *testing.T) {
+		list := NewListModel(&MockStorage{})
+		_, cmd := list.applyImportFromTransfer()
+		if cmd != nil {
+			t.Fatalf("expected nil command")
+		}
+	})
+
+	t.Run("apply error", func(t *testing.T) {
+		list := NewListModel(&MockStorage{})
+		list.transfer = &transferState{
+			action:     transferActionImport,
+			stage:      transferStageConfirm,
+			path:       filepath.Join(t.TempDir(), "missing.json"),
+			importMode: "merge",
+		}
+		list.applyImportFromTransfer()
+		if list.transfer.operationError == nil {
+			t.Fatalf("expected operation error")
+		}
+	})
+
+	t.Run("success", func(t *testing.T) {
+		storage := NewMockModel()
+		if err := storage.CreateTask(&ItemModel{Title: "Existing", Description: "Local"}); err != nil {
+			t.Fatalf("failed to seed local task: %v", err)
+		}
+		now := time.Now()
+		filePath := writeTestImportBundle(t, ExportBundle{
+			Version:    1,
+			ExportedAt: now,
+			Tasks: []TaskDTO{
+				{
+					ID:          "1",
+					Title:       "Existing",
+					Description: "Imported",
+					CreatedAt:   now,
+					UpdatedAt:   now,
+				},
+				{
+					ID:          "2",
+					Title:       "New",
+					Description: "New Desc",
+					CreatedAt:   now,
+					UpdatedAt:   now,
+				},
+			},
+		})
+
+		list := NewListModel(storage)
+		list.transfer = &transferState{
+			action:       transferActionImport,
+			stage:        transferStageConfirm,
+			path:         filePath,
+			importMode:   "merge",
+			skipExisting: true,
+			backup:       true,
+		}
+
+		_, cmd := list.applyImportFromTransfer()
+		if list.transfer != nil {
+			t.Fatalf("expected transfer to be cleared")
+		}
+		if !list.loading {
+			t.Fatalf("expected loading state enabled")
+		}
+		if cmd == nil {
+			t.Fatalf("expected reload command")
+		}
+		if !strings.Contains(list.statusMessage, "skipped=1") {
+			t.Fatalf("expected skipped count in status, got %q", list.statusMessage)
+		}
+		if !strings.Contains(list.statusMessage, "skipped IDs=1") {
+			t.Fatalf("expected skipped IDs in status, got %q", list.statusMessage)
+		}
+
+		msg := cmd()
+		if _, ok := msg.(DataLoadedMsg); !ok {
+			t.Fatalf("expected DataLoadedMsg from reload command, got %T", msg)
+		}
+	})
+
+	t.Run("success includes backup path for replace mode", func(t *testing.T) {
+		storage := NewMockModel()
+		if err := storage.CreateTask(&ItemModel{Title: "Existing", Description: "Local"}); err != nil {
+			t.Fatalf("failed to seed local task: %v", err)
+		}
+		now := time.Now()
+		filePath := writeTestImportBundle(t, ExportBundle{
+			Version:    1,
+			ExportedAt: now,
+			Tasks: []TaskDTO{
+				{
+					ID:          "3",
+					Title:       "Replacement",
+					Description: "Imported Desc",
+					CreatedAt:   now,
+					UpdatedAt:   now,
+				},
+			},
+		})
+
+		list := NewListModel(storage)
+		list.transfer = &transferState{
+			action:     transferActionImport,
+			stage:      transferStageConfirm,
+			path:       filePath,
+			importMode: "replace",
+			backup:     true,
+		}
+
+		_, cmd := list.applyImportFromTransfer()
+		if cmd == nil {
+			t.Fatalf("expected reload command")
+		}
+		if !strings.Contains(list.statusMessage, "backup=") {
+			t.Fatalf("expected backup path in status, got %q", list.statusMessage)
+		}
+	})
 }
 
 func TestListModelRenderTransferOverlayShowsSkipExistingAndConflicts(t *testing.T) {
