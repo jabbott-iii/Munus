@@ -65,6 +65,13 @@ func (m *ListModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.handleTransferKey(msg)
 		}
 
+		if m.confirmingDelete && msg.String() == "esc" {
+			m.confirmingDelete = false
+			m.deletePrimed = false
+			m.taskToDelete = nil
+			return m, nil
+		}
+
 		if m.confirmingDelete {
 			switch msg.String() {
 			case "d", "y", "n", "esc":

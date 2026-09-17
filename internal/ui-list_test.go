@@ -284,6 +284,32 @@ func TestListModelDeleteCancel(t *testing.T) {
 	}
 }
 
+func TestListModelDeleteCancelWithEscape(t *testing.T) {
+	storage := &MockStorage{tasks: []*ItemModel{
+		{ID: 1, Title: "Task 1"},
+	}}
+	list := NewListModel(storage)
+	list.tasks = storage.tasks
+	list.confirmingDelete = true
+	list.deletePrimed = true
+	list.taskToDelete = &ItemModel{ID: 1, Title: "Task 1"}
+
+	_, cmd := list.Update(tea.KeyMsg{Type: tea.KeyEsc})
+
+	if list.confirmingDelete {
+		t.Errorf("Expected confirmingDelete to be false")
+	}
+	if list.deletePrimed {
+		t.Errorf("Expected deletePrimed to be false")
+	}
+	if list.taskToDelete != nil {
+		t.Errorf("Expected taskToDelete to be nil")
+	}
+	if cmd != nil {
+		t.Errorf("Expected no quit command on escape during delete confirmation")
+	}
+}
+
 // TestListModelDeleteConfirm tests deleting confirmation with the 'y' key
 func TestListModelDeleteConfirm(t *testing.T) {
 	storage := &MockStorage{tasks: []*ItemModel{
