@@ -322,6 +322,34 @@ func TestListModelDeleteConfirmWithSecondD(t *testing.T) {
 	}
 }
 
+func TestListModelDeleteConfirmWithSecondDKeepsConfirmationOnError(t *testing.T) {
+	deleteErr := errors.New("delete failed")
+	storage := &MockStorage{
+		tasks: []*ItemModel{{ID: 1, Title: "Task 1"}},
+		err:   deleteErr,
+	}
+	list := NewListModel(storage)
+	list.tasks = storage.tasks
+	list.loading = false
+	list.cursor = 0
+
+	_, _ = list.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'d'}})
+	_, cmd := list.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'d'}})
+
+	if !list.confirmingDelete {
+		t.Fatalf("Expected confirmingDelete to remain true after failed second d")
+	}
+	if list.taskToDelete == nil || list.taskToDelete.ID != 1 {
+		t.Fatalf("Expected taskToDelete to remain set after failed second d, got %+v", list.taskToDelete)
+	}
+	if !errors.Is(list.err, deleteErr) {
+		t.Fatalf("Expected delete error to be stored, got %v", list.err)
+	}
+	if cmd != nil {
+		t.Fatalf("Expected no reload command after failed second d")
+	}
+}
+
 // TestListModelQuitKeys tests quit key bindings
 func TestListModelQuitKeys(t *testing.T) {
 	tests := []struct {

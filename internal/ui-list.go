@@ -114,12 +114,7 @@ func (m *ListModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		case "d":
 			if m.confirmingDelete && m.taskToDelete != nil {
-				if err := m.storage.DeleteTask(m.taskToDelete.ID); err != nil {
-					m.err = err
-				}
-				m.confirmingDelete = false
-				m.taskToDelete = nil
-				return m, m.loadData
+				return m.confirmDelete()
 			}
 			if !m.confirmingDelete {
 				task := m.GetCurrentTask()
@@ -140,12 +135,7 @@ func (m *ListModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		case "y":
 			if m.confirmingDelete && m.taskToDelete != nil {
-				if err := m.storage.DeleteTask(m.taskToDelete.ID); err != nil {
-					m.err = err
-				}
-				m.confirmingDelete = false
-				m.taskToDelete = nil
-				return m, m.loadData
+				return m.confirmDelete()
 			}
 			return m, nil
 
@@ -481,6 +471,21 @@ func (m *ListModel) ToggleComplete() error {
 	}
 
 	return m.storage.UpdateTask(task)
+}
+
+func (m *ListModel) confirmDelete() (tea.Model, tea.Cmd) {
+	if m.taskToDelete == nil {
+		return m, nil
+	}
+
+	if err := m.storage.DeleteTask(m.taskToDelete.ID); err != nil {
+		m.err = err
+		return m, nil
+	}
+
+	m.confirmingDelete = false
+	m.taskToDelete = nil
+	return m, m.loadData
 }
 
 //------------------------------------------export | import-----------------------------------------------------------------------------------------//
