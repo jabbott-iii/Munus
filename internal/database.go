@@ -61,6 +61,7 @@ type ListModel struct {
 	err              error
 	loading          bool
 	confirmingDelete bool
+	deletePrimed     bool
 	taskToDelete     *ItemModel
 	viewportWidth    int
 	viewportHeight   int

@@ -350,6 +350,34 @@ func TestListModelDeleteConfirmWithSecondDKeepsConfirmationOnError(t *testing.T)
 	}
 }
 
+func TestListModelDeleteConfirmRequiresConsecutiveD(t *testing.T) {
+	storage := &MockStorage{tasks: []*ItemModel{
+		{ID: 1, Title: "Task 1"},
+	}}
+	list := NewListModel(storage)
+	list.tasks = storage.tasks
+	list.loading = false
+	list.cursor = 0
+
+	_, _ = list.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'d'}})
+	_, _ = list.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'h'}})
+
+	if !list.confirmingDelete {
+		t.Fatalf("Expected confirmation to remain open after h")
+	}
+
+	_, cmd := list.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'d'}})
+	if cmd != nil {
+		t.Fatalf("Expected first d after interruption to re-prime, not delete")
+	}
+	if !list.confirmingDelete {
+		t.Fatalf("Expected confirmation to remain open after non-consecutive d")
+	}
+	if list.taskToDelete == nil || list.taskToDelete.ID != 1 {
+		t.Fatalf("Expected taskToDelete to remain set, got %+v", list.taskToDelete)
+	}
+}
+
 // TestListModelQuitKeys tests quit key bindings
 func TestListModelQuitKeys(t *testing.T) {
 	tests := []struct {

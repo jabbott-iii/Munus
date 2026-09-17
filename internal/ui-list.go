@@ -65,6 +65,10 @@ func (m *ListModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.handleTransferKey(msg)
 		}
 
+		if msg.String() != "d" {
+			m.deletePrimed = false
+		}
+
 		switch msg.String() {
 		case "q", "ctrl+c", "esc":
 			return m, tea.Quit
@@ -113,7 +117,8 @@ func (m *ListModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, m.loadData
 
 		case "d":
-			if m.confirmingDelete && m.taskToDelete != nil {
+			if m.confirmingDelete && m.taskToDelete != nil && m.deletePrimed {
+				m.deletePrimed = false
 				return m.confirmDelete()
 			}
 			if !m.confirmingDelete {
@@ -121,13 +126,17 @@ func (m *ListModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if task != nil {
 					m.confirmingDelete = true
 					m.taskToDelete = task
+					m.deletePrimed = true
 				}
+				return m, nil
 			}
+			m.deletePrimed = true
 			return m, nil
 
 		case "n":
 			if m.confirmingDelete {
 				m.confirmingDelete = false
+				m.deletePrimed = false
 				m.taskToDelete = nil
 				return m, nil
 			}
@@ -484,6 +493,7 @@ func (m *ListModel) confirmDelete() (tea.Model, tea.Cmd) {
 	}
 
 	m.confirmingDelete = false
+	m.deletePrimed = false
 	m.taskToDelete = nil
 	return m, m.loadData
 }
