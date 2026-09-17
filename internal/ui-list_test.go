@@ -963,6 +963,24 @@ func TestListModelHandleTransferKeyCharacterInput(t *testing.T) {
 	}
 }
 
+func TestListModelTransferInputKeepsVimRunesLiteral(t *testing.T) {
+	list := NewListModel(&MockStorage{})
+	list.transfer = &transferState{
+		action: transferActionExport,
+		stage:  transferStageInput,
+		path:   "",
+		cursor: 0,
+	}
+
+	for _, r := range []rune{'j', 'k', 'g', 'G', 'l', 'd'} {
+		_, _ = list.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+	}
+
+	if list.transfer.path != "jkgGld" {
+		t.Fatalf("Expected Vim runes to be inserted literally in transfer input, got %q", list.transfer.path)
+	}
+}
+
 func TestListModelHandleTransferKeyToggleSkipExisting(t *testing.T) {
 	list := NewListModel(&MockStorage{})
 	list.transfer = &transferState{

@@ -62,6 +62,8 @@ func (m *ListModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tea.KeyMsg:
 		if m.transfer != nil {
+			// Transfer input is its own text-entry mode, so list-level bindings such
+			// as j/k/g/G/l must never intercept typed characters here.
 			return m.handleTransferKey(msg)
 		}
 
