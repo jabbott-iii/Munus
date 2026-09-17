@@ -153,14 +153,7 @@ func (m *ListModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.loading = true
 			return m, m.loadData
 
-		case "?":
-			m.showHelp = !m.showHelp
-
-		case "h":
-			if m.expanded[m.cursor] {
-				m.expanded[m.cursor] = false
-				return m, nil
-			}
+		case "?", "h":
 			m.showHelp = !m.showHelp
 
 		case "pgup", "b":
@@ -321,7 +314,7 @@ func (m *ListModel) View() string {
 
 	s.WriteString("\n")
 	s.WriteString(helpStyle.Render("Commands:"))
-	s.WriteString(helpStyle.Render("\n\nshift+tab/↑/k | tab/↓/j: Navigate • g/G: Top/Bottom • e/l: Expand • h: Collapse • c: Complete • d or dd: Delete • n: New • r: Refresh • ctrl+c: Quit"))
+	s.WriteString(helpStyle.Render("\n\nshift+tab/↑/k | tab/↓/j: Navigate • g/G: Top/Bottom • e/l: Expand • c: Complete • d or dd: Delete • n: New • r: Refresh • ctrl+c: Quit"))
 	s.WriteString(helpStyle.Render("\n?: Help • x: Export to File • i: Import from File"))
 
 	if m.statusMessage != "" {
