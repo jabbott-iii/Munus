@@ -33,10 +33,17 @@ import (
 
 // NewRootCmd tui main entry point
 func NewRootCmd(db *Database) *cobra.Command {
+	var vim bool
+
 	cmd := &cobra.Command{
 		Use: "munus",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			p := tea.NewProgram(NewFormModel(db), tea.WithAltScreen())
+			opts := tuiOptions{vimEnabled: vim}
+			initialModel := tea.Model(NewFormModelWithOptions(db, opts))
+			if vim {
+				initialModel = NewListModelWithOptions(db, opts)
+			}
+			p := tea.NewProgram(initialModel, tea.WithAltScreen())
 			_, err := p.Run()
 			return err
 		},
@@ -48,6 +55,7 @@ func NewRootCmd(db *Database) *cobra.Command {
 	cmd.AddCommand(CompleteTaskCmd(db))
 	cmd.AddCommand(NewExportCmd(db))
 	cmd.AddCommand(NewImportCmd(db))
+	cmd.Flags().BoolVar(&vim, "vim", false, "enable vim keybindings in the TUI")
 
 	return cmd
 }

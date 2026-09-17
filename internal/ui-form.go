@@ -48,13 +48,17 @@ func (m *FormModel) Init() tea.Cmd {
 func (m *FormModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
+		if model, cmd, handled := m.handleVimKey(msg); handled {
+			return model, cmd
+		}
+
 		switch msg.String() {
 		case "ctrl+c", "esc":
 			m.done = true
 			return m, tea.Quit
 
 		case "ctrl+l":
-			lm := NewListModel(m.storage)
+			lm := NewListModelWithOptions(m.storage, tuiOptions{vimEnabled: m.vimEnabled})
 			return lm, lm.Init()
 
 		case "tab", "down":
@@ -78,6 +82,11 @@ func (m *FormModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.err = err
 				} else {
 					m.submitted = true
+					if m.vimEnabled {
+						lm := NewListModelWithOptions(m.storage, tuiOptions{vimEnabled: m.vimEnabled})
+						lm.statusMessage = "🗹 Task created successfully!"
+						return lm, lm.Init()
+					}
 					fm := NewFormModel(m.storage)
 					return fm, fm.Init()
 				}
@@ -130,6 +139,77 @@ func (m *FormModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+func (m *FormModel) handleVimKey(msg tea.KeyMsg) (tea.Model, tea.Cmd, bool) {
+	if !m.vimEnabled {
+		return m, nil, false
+	}
+
+	if m.formMode == formModeInsert {
+		if msg.Type == tea.KeyEsc {
+			m.formMode = formModeNormal
+			return m, nil, true
+		}
+		return m, nil, false
+	}
+
+	switch msg.Type {
+	case tea.KeyCtrlC:
+		m.done = true
+		return m, tea.Quit, true
+	case tea.KeyCtrlL:
+		return m.returnToList()
+	case tea.KeyEsc:
+		return m.returnToList()
+	case tea.KeyTab, tea.KeyDown:
+		if m.currentField < deadlineField {
+			m.currentField++
+			m.cursor = len(m.fields[m.currentField])
+		}
+		return m, nil, true
+	case tea.KeyShiftTab, tea.KeyUp:
+		if m.currentField > titleField {
+			m.currentField--
+			m.cursor = len(m.fields[m.currentField])
+		}
+		return m, nil, true
+	case tea.KeyEnter:
+		return m.advanceOrSubmit()
+	case tea.KeyRunes:
+		switch msg.String() {
+		case "i", "a":
+			m.formMode = formModeInsert
+			return m, nil, true
+		case "o":
+			if m.currentField < deadlineField {
+				m.currentField++
+				m.cursor = len(m.fields[m.currentField])
+			}
+			m.formMode = formModeInsert
+			return m, nil, true
+		case "j":
+			if m.currentField < deadlineField {
+				m.currentField++
+				m.cursor = len(m.fields[m.currentField])
+			}
+			return m, nil, true
+		case "k":
+			if m.currentField > titleField {
+				m.currentField--
+				m.cursor = len(m.fields[m.currentField])
+			}
+			return m, nil, true
+		case "h":
+			return m.returnToList()
+		case "l":
+			return m.advanceOrSubmit()
+		default:
+			return m, nil, true
+		}
+	default:
+		return m, nil, true
+	}
+}
+
 // View renders the form
 func (m *FormModel) View() string {
 	if m.submitted {
@@ -179,6 +259,15 @@ func (m *FormModel) View() string {
 	var s strings.Builder
 	s.WriteString(titleStyle.Render("Create New Task"))
 	s.WriteString("\n\n")
+
+	if m.vimEnabled {
+		modeLabel := "-- INSERT --"
+		if m.formMode == formModeNormal {
+			modeLabel = "-- NORMAL --"
+		}
+		s.WriteString(helpStyle.Render(modeLabel))
+		s.WriteString("\n\n")
+	}
 
 	titleLabel := fmt.Sprintf("Title * (%d/%d)", len(m.fields[titleField]), MaxTitleLength)
 	s.WriteString(labelStyle.Render(titleLabel))
@@ -232,8 +321,16 @@ func (m *FormModel) View() string {
 	}
 
 	s.WriteString("\n")
-	s.WriteString(helpStyle.Render("shift+tab/↑ | tab/↓: Navigation • Enter: Submit • ctrl+l: List • ctrl+c: Quit"))
-	s.WriteString(helpStyle.Render("\nTyping is always literal in form fields; list-only Vim navigation is disabled while editing."))
+	if m.vimEnabled {
+		if m.formMode == formModeInsert {
+			s.WriteString(helpStyle.Render("Vim insert • Esc: normal • Tab/↑/↓: field navigation • Enter: next/submit • ctrl+l: List • ctrl+c: Quit"))
+		} else {
+			s.WriteString(helpStyle.Render("Vim normal • j/k: fields • h/esc: list • l/Enter: next/submit • i/a/o: insert • ctrl+c: Quit"))
+		}
+	} else {
+		s.WriteString(helpStyle.Render("shift+tab/↑ | tab/↓: Navigation • Enter: Submit • ctrl+l: List • ctrl+c: Quit"))
+		s.WriteString(helpStyle.Render("\nTyping is always literal in form fields; list-only Vim navigation is disabled while editing."))
+	}
 
 	return s.String()
 }
@@ -243,6 +340,29 @@ func (m *FormModel) addCursor(text string) string {
 		return text + "█"
 	}
 	return text[:m.cursor] + "█" + text[m.cursor:]
+}
+
+func (m *FormModel) returnToList() (tea.Model, tea.Cmd, bool) {
+	lm := NewListModelWithOptions(m.storage, tuiOptions{vimEnabled: m.vimEnabled})
+	return lm, lm.Init(), true
+}
+
+func (m *FormModel) advanceOrSubmit() (tea.Model, tea.Cmd, bool) {
+	if m.currentField < deadlineField {
+		m.currentField++
+		m.cursor = len(m.fields[m.currentField])
+		return m, nil, true
+	}
+
+	if err := m.submitForm(); err != nil {
+		m.err = err
+		return m, nil, true
+	}
+
+	m.submitted = true
+	lm := NewListModelWithOptions(m.storage, tuiOptions{vimEnabled: m.vimEnabled})
+	lm.statusMessage = "🗹 Task created successfully!"
+	return lm, lm.Init(), true
 }
 
 func (m *FormModel) submitForm() error {

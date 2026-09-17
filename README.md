@@ -83,9 +83,13 @@ Examples:
 ### Interactive TUI
 
 - Running munus with no subcommand launches the terminal UI for interactive task management.
-- Default navigation remains available: `tab`/`shift+tab` and `↑`/`↓` move through the task list, `e` expands a task, `d` opens delete confirmation, `y` confirms deletion, `n` or `Esc` cancels the delete prompt, and `?` shows help text in-app.
-- Additive Vim-style task-list navigation is also supported in normal/list mode: `j`/`k` move down/up, `g`/`G` jump to the top/bottom, `l` expands the selected task, and pressing `d` again immediately after `d` works like a `dd`-style delete confirm.
-- Vim-style bindings are disabled while typing into editable fields such as the new-task form and import/export path prompt, so keys like `j`, `k`, `g`, `h`, and `l` are inserted as normal text during editing.
+- By default, Munus keeps the existing non-Vim behavior: the TUI opens the new-task form, `tab`/`shift+tab` and `↑`/`↓` move between fields or tasks where applicable, `ctrl+l` switches to the task list, and `ctrl+c` quits.
+- Run `munus --vim` to enable Vim-style TUI behavior.
+- With `--vim` enabled:
+  - Munus opens the task list first so list navigation acts like the primary dashboard.
+  - The list accepts `j`/`k` to move, `g`/`G` to jump to the top/bottom, `l` to expand the selected task, `d` to open delete confirmation, and either `y` or consecutive `dd` to confirm deletion. `n` or `Esc` cancels the delete prompt.
+  - Forms start in insert mode so task titles, descriptions, and import/export paths still accept literal text input.
+  - Press `Esc` in a form to switch to normal mode, then use `j`/`k` to move between fields, `h` or `Esc` to return to the list, `l` or `Enter` to advance/submit, and `i`/`a`/`o` to return to insert mode. `o` moves to the next field before re-entering insert mode.
 
 ## Install:
 

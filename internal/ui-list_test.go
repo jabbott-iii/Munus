@@ -26,6 +26,10 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
+func newVimListModel(storage Storage) *ListModel {
+	return NewListModelWithOptions(storage, tuiOptions{vimEnabled: true})
+}
+
 // TestListModelInit tests the Init method of ListModel
 func TestListModelInit(t *testing.T) {
 	storage := &MockStorage{}
@@ -145,7 +149,7 @@ func TestListModelNavigationVimJK(t *testing.T) {
 		{ID: 2, Title: "Task 2"},
 		{ID: 3, Title: "Task 3"},
 	}}
-	list := NewListModel(storage)
+	list := newVimListModel(storage)
 	list.tasks = storage.tasks
 	list.loading = false
 
@@ -157,6 +161,21 @@ func TestListModelNavigationVimJK(t *testing.T) {
 	_, _ = list.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'k'}})
 	if list.cursor != 0 {
 		t.Fatalf("Expected cursor 0 after k, got %d", list.cursor)
+	}
+}
+
+func TestListModelDefaultModeIgnoresVimNavigation(t *testing.T) {
+	storage := &MockStorage{tasks: []*ItemModel{
+		{ID: 1, Title: "Task 1"},
+		{ID: 2, Title: "Task 2"},
+	}}
+	list := NewListModel(storage)
+	list.tasks = storage.tasks
+	list.loading = false
+
+	_, _ = list.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}})
+	if list.cursor != 0 {
+		t.Fatalf("Expected cursor to remain at 0 when vim mode is disabled, got %d", list.cursor)
 	}
 }
 
@@ -352,7 +371,7 @@ func TestListModelDeleteConfirmWithSecondD(t *testing.T) {
 	storage := &MockStorage{tasks: []*ItemModel{
 		{ID: 1, Title: "Task 1"},
 	}}
-	list := NewListModel(storage)
+	list := newVimListModel(storage)
 	list.tasks = storage.tasks
 	list.loading = false
 	list.cursor = 0
@@ -374,7 +393,7 @@ func TestListModelDeleteConfirmWithSecondDKeepsConfirmationOnError(t *testing.T)
 		tasks: []*ItemModel{{ID: 1, Title: "Task 1"}},
 		err:   deleteErr,
 	}
-	list := NewListModel(storage)
+	list := newVimListModel(storage)
 	list.tasks = storage.tasks
 	list.loading = false
 	list.cursor = 0
@@ -400,7 +419,7 @@ func TestListModelDeleteConfirmRequiresConsecutiveD(t *testing.T) {
 	storage := &MockStorage{tasks: []*ItemModel{
 		{ID: 1, Title: "Task 1"},
 	}}
-	list := NewListModel(storage)
+	list := newVimListModel(storage)
 	list.tasks = storage.tasks
 	list.loading = false
 	list.cursor = 0
@@ -508,7 +527,7 @@ func TestListModelVimJumpTopBottom(t *testing.T) {
 		tasks[i] = &ItemModel{ID: i + 1, Title: "Task"}
 	}
 
-	list := NewListModel(&MockStorage{tasks: tasks})
+	list := newVimListModel(&MockStorage{tasks: tasks})
 	list.tasks = tasks
 	list.loading = false
 	list.cursor = 5
@@ -535,7 +554,7 @@ func TestListModelVimExpand(t *testing.T) {
 	storage := &MockStorage{tasks: []*ItemModel{
 		{ID: 1, Title: "Task 1", Description: "Desc 1"},
 	}}
-	list := NewListModel(storage)
+	list := newVimListModel(storage)
 	list.tasks = storage.tasks
 	list.loading = false
 	list.cursor = 0
@@ -547,11 +566,11 @@ func TestListModelVimExpand(t *testing.T) {
 }
 
 func TestListModelViewDocumentsVimBindings(t *testing.T) {
-	list := NewListModel(&MockStorage{})
+	list := newVimListModel(&MockStorage{})
 	list.loading = false
 
 	view := list.View()
-	for _, expected := range []string{"↑/k", "↓/j", "g/G", "e/l", "d: Delete prompt", "y or dd: Confirm delete", "n/esc: Cancel delete", "?: Help"} {
+	for _, expected := range []string{"Vim mode: j/k navigate", "g/G top/bottom", "dd or y confirms", "?: Help"} {
 		if !strings.Contains(view, expected) {
 			t.Errorf("Expected view to contain %q, got %q", expected, view)
 		}
@@ -972,7 +991,7 @@ func TestListModelHandleTransferKeyCharacterInput(t *testing.T) {
 }
 
 func TestListModelTransferInputKeepsVimRunesLiteral(t *testing.T) {
-	list := NewListModel(&MockStorage{})
+	list := newVimListModel(&MockStorage{})
 	list.transfer = &transferState{
 		action: transferActionExport,
 		stage:  transferStageInput,

@@ -67,7 +67,15 @@ type ListModel struct {
 	viewportHeight   int
 	statusMessage    string
 	transfer         *transferState
+	vimEnabled       bool
 }
+
+type formInputMode int
+
+const (
+	formModeInsert formInputMode = iota
+	formModeNormal
+)
 
 // FormModel represents the form input model
 type FormModel struct {
@@ -78,6 +86,12 @@ type FormModel struct {
 	done         bool
 	err          error
 	submitted    bool
+	formMode     formInputMode
+	vimEnabled   bool
+}
+
+type tuiOptions struct {
+	vimEnabled bool
 }
 
 // DataLoadedMsg is emitted when tasks are loaded from storage.
@@ -91,21 +105,32 @@ type ErrMsg struct {
 
 // NewFormModel creates a new form model
 func NewFormModel(storage Storage) *FormModel {
+	return NewFormModelWithOptions(storage, tuiOptions{})
+}
+
+func NewFormModelWithOptions(storage Storage, opts tuiOptions) *FormModel {
 	return &FormModel{
 		storage:      storage,
 		fields:       make([]string, 3),
 		currentField: titleField,
+		formMode:     formModeInsert,
+		vimEnabled:   opts.vimEnabled,
 	}
 }
 
 // NewListModel creates a new list model
 func NewListModel(storage Storage) *ListModel {
+	return NewListModelWithOptions(storage, tuiOptions{})
+}
+
+func NewListModelWithOptions(storage Storage, opts tuiOptions) *ListModel {
 	m := &ListModel{
 		storage:          storage,
 		expanded:         make(map[int]bool),
 		loading:          true,
 		confirmingDelete: false,
 		taskToDelete:     nil,
+		vimEnabled:       opts.vimEnabled,
 	}
 	return m
 }
