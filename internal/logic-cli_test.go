@@ -666,6 +666,181 @@ func TestImportCmdRejectsAmbiguousConflictFlags(t *testing.T) {
 	}
 }
 
+func TestExportCmdDryRun(t *testing.T) {
+	db := NewMockModel()
+	if err := db.CreateTask(&ItemModel{Title: "Todo", Description: "Task", Completed: false}); err != nil {
+		t.Fatalf("failed to seed todo task: %v", err)
+	}
+	if err := db.CreateTask(&ItemModel{Title: "Done", Description: "Task", Completed: true}); err != nil {
+		t.Fatalf("failed to seed done task: %v", err)
+	}
+
+	cmd := NewExportCmd(db)
+	cmd.SetArgs([]string{"--dry-run"})
+	buf := &bytes.Buffer{}
+	cmd.SetOut(buf)
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("export dry-run failed: %v", err)
+	}
+	if !strings.Contains(buf.String(), "Would export 1 tasks") {
+		t.Fatalf("expected dry-run summary, got %q", buf.String())
+	}
+}
+
+func TestExportCmdStdout(t *testing.T) {
+	db := NewMockModel()
+	if err := db.CreateTask(&ItemModel{Title: "Task", Description: "Desc"}); err != nil {
+		t.Fatalf("failed to seed task: %v", err)
+	}
+
+	cmd := NewExportCmd(db)
+	cmd.SetArgs([]string{"--stdout"})
+	buf := &bytes.Buffer{}
+	cmd.SetOut(buf)
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("export stdout failed: %v", err)
+	}
+	output := buf.String()
+	if !strings.Contains(output, `"version": 1`) {
+		t.Fatalf("expected version in JSON output, got %q", output)
+	}
+	if !strings.Contains(output, `"title": "Task"`) {
+		t.Fatalf("expected task in JSON output, got %q", output)
+	}
+}
+
+func TestExportCmdWritesFile(t *testing.T) {
+	db := NewMockModel()
+	if err := db.CreateTask(&ItemModel{Title: "Task", Description: "Desc"}); err != nil {
+		t.Fatalf("failed to seed task: %v", err)
+	}
+
+	filePath := filepath.Join(t.TempDir(), "export.json")
+	cmd := NewExportCmd(db)
+	cmd.SetArgs([]string{"--file", filePath})
+	buf := &bytes.Buffer{}
+	cmd.SetOut(buf)
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("export file failed: %v", err)
+	}
+	if !strings.Contains(buf.String(), "Exported 1 tasks") {
+		t.Fatalf("expected success output, got %q", buf.String())
+	}
+	data, err := os.ReadFile(filePath)
+	if err != nil {
+		t.Fatalf("expected export file to exist: %v", err)
+	}
+	if !strings.Contains(string(data), `"tasks"`) {
+		t.Fatalf("expected tasks key in export file")
+	}
+}
+
+func TestExportCmdReturnsErrorWhenDatabaseFails(t *testing.T) {
+	db := NewMockModel()
+	if err := db.Close(); err != nil {
+		t.Fatalf("failed to close db: %v", err)
+	}
+
+	cmd := NewExportCmd(db)
+	cmd.SetArgs([]string{"--dry-run"})
+	if err := cmd.Execute(); err == nil {
+		t.Fatal("expected export to fail with closed database")
+	}
+}
+
+func TestImportCmdRequiresFileFlag(t *testing.T) {
+	db := NewMockModel()
+	cmd := NewImportCmd(db)
+
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("expected missing file flag error")
+	}
+	if !strings.Contains(err.Error(), "required flag: --file") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestImportCmdReplaceModeAbortsWhenUserDeclines(t *testing.T) {
+	db := NewMockModel()
+	if err := db.CreateTask(&ItemModel{Title: "Existing", Description: "Local"}); err != nil {
+		t.Fatalf("failed to seed existing task: %v", err)
+	}
+
+	now := time.Now()
+	filePath := writeTestImportBundle(t, ExportBundle{
+		Version:    1,
+		ExportedAt: now,
+		Tasks: []TaskDTO{
+			{
+				ID:          "2",
+				Title:       "Imported Task",
+				Description: "Imported Desc",
+				CreatedAt:   now,
+				UpdatedAt:   now,
+			},
+		},
+	})
+
+	cmd := NewImportCmd(db)
+	cmd.SetArgs([]string{"--file", filePath, "--mode", "replace"})
+	cmd.SetIn(strings.NewReader("n\n"))
+
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("expected aborted-by-user error")
+	}
+	if !strings.Contains(err.Error(), "aborted by user") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestImportCmdReplaceModeAppliesWhenUserConfirms(t *testing.T) {
+	db := NewMockModel()
+	if err := db.CreateTask(&ItemModel{Title: "Existing", Description: "Local"}); err != nil {
+		t.Fatalf("failed to seed existing task: %v", err)
+	}
+
+	now := time.Now()
+	filePath := writeTestImportBundle(t, ExportBundle{
+		Version:    1,
+		ExportedAt: now,
+		Tasks: []TaskDTO{
+			{
+				ID:          "3",
+				Title:       "Imported Replacement",
+				Description: "Imported Desc",
+				CreatedAt:   now,
+				UpdatedAt:   now,
+			},
+		},
+	})
+
+	cmd := NewImportCmd(db)
+	cmd.SetArgs([]string{"--file", filePath, "--mode", "replace"})
+	cmd.SetIn(strings.NewReader("y\n"))
+	buf := &bytes.Buffer{}
+	cmd.SetOut(buf)
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("replace import failed: %v", err)
+	}
+
+	tasks, err := db.ListTasks()
+	if err != nil {
+		t.Fatalf("failed to list tasks: %v", err)
+	}
+	if len(tasks) != 1 || tasks[0].Title != "Imported Replacement" {
+		t.Fatalf("expected imported replacement task, got %+v", tasks)
+	}
+	if !strings.Contains(buf.String(), "Import complete: created=1 updated=0 unchanged=0 skipped=0 conflicted=0") {
+		t.Fatalf("expected completion output, got %q", buf.String())
+	}
+}
+
 // ============================================ Integration Tests ============================================
 
 func TestIntegration_AddAndList(t *testing.T) {
