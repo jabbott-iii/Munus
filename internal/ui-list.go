@@ -17,6 +17,7 @@ limitations under the License.
 package internal
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -49,9 +50,13 @@ func (m *ListModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case DataLoadedMsg:
 		m.loading = false
+		m.err = nil
 		m.tasks = msg.tasks
-		m.topUpcoming = GetTopUpcomingTasks(m.tasks, 10)
+		// Every incomplete task with a deadline is listed (soonest first) so
+		// none become unreachable once there are more than a page of them.
+		m.topUpcoming = GetTopUpcomingTasks(m.tasks, len(m.tasks))
 		m.tasksNoDeadline = GetTasksWithoutDeadline(m.tasks)
+		m.clampCursor()
 		return m, nil
 
 	case ErrMsg:
@@ -67,6 +72,16 @@ func (m *ListModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.handleTransferKey(msg)
 		}
 
+		// An error replaces the list view; the next key dismisses it.
+		if m.err != nil {
+			switch msg.String() {
+			case "q", "ctrl+c":
+				return m, tea.Quit
+			}
+			m.err = nil
+			return m, nil
+		}
+
 		if m.confirmingDelete && msg.String() == "esc" {
 			m.confirmingDelete = false
 			m.deletePrimed = false
@@ -74,11 +89,14 @@ func (m *ListModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 
+		// The delete dialog is modal: only its own keys (and quit) act while it
+		// is open, so no other overlay or action can start behind it.
 		if m.confirmingDelete {
 			switch msg.String() {
-			case "d", "y", "n", "esc":
+			case "d", "y", "n", "q", "ctrl+c":
 			default:
 				m.deletePrimed = false
+				return m, nil
 			}
 		} else if msg.String() != "d" {
 			m.deletePrimed = false
@@ -124,11 +142,13 @@ func (m *ListModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 
 		case "e":
-			m.expanded[m.cursor] = !m.expanded[m.cursor]
+			if task := m.GetCurrentTask(); task != nil {
+				m.expanded[task.ID] = !m.expanded[task.ID]
+			}
 
 		case "l":
-			if m.vimEnabled && m.GetCurrentTask() != nil {
-				m.expanded[m.cursor] = true
+			if task := m.GetCurrentTask(); m.vimEnabled && task != nil {
+				m.expanded[task.ID] = true
 			}
 
 		case "g":
@@ -145,8 +165,12 @@ func (m *ListModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 
 		case "c":
+			if m.GetCurrentTask() == nil {
+				return m, nil
+			}
 			if err := m.ToggleComplete(); err != nil {
 				m.err = err
+				return m, nil
 			}
 			return m, m.loadData
 
@@ -194,14 +218,16 @@ func (m *ListModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "pgup", "b":
 			if m.currentPage > 0 {
 				m.currentPage--
-				m.cursor = 0
+				m.cursor = m.currentPage * pageSize
+				m.clampCursor()
 			}
 
 		case "pgdown", "f":
 			visibleTasks := m.GetVisibleTasks()
 			if (m.currentPage+1)*pageSize < len(visibleTasks) {
 				m.currentPage++
-				m.cursor = 0
+				m.cursor = m.currentPage * pageSize
+				m.clampCursor()
 			}
 
 		case "x":
@@ -238,7 +264,7 @@ func (m *ListModel) View() string {
 	if m.err != nil {
 		return lipgloss.NewStyle().
 			Foreground(lipgloss.Color("#EF4444")).
-			Render("Error: " + m.err.Error())
+			Render("Error: " + sanitizeForTerminal(m.err.Error(), true) + "\n\nPress any key to continue.")
 	}
 
 	if m.loading {
@@ -291,7 +317,7 @@ func (m *ListModel) View() string {
 
 	s.WriteString(titleStyle.Render(" Task List"))
 
-	s.WriteString(sectionStyle.Render(" Upcoming Deadlines (Top 10)"))
+	s.WriteString(sectionStyle.Render(" Upcoming Deadlines"))
 	s.WriteString("\n")
 
 	visibleTasks := m.GetVisibleTasks()
@@ -387,7 +413,7 @@ func (m *ListModel) View() string {
 		dialog.WriteString("\n\n")
 		dialog.WriteString("Are you sure you want to delete this task?\n\n")
 		dialog.WriteString(modalTitleStyle.Render("Title: "))
-		dialog.WriteString(m.taskToDelete.Title)
+		dialog.WriteString(sanitizeForTerminal(m.taskToDelete.Title, false))
 		dialog.WriteString("\n\n")
 		dialog.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("#4CAF50")).Render("[y] Yes  "))
 		dialog.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("#FF6B6B")).Render("[n] No  "))
@@ -455,7 +481,7 @@ func (m *ListModel) RenderTask(task *ItemModel, index int, isSelected bool,
 		}
 	}
 
-	line := fmt.Sprintf("%s %s%s", checkbox, task.Title, deadlineInfo)
+	line := fmt.Sprintf("%s %s%s", checkbox, sanitizeForTerminal(task.Title, false), deadlineInfo)
 
 	if isSelected {
 		s.WriteString(selectedStyle.Render(line))
@@ -465,9 +491,9 @@ func (m *ListModel) RenderTask(task *ItemModel, index int, isSelected bool,
 		s.WriteString(normalStyle.Render(line))
 	}
 
-	if m.expanded[index] && task.Description != "" {
+	if m.expanded[task.ID] && task.Description != "" {
 		s.WriteString("\n")
-		s.WriteString(descriptionStyle.Render(task.Description))
+		s.WriteString(descriptionStyle.Render(sanitizeForTerminal(task.Description, true)))
 		s.WriteString("\n")
 	}
 
@@ -500,6 +526,26 @@ func (m *ListModel) EnsureCursorVisible() {
 	}
 }
 
+// clampCursor keeps the cursor on an existing row (for example after the last
+// row is deleted) and keeps the current page in range.
+func (m *ListModel) clampCursor() {
+	count := len(m.GetVisibleTasks())
+	if m.cursor >= count {
+		m.cursor = count - 1
+	}
+	if m.cursor < 0 {
+		m.cursor = 0
+	}
+	lastPage := 0
+	if count > 0 {
+		lastPage = (count - 1) / pageSize
+	}
+	if m.currentPage > lastPage {
+		m.currentPage = lastPage
+	}
+	m.EnsureCursorVisible()
+}
+
 func (m *ListModel) GetCurrentTask() *ItemModel {
 	visible := m.GetVisibleTasks()
 	if m.cursor >= 0 && m.cursor < len(visible) {
@@ -514,13 +560,18 @@ func (m *ListModel) ToggleComplete() error {
 		return fmt.Errorf("no task selected")
 	}
 
+	previous := *task
 	if task.Completed {
 		task.MarkIncomplete()
 	} else {
 		task.MarkComplete()
 	}
 
-	return m.storage.UpdateTask(task)
+	if err := m.storage.UpdateTask(task); err != nil {
+		*task = previous // keep the list consistent with what is stored
+		return err
+	}
+	return nil
 }
 
 func (m *ListModel) confirmDelete() (tea.Model, tea.Cmd) {
@@ -528,7 +579,8 @@ func (m *ListModel) confirmDelete() (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
-	if err := m.storage.DeleteTask(m.taskToDelete.ID); err != nil {
+	// A task already removed elsewhere is treated as deleted.
+	if err := m.storage.DeleteTask(m.taskToDelete.ID); err != nil && !errors.Is(err, ErrTaskNotFound) {
 		m.err = err
 		return m, nil
 	}
@@ -844,7 +896,7 @@ func (m *ListModel) renderTransferOverlay(baseView string) string {
 
 	if m.transfer.operationError != nil {
 		dialog.WriteString("\n\n")
-		dialog.WriteString(errorStyle.Render("Error: " + m.transfer.operationError.Error()))
+		dialog.WriteString(errorStyle.Render("Error: " + sanitizeForTerminal(m.transfer.operationError.Error(), true)))
 	}
 
 	dialogContent := dialogStyle.Render(dialog.String())

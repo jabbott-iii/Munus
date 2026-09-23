@@ -18,6 +18,7 @@ package internal
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -233,15 +234,15 @@ func TestListModelExpandToggle(t *testing.T) {
 	msg := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'e'}}
 	_, _ = list.Update(msg)
 
-	if !list.expanded[0] {
-		t.Errorf("Expected expanded[0] to be true")
+	if !list.expanded[1] {
+		t.Errorf("Expected task 1 to be expanded")
 	}
 
 	msg = tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'e'}}
 	_, _ = list.Update(msg)
 
-	if list.expanded[0] {
-		t.Errorf("Expected expanded[0] to be false after toggle")
+	if list.expanded[1] {
+		t.Errorf("Expected task 1 to be collapsed after toggle")
 	}
 }
 
@@ -562,7 +563,7 @@ func TestListModelVimExpand(t *testing.T) {
 	list.cursor = 0
 
 	_, _ = list.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'l'}})
-	if !list.expanded[0] {
+	if !list.expanded[1] {
 		t.Fatalf("Expected selected task to expand after l")
 	}
 }
@@ -583,7 +584,14 @@ func TestListModelViewDocumentsVimBindings(t *testing.T) {
 func TestListModelPageUp(t *testing.T) {
 	storage := &MockStorage{}
 	list := NewListModel(storage)
+	tasks := make([]*ItemModel, 25)
+	for i := range 25 {
+		tasks[i] = &ItemModel{ID: i + 1, Title: fmt.Sprintf("Task %02d", i+1)}
+	}
+	list.tasks = tasks
+	list.tasksNoDeadline = tasks
 	list.currentPage = 2
+	list.cursor = 20
 
 	msg := tea.KeyMsg{Type: tea.KeyPgUp}
 	_, _ = list.Update(msg)
@@ -591,8 +599,8 @@ func TestListModelPageUp(t *testing.T) {
 	if list.currentPage != 1 {
 		t.Errorf("Expected currentPage 1, got %d", list.currentPage)
 	}
-	if list.cursor != 0 {
-		t.Errorf("Expected cursor reset to 0")
+	if list.cursor != pageSize {
+		t.Errorf("Expected cursor on first row of page 2 (%d), got %d", pageSize, list.cursor)
 	}
 }
 
@@ -1218,6 +1226,9 @@ func TestListModelPlanImportFromTransfer(t *testing.T) {
 }
 
 func TestListModelApplyImportFromTransfer(t *testing.T) {
+	// Backups are written under the home directory; keep them out of the real one.
+	setTestHome(t)
+
 	t.Run("nil transfer", func(t *testing.T) {
 		list := NewListModel(&MockStorage{})
 		_, cmd := list.applyImportFromTransfer()
@@ -1403,5 +1414,202 @@ func TestYesNoLabel(t *testing.T) {
 		if result != tt.expected {
 			t.Errorf("yesNoLabel(%v) = %q, want %q", tt.value, result, tt.expected)
 		}
+	}
+}
+
+// ============================== P-004 regressions ==============================
+
+func loadList(t *testing.T, list *ListModel) {
+	t.Helper()
+	_, _ = list.Update(list.loadData())
+}
+
+func TestListModelShowsAllDeadlinedTasks(t *testing.T) {
+	storage := &MockStorage{}
+	for i := 1; i <= 13; i++ {
+		deadline := time.Now().Add(time.Duration(i) * time.Hour)
+		storage.tasks = append(storage.tasks, &ItemModel{ID: i, Title: fmt.Sprintf("T%02d", i), Deadline: &deadline})
+	}
+	list := NewListModel(storage)
+	loadList(t, list)
+
+	if got := len(list.GetVisibleTasks()); got != 13 {
+		t.Fatalf("expected all 13 deadlined tasks to be visible, got %d", got)
+	}
+	_, _ = list.Update(tea.KeyMsg{Type: tea.KeyPgDown})
+	if !strings.Contains(list.View(), "T13") {
+		t.Fatalf("expected the 13th task on page 2, got view:\n%s", list.View())
+	}
+}
+
+func TestListModelPageDownSelectsTaskOnNewPage(t *testing.T) {
+	storage := &MockStorage{}
+	for i := 1; i <= 12; i++ {
+		storage.tasks = append(storage.tasks, &ItemModel{ID: i, Title: fmt.Sprintf("N%02d", i)})
+	}
+	list := NewListModel(storage)
+	loadList(t, list)
+
+	_, _ = list.Update(tea.KeyMsg{Type: tea.KeyPgDown})
+	current := list.GetCurrentTask()
+	if list.currentPage != 1 || list.cursor != pageSize || current == nil {
+		t.Fatalf("expected cursor %d on page 1, got cursor=%d page=%d task=%v", pageSize, list.cursor, list.currentPage, current)
+	}
+	visible := list.GetVisibleTasks()
+	if current != visible[pageSize] {
+		t.Fatalf("expected the first task of page 2 to be selected")
+	}
+
+	// Moving within the page must not jump back to page 1.
+	_, _ = list.Update(tea.KeyMsg{Type: tea.KeyDown})
+	if list.currentPage != 1 {
+		t.Fatalf("expected to stay on page 2 after moving down, got page %d", list.currentPage)
+	}
+}
+
+func TestListModelCompleteWithoutSelectionIsNoOp(t *testing.T) {
+	list := NewListModel(&MockStorage{})
+	loadList(t, list)
+
+	_, cmd := list.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'c'}})
+	if cmd != nil || list.err != nil {
+		t.Fatalf("expected no command and no error, got cmd=%v err=%v", cmd != nil, list.err)
+	}
+}
+
+func TestListModelErrorIsDismissedByKeyAndClearedByReload(t *testing.T) {
+	storage := &MockStorage{tasks: []*ItemModel{{ID: 1, Title: "A"}}}
+	list := NewListModel(storage)
+	loadList(t, list)
+
+	list.err = errors.New("boom")
+	if !strings.Contains(list.View(), "boom") {
+		t.Fatalf("expected error in view")
+	}
+	_, cmd := list.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}})
+	if list.err != nil || cmd != nil {
+		t.Fatalf("expected first key to dismiss the error only, err=%v", list.err)
+	}
+	if !strings.Contains(list.View(), "A") {
+		t.Fatalf("expected list view after dismissing error")
+	}
+
+	list.err = errors.New("stale")
+	loadList(t, list)
+	if list.err != nil {
+		t.Fatalf("expected successful reload to clear stale error, got %v", list.err)
+	}
+}
+
+func TestListModelErrorScreenStillQuits(t *testing.T) {
+	list := NewListModel(&MockStorage{})
+	list.err = errors.New("boom")
+	_, cmd := list.Update(tea.KeyMsg{Type: tea.KeyCtrlC})
+	if cmd == nil {
+		t.Fatal("expected quit command from error screen")
+	}
+}
+
+func TestListModelCursorClampedAfterDeletingLastRow(t *testing.T) {
+	storage := &MockStorage{tasks: []*ItemModel{{ID: 2, Title: "B"}, {ID: 1, Title: "A"}}}
+	list := NewListModel(storage)
+	loadList(t, list)
+
+	_, _ = list.Update(tea.KeyMsg{Type: tea.KeyDown})
+	_, _ = list.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'d'}})
+	_, cmd := list.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'y'}})
+	if cmd == nil {
+		t.Fatal("expected reload after delete")
+	}
+	_, _ = list.Update(cmd())
+
+	if list.cursor != 0 || list.GetCurrentTask() == nil || list.GetCurrentTask().Title != "B" {
+		t.Fatalf("expected cursor clamped onto remaining task, got cursor=%d task=%v", list.cursor, list.GetCurrentTask())
+	}
+}
+
+func TestListModelExpandedStateFollowsTask(t *testing.T) {
+	storage := &MockStorage{tasks: []*ItemModel{
+		{ID: 2, Title: "Beta", Description: "beta-desc"},
+		{ID: 1, Title: "Alpha", Description: "alpha-desc"},
+	}}
+	list := NewListModel(storage)
+	loadList(t, list)
+
+	_, _ = list.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'e'}}) // expand Beta (row 0)
+	storage.tasks[0].Completed = true                                      // Beta moves to the completed section
+	loadList(t, list)
+
+	view := list.View()
+	if !strings.Contains(view, "beta-desc") {
+		t.Fatalf("expected Beta to stay expanded after it moved")
+	}
+	if strings.Contains(view, "alpha-desc") {
+		t.Fatalf("expected Alpha (now row 0) to stay collapsed")
+	}
+}
+
+func TestListModelDeleteDialogBlocksOtherActions(t *testing.T) {
+	storage := &MockStorage{tasks: []*ItemModel{{ID: 1, Title: "Keep"}}}
+	list := NewListModel(storage)
+	loadList(t, list)
+
+	_, _ = list.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'d'}})
+	for _, key := range []rune{'i', 'x', 'c', 'e', 'r'} {
+		_, _ = list.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{key}})
+	}
+	if list.transfer != nil {
+		t.Fatalf("expected no transfer overlay while delete dialog is open")
+	}
+	if storage.tasks[0].Completed {
+		t.Fatalf("expected no completion while delete dialog is open")
+	}
+	if !list.confirmingDelete {
+		t.Fatalf("expected delete dialog to remain open")
+	}
+
+	_, cmd := list.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'y'}})
+	if cmd == nil || len(storage.tasks) != 0 {
+		t.Fatalf("expected y to confirm deletion, tasks=%d", len(storage.tasks))
+	}
+}
+
+type failingUpdateStorage struct {
+	MockStorage
+}
+
+func (f *failingUpdateStorage) UpdateTask(*ItemModel) error { return errors.New("disk full") }
+
+func TestListModelFailedToggleKeepsStoredState(t *testing.T) {
+	storage := &failingUpdateStorage{MockStorage{tasks: []*ItemModel{{ID: 1, Title: "A"}}}}
+	list := NewListModel(storage)
+	loadList(t, list)
+
+	_, _ = list.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'c'}})
+	if list.err == nil {
+		t.Fatal("expected the update error to be shown")
+	}
+	if task := list.GetCurrentTask(); task == nil || task.Completed || task.CompletedAt != nil {
+		t.Fatalf("expected in-memory task to stay incomplete after failed save, got %+v", task)
+	}
+}
+
+type notFoundDeleteStorage struct {
+	MockStorage
+}
+
+func (s *notFoundDeleteStorage) DeleteTask(id int) error {
+	return fmt.Errorf("%w: %d", ErrTaskNotFound, id)
+}
+
+func TestListModelDeletingAlreadyRemovedTaskClosesDialog(t *testing.T) {
+	storage := &notFoundDeleteStorage{MockStorage{tasks: []*ItemModel{{ID: 1, Title: "Gone"}}}}
+	list := NewListModel(storage)
+	loadList(t, list)
+
+	_, _ = list.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'d'}})
+	_, cmd := list.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'y'}})
+	if list.confirmingDelete || list.err != nil || cmd == nil {
+		t.Fatalf("expected dialog closed and reload, got confirming=%v err=%v cmd=%v", list.confirmingDelete, list.err, cmd != nil)
 	}
 }

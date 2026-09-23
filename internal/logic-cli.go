@@ -37,6 +37,18 @@ func NewRootCmd(db *Database) *cobra.Command {
 
 	cmd := &cobra.Command{
 		Use: "munus",
+		// The database is opened only once a command actually runs, so --help,
+		// --version, help and completion never create a database file.
+		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
+			if skipsDatabase(cmd) {
+				return nil
+			}
+			if err := db.Open(); err != nil {
+				cmd.SilenceUsage = true
+				return fmt.Errorf("failed to initialize database: %w", err)
+			}
+			return nil
+		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			opts := tuiOptions{vimEnabled: vim}
 			initialModel := tea.Model(NewFormModelWithOptions(db, opts))
@@ -58,6 +70,18 @@ func NewRootCmd(db *Database) *cobra.Command {
 	cmd.Flags().BoolVar(&vim, "vim", false, "enable vim keybindings in the TUI")
 
 	return cmd
+}
+
+// skipsDatabase reports whether cmd is one of cobra's built-in help or shell
+// completion commands, which never touch task data.
+func skipsDatabase(cmd *cobra.Command) bool {
+	for c := cmd; c != nil; c = c.Parent() {
+		switch name := c.Name(); {
+		case name == "help", name == "completion", strings.HasPrefix(name, "__complete"):
+			return true
+		}
+	}
+	return false
 }
 
 // -------------------------------------- export ------------------------------------------------------------------------------------ //
@@ -139,7 +163,7 @@ func NewImportCmd(db *Database) *cobra.Command {
 	munus import -f tasks.json --skip-existing
 	munus import -f tasks.json --mode replace --yes --backup
 	munus import -f tasks.json --dry-run --strict
-	munus import -f tasks.json --mode merge --on-conflict rename --id-strategy ict`,
+	munus import -f tasks.json --mode merge --on-conflict rename --id-strategy regenerate`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if opts.File == "" {
 				return errors.New("required flag: --file")
@@ -224,11 +248,13 @@ func NewImportCmd(db *Database) *cobra.Command {
 	return cmd
 }
 
+// Confirm prints prompt and reports whether the whole answer line is "y" or
+// "yes" (any case). End of input counts as "no".
 func Confirm(cmd *cobra.Command, prompt string) (bool, error) {
 	_, _ = fmt.Fprint(cmd.OutOrStdout(), prompt)
 	r := bufio.NewReader(cmd.InOrStdin())
 	s, err := r.ReadString('\n')
-	if err != nil {
+	if err != nil && !errors.Is(err, io.EOF) {
 		return false, err
 	}
 	answer := strings.TrimSpace(s)
@@ -264,11 +290,8 @@ func NewAddCmd(db *Database) *cobra.Command {
 			if title == "" || description == "" {
 				return fmt.Errorf("both title and description are required")
 			}
-			if len(title) > MaxTitleLength {
-				return fmt.Errorf("title exceeds maximum length of %d", MaxTitleLength)
-			}
-			if len(description) > MaxDescriptionLength {
-				return fmt.Errorf("description exceeds maximum length of %d", MaxDescriptionLength)
+			if err := ValidateTaskText(title, description); err != nil {
+				return err
 			}
 
 			var deadlineTime *time.Time
@@ -317,7 +340,8 @@ func GetTaskStatus(task *ItemModel) string {
 
 func PrintList(w io.Writer, tasks []*ItemModel) {
 	for _, t := range tasks {
-		_, _ = fmt.Fprintf(w, "[%s] ID: %v- %s:\n%s\n -Deadline: %v\n -Complete: %t\n\n", GetTaskStatus(t), t.ID, t.Title, t.Description, t.Deadline, t.Completed)
+		_, _ = fmt.Fprintf(w, "[%s] ID: %v- %s:\n%s\n -Deadline: %v\n -Complete: %t\n\n", GetTaskStatus(t), t.ID,
+			sanitizeForTerminal(t.Title, false), sanitizeForTerminal(t.Description, true), t.Deadline, t.Completed)
 	}
 }
 
@@ -354,11 +378,16 @@ func DeleteTaskCmd(db *Database) *cobra.Command {
 				return fmt.Errorf("invalid task ID %q: must be a positive integer", args[0])
 			}
 
-			// confirmation
-			var confirm string
-			_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Delete task %d? [y/N]: ", taskID)
-			_, _ = fmt.Fscanln(cmd.InOrStdin(), &confirm)
-			if confirm != "y" && confirm != "Y" && confirm != "yes" && confirm != "YES" {
+			// Fail before prompting when the task does not exist.
+			if _, err := db.GetTaskByID(taskID); err != nil {
+				return fmt.Errorf("failed to delete task %d: %w", taskID, err)
+			}
+
+			ok, err := Confirm(cmd, fmt.Sprintf("Delete task %d? [y/N]: ", taskID))
+			if err != nil {
+				return err
+			}
+			if !ok {
 				_, _ = fmt.Fprintln(cmd.OutOrStdout(), "Delete cancelled.")
 				return nil
 			}
@@ -396,9 +425,6 @@ func CompleteTaskCmd(db *Database) *cobra.Command {
 			task, err := db.GetTaskByID(taskID)
 			if err != nil {
 				return fmt.Errorf("failed to load task %d: %w", taskID, err)
-			}
-			if task == nil {
-				return fmt.Errorf("task %d not found", taskID)
 			}
 
 			// 2) Update fields in memory

@@ -20,19 +20,34 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"io"
+	"log"
+	"os"
+	"strings"
 	"time"
 
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
+	"gorm.io/gorm/logger"
 )
 
 // Database owns the gorm connection for internal data access.
 type Database struct {
 	conn  *gorm.DB
 	sqlDB *sql.DB
+	path  string
+	file  string // file sqlite actually opened ("" for in-memory databases)
 }
 
-var ErrTaskNotFound = errors.New("task not found")
+var (
+	ErrTaskNotFound    = errors.New("task not found")
+	errDatabaseNotOpen = errors.New("database is not open")
+
+	// gormLogWriter receives GORM's own log output. Errors are returned to
+	// callers, so nothing is written to stdout (which would corrupt
+	// `export --stdout` and the TUI); tests may swap the writer.
+	gormLogWriter io.Writer = io.Discard
+)
 
 //-----------------------------------------------------------------------------------Models-------------------------------------------------------------------//
 
@@ -143,12 +158,15 @@ type ExportBundle struct {
 	Tasks      []TaskDTO `json:"tasks"`
 }
 
+// TaskDTO is the v1 export/import wire format. CompletedAt is optional so
+// files written before it existed still import.
 type TaskDTO struct {
 	ID          string     `json:"id"`
 	Title       string     `json:"title"`
 	Description string     `json:"description,omitempty"`
 	Completed   bool       `json:"completed"`
 	Deadline    *time.Time `json:"deadline,omitempty"`
+	CompletedAt *time.Time `json:"completed_at,omitempty"`
 	CreatedAt   time.Time  `json:"created_at"`
 	UpdatedAt   time.Time  `json:"updated_at"`
 }
@@ -159,6 +177,7 @@ type Task struct {
 	Description string
 	Completed   bool
 	Deadline    *time.Time
+	CompletedAt *time.Time
 	CreatedAt   time.Time
 	UpdatedAt   time.Time
 }
@@ -278,7 +297,11 @@ func NewDatabase(path string) (*Database, error) {
 		path = "munus.db"
 	}
 
-	conn, err := gorm.Open(sqlite.Open(path), &gorm.Config{})
+	createPrivateDatabaseFile(path)
+
+	conn, err := gorm.Open(sqlite.Open(path), &gorm.Config{
+		Logger: logger.New(log.New(gormLogWriter, "", 0), logger.Config{LogLevel: logger.Silent}),
+	})
 	if err != nil {
 		return nil, fmt.Errorf("open sqlite database: %w", err)
 	}
@@ -287,8 +310,88 @@ func NewDatabase(path string) (*Database, error) {
 		return nil, fmt.Errorf("auto-migrate schema: %w", err)
 	}
 
-	sqlDB, _ := conn.DB()
-	return &Database{conn: conn, sqlDB: sqlDB}, nil
+	sqlDB, err := conn.DB()
+	if err != nil {
+		return nil, fmt.Errorf("access sql database: %w", err)
+	}
+
+	// Record the file sqlite really opened, which differs from path for URI
+	// or parameterised DSNs (e.g. "file:x.db" or "x.db?_busy_timeout=5000").
+	var file string
+	if err := sqlDB.QueryRow("SELECT file FROM pragma_database_list WHERE name = 'main'").Scan(&file); err != nil {
+		file = ""
+	}
+	return &Database{conn: conn, sqlDB: sqlDB, path: path, file: file}, nil
+}
+
+// NewDeferredDatabase returns a Database for path that is opened on the first
+// call to Open, so commands such as --help never create a database file.
+func NewDeferredDatabase(path string) *Database {
+	if path == "" {
+		path = "munus.db"
+	}
+	return &Database{path: path}
+}
+
+// Open opens the database if it is not open yet. It is safe to call repeatedly.
+func (d *Database) Open() error {
+	if d == nil {
+		return errors.New("database is not initialized")
+	}
+	if d.conn != nil {
+		return nil
+	}
+	opened, err := NewDatabase(d.path)
+	if err != nil {
+		return err
+	}
+	*d = *opened
+	return nil
+}
+
+// createPrivateDatabaseFile creates a new database file readable only by the
+// owner. Existing files are left untouched; any failure is ignored so that
+// sqlite reports the underlying problem when it opens the path.
+func createPrivateDatabaseFile(path string) {
+	// URIs and DSNs with parameters are not plain file names; leave them to sqlite.
+	if path == ":memory:" || strings.HasPrefix(path, "file:") || strings.Contains(path, "?") {
+		return
+	}
+	f, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE|os.O_EXCL, 0o600)
+	if err != nil {
+		return
+	}
+	_ = f.Close()
+}
+
+func (d *Database) ready() error {
+	if d == nil || d.conn == nil {
+		return errDatabaseNotOpen
+	}
+	return nil
+}
+
+// DatabasePath returns the path the database was opened with.
+func (d *Database) DatabasePath() string {
+	if d == nil {
+		return ""
+	}
+	return d.path
+}
+
+// databaseFile returns the file sqlite opened, falling back to the configured
+// path when it is unknown.
+func (d *Database) databaseFile() string {
+	if d == nil {
+		return ""
+	}
+	if d.file != "" {
+		return d.file
+	}
+	if d.path == ":memory:" || strings.HasPrefix(d.path, "file:") || strings.Contains(d.path, "?") {
+		return ""
+	}
+	return d.path
 }
 
 func (d *Database) Close() error {
@@ -311,11 +414,17 @@ func (d *Database) CreateTask(task *ItemModel) error {
 	if task == nil {
 		return errors.New("task is nil")
 	}
+	if err := d.ready(); err != nil {
+		return err
+	}
 	return d.conn.Create(task).Error
 }
 
 // ListTasks returns all tasks.
 func (d *Database) ListTasks() ([]*ItemModel, error) {
+	if err := d.ready(); err != nil {
+		return nil, err
+	}
 	var tasks []*ItemModel
 	if err := d.conn.Order("id DESC").Find(&tasks).Error; err != nil {
 		return nil, err
@@ -333,16 +442,27 @@ func (d *Database) ReplaceAllTasks(tasks []*ItemModel) error {
 			return err
 		}
 
-		if len(tasks) == 0 {
-			return nil
+		// Insert rows that carry an explicit ID first so auto-assigned IDs can
+		// never collide with an ID that is still waiting to be restored.
+		for _, explicit := range []bool{true, false} {
+			for _, task := range tasks {
+				if task == nil || (task.ID != 0) != explicit {
+					continue
+				}
+				if err := tx.Create(task).Error; err != nil {
+					return err
+				}
+			}
 		}
-
-		return tx.Create(&tasks).Error
+		return nil
 	})
 }
 
 // GetTaskByID fetches a task by primary key.
 func (d *Database) GetTaskByID(id int) (*ItemModel, error) {
+	if err := d.ready(); err != nil {
+		return nil, err
+	}
 	var task ItemModel
 	if err := d.conn.First(&task, id).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -361,13 +481,27 @@ func (d *Database) UpdateTask(task *ItemModel) error {
 	if task.ID == 0 {
 		return errors.New("task id is required")
 	}
+	if err := d.ready(); err != nil {
+		return err
+	}
 	return d.conn.Save(task).Error
 }
 
-// DeleteTask deletes a task by id.
+// DeleteTask deletes a task by id. It returns ErrTaskNotFound when no task
+// with that id exists.
 func (d *Database) DeleteTask(id int) error {
 	if id == 0 {
 		return errors.New("task id is required")
 	}
-	return d.conn.Delete(&ItemModel{}, id).Error
+	if err := d.ready(); err != nil {
+		return err
+	}
+	result := d.conn.Delete(&ItemModel{}, id)
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return fmt.Errorf("%w: %d", ErrTaskNotFound, id)
+	}
+	return nil
 }

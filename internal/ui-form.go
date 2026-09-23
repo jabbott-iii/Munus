@@ -379,6 +379,9 @@ func (m *FormModel) submitForm() error {
 	if len(m.fields[descriptionField]) > MaxDescriptionLength {
 		return fmt.Errorf("description exceeds maximum length of %d characters", MaxDescriptionLength)
 	}
+	if err := ValidateTaskText(strings.TrimSpace(m.fields[titleField]), strings.TrimSpace(m.fields[descriptionField])); err != nil {
+		return err
+	}
 
 	var deadline *time.Time
 	if strings.TrimSpace(m.fields[deadlineField]) != "" {

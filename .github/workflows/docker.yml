@@ -22,10 +22,17 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       - name: Build Docker image
         run: docker build --tag "$IMAGE_NAME" --file Dockerfile .
 
       - name: Smoke test CLI help
         run: docker run --rm "$IMAGE_NAME" --help
+
+      # Exercises the database as the image's non-root user on its data volume.
+      - name: Smoke test database access
+        run: |
+          docker volume create munus-smoke
+          docker run --rm -v munus-smoke:/app/data "$IMAGE_NAME" add --title smoke --description "docker smoke test"
+          docker run --rm -v munus-smoke:/app/data "$IMAGE_NAME" list | grep -q smoke

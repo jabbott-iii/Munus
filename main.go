@@ -17,22 +17,24 @@ limitations under the License.
 package main
 
 import (
-	"log"
 	"os"
 
 	"github.com/jabbott-iii/Munus/internal"
 )
 
-func main() {
+// version is stamped at release time with -ldflags "-X main.version=<tag>".
+var version = "dev"
 
-	// sqlite db creation / use
-	db, err := internal.NewDatabase(databasePathFromEnv())
-	if err != nil {
-		log.Fatalf("failed to initialize database: %v", err)
-	}
+func main() {
+	// The sqlite database is opened lazily by the root command, so help and
+	// version output never create a database file.
+	db := internal.NewDeferredDatabase(databasePathFromEnv())
 
 	rootCmd := internal.NewRootCmd(db)
-	if err := rootCmd.Execute(); err != nil {
+	rootCmd.Version = version
+	err := rootCmd.Execute()
+	_ = db.Close()
+	if err != nil {
 		os.Exit(1)
 	}
 }

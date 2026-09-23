@@ -17,8 +17,11 @@ limitations under the License.
 package internal
 
 import (
+	"bytes"
+	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
 )
@@ -73,7 +76,7 @@ func TestNewDatabaseWithEmptyPathCreatesValidDatabase(t *testing.T) {
 	// Change to temp directory so default db path is created there
 	err := os.Chdir(tmpDir)
 	if err != nil {
-		return
+		t.Fatalf("setup failed: %v", err)
 	}
 
 	db, err := NewDatabase("")
@@ -324,11 +327,11 @@ func TestDeleteTaskRemovesFromDatabase(t *testing.T) {
 
 	err := db.CreateTask(task1)
 	if err != nil {
-		return
+		t.Fatalf("setup failed: %v", err)
 	}
 	err = db.CreateTask(task2)
 	if err != nil {
-		return
+		t.Fatalf("setup failed: %v", err)
 	}
 
 	// Delete first task
@@ -361,11 +364,11 @@ func TestReplaceAllTasksClearsAndReplacesAll(t *testing.T) {
 	task2 := &ItemModel{Title: "Original 2"}
 	err := db.CreateTask(task1)
 	if err != nil {
-		return
+		t.Fatalf("setup failed: %v", err)
 	}
 	err = db.CreateTask(task2)
 	if err != nil {
-		return
+		t.Fatalf("setup failed: %v", err)
 	}
 
 	// Replace all with new tasks
@@ -415,7 +418,7 @@ func TestReplaceAllTasksWithEmptyList(t *testing.T) {
 	task := &ItemModel{Title: "Task to Delete"}
 	err := db.CreateTask(task)
 	if err != nil {
-		return
+		t.Fatalf("setup failed: %v", err)
 	}
 
 	// Replace it with empty list
@@ -462,20 +465,22 @@ func TestTaskDeadlineCalculation(t *testing.T) {
 		wantIsOverdue bool
 	}{
 		{
-			name:          "overdue task",
-			deadline:      new(now.AddDate(0, 0, -5)),
+			name: "overdue task",
+			// Fixed durations (not calendar days) keep this stable across DST changes.
+			deadline:      new(now.Add(-5*24*time.Hour - time.Hour)),
 			wantDays:      -5,
 			wantIsOverdue: true,
 		},
 		{
 			name:          "due today",
-			deadline:      new(now),
+			deadline:      new(now.Add(time.Hour)),
 			wantDays:      0,
 			wantIsOverdue: false,
 		},
 		{
+			// An extra hour keeps the truncated day count stable while the test runs.
 			name:          "upcoming task",
-			deadline:      new(now.AddDate(0, 0, 3)),
+			deadline:      new(now.Add(3*24*time.Hour + time.Hour)),
 			wantDays:      3,
 			wantIsOverdue: false,
 		},
@@ -494,13 +499,15 @@ func TestTaskDeadlineCalculation(t *testing.T) {
 				Deadline: tt.deadline,
 			}
 
-			// Note: DaysUntilDeadline() might have rounding differences,
-			// so we check if it's approximately correct (within 1 day)
 			if tt.deadline != nil {
-				days := task.DaysUntilDeadline()
-				if days != tt.wantDays {
-					t.Logf("DaysUntilDeadline() = %d, want approximately %d", days, tt.wantDays)
+				if days := task.DaysUntilDeadline(); days != tt.wantDays {
+					t.Errorf("DaysUntilDeadline() = %d, want %d", days, tt.wantDays)
 				}
+			} else if days := task.DaysUntilDeadline(); days != -1 {
+				t.Errorf("DaysUntilDeadline() with no deadline = %d, want -1", days)
+			}
+			if got := task.IsOverdue(); got != tt.wantIsOverdue {
+				t.Errorf("IsOverdue() = %v, want %v", got, tt.wantIsOverdue)
 			}
 		})
 	}
@@ -518,7 +525,7 @@ func TestItemModelMarkComplete(t *testing.T) {
 	}
 	err := db.CreateTask(task)
 	if err != nil {
-		return
+		t.Fatalf("setup failed: %v", err)
 	}
 
 	// Mark complete
@@ -535,7 +542,7 @@ func TestItemModelMarkComplete(t *testing.T) {
 	// Persist and verify
 	err = db.UpdateTask(task)
 	if err != nil {
-		return
+		t.Fatalf("setup failed: %v", err)
 	}
 	retrieved, _ := db.GetTaskByID(task.ID)
 	if !retrieved.Completed {
@@ -556,7 +563,7 @@ func TestItemModelMarkIncomplete(t *testing.T) {
 	}
 	err := db.CreateTask(task)
 	if err != nil {
-		return
+		t.Fatalf("setup failed: %v", err)
 	}
 
 	// Mark incomplete
@@ -605,5 +612,144 @@ func setupTestDB(t *testing.T) (*Database, func()) {
 		if err := db.Close(); err != nil {
 			t.Fatalf("Failed to close database: %v", err)
 		}
+	}
+}
+
+func TestNewDatabaseCreatesOwnerOnlyFile(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX permissions are not enforced on Windows")
+	}
+	path := filepath.Join(t.TempDir(), "private.db")
+	db, err := NewDatabase(path)
+	if err != nil {
+		t.Fatalf("NewDatabase failed: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("stat: %v", err)
+	}
+	if perm := info.Mode().Perm(); perm != 0o600 {
+		t.Fatalf("expected new database to be 0600, got %v", perm)
+	}
+	if got := db.DatabasePath(); got != path {
+		t.Fatalf("DatabasePath() = %q, want %q", got, path)
+	}
+}
+
+func TestNewDatabaseLeavesExistingFilePermissions(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX permissions are not enforced on Windows")
+	}
+	path := filepath.Join(t.TempDir(), "shared.db")
+	if err := os.WriteFile(path, nil, 0o640); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	if err := os.Chmod(path, 0o640); err != nil {
+		t.Fatalf("chmod: %v", err)
+	}
+	db, err := NewDatabase(path)
+	if err != nil {
+		t.Fatalf("NewDatabase failed: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+	info, _ := os.Stat(path)
+	if perm := info.Mode().Perm(); perm != 0o640 {
+		t.Fatalf("expected existing permissions to be kept, got %v", perm)
+	}
+}
+
+func TestDeferredDatabaseOpensOnDemand(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "deferred.db")
+	db := NewDeferredDatabase(path)
+
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatalf("expected no database file before Open, stat err=%v", err)
+	}
+	if _, err := db.ListTasks(); !errors.Is(err, errDatabaseNotOpen) {
+		t.Fatalf("expected errDatabaseNotOpen before Open, got %v", err)
+	}
+	if err := db.CreateTask(&ItemModel{Title: "x"}); !errors.Is(err, errDatabaseNotOpen) {
+		t.Fatalf("expected errDatabaseNotOpen before Open, got %v", err)
+	}
+
+	if err := db.Open(); err != nil {
+		t.Fatalf("Open failed: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+	if err := db.Open(); err != nil {
+		t.Fatalf("second Open should be a no-op, got %v", err)
+	}
+	if err := db.CreateTask(&ItemModel{Title: "x", Description: "y"}); err != nil {
+		t.Fatalf("CreateTask after Open failed: %v", err)
+	}
+	if _, err := os.Stat(path); err != nil {
+		t.Fatalf("expected database file after Open: %v", err)
+	}
+}
+
+func TestDeferredDatabaseOpenReportsErrors(t *testing.T) {
+	db := NewDeferredDatabase(filepath.Join(t.TempDir(), "missing-dir", "x.db"))
+	if err := db.Open(); err == nil {
+		t.Fatal("expected error opening database in a missing directory")
+	}
+	var nilDB *Database
+	if err := nilDB.Open(); err == nil {
+		t.Fatal("expected error for nil database")
+	}
+}
+
+func TestDeleteTaskReportsMissingTask(t *testing.T) {
+	db, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	if err := db.DeleteTask(999); !errors.Is(err, ErrTaskNotFound) {
+		t.Fatalf("expected ErrTaskNotFound, got %v", err)
+	}
+}
+
+func TestReplaceAllTasksRestoresExplicitIDsBeforeAssigningNewOnes(t *testing.T) {
+	db, err := NewDatabase(filepath.Join(t.TempDir(), "ids.db"))
+	if err != nil {
+		t.Fatalf("NewDatabase failed: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+
+	// The auto-assigned row comes first in the slice; it must still not take ID 1 or 2.
+	tasks := []*ItemModel{{Title: "auto"}, {ID: 2, Title: "two"}, {ID: 1, Title: "one"}}
+	if err := db.ReplaceAllTasks(tasks); err != nil {
+		t.Fatalf("ReplaceAllTasks failed: %v", err)
+	}
+	one, err := db.GetTaskByID(1)
+	if err != nil || one.Title != "one" {
+		t.Fatalf("expected task 1 restored, got %+v (err %v)", one, err)
+	}
+	two, err := db.GetTaskByID(2)
+	if err != nil || two.Title != "two" {
+		t.Fatalf("expected task 2 restored, got %+v (err %v)", two, err)
+	}
+	if tasks[0].ID <= 2 {
+		t.Fatalf("expected auto task to get a fresh ID, got %d", tasks[0].ID)
+	}
+}
+
+func TestDatabaseDoesNotLog(t *testing.T) {
+	var buf bytes.Buffer
+	previous := gormLogWriter
+	gormLogWriter = &buf
+	t.Cleanup(func() { gormLogWriter = previous })
+
+	db, err := NewDatabase(filepath.Join(t.TempDir(), "log.db"))
+	if err != nil {
+		t.Fatalf("NewDatabase failed: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+
+	if _, err := db.GetTaskByID(999); !errors.Is(err, ErrTaskNotFound) {
+		t.Fatalf("expected ErrTaskNotFound, got %v", err)
+	}
+	if buf.Len() != 0 {
+		t.Fatalf("expected no GORM log output, got %q", buf.String())
 	}
 }

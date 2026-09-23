@@ -18,16 +18,23 @@ package internal
 
 import (
 	"fmt"
+	"math"
 	"regexp"
 	"strconv"
 	"strings"
 	"time"
 )
 
-var (
-	monthRegex = regexp.MustCompile(`(\d+)M`)
-	unitRegex  = regexp.MustCompile(`(\d+)([mhdw])`)
+// Upper bounds keep relative deadlines far from time.Duration overflow and
+// stop oversized inputs from doing unbounded work.
+const (
+	maxDeadlineMonths   = 1200                       // 100 years
+	maxRelativeDuration = 100 * 365 * 24 * time.Hour // ~100 years for m/h/d/w units
 )
+
+// relativeTokenRegex matches one "<number><unit>" token at the start of the input.
+// Uppercase M means months; m/h/d/w (either case) mean minutes/hours/days/weeks.
+var relativeTokenRegex = regexp.MustCompile(`^(\d+)([mhdwMHDW])`)
 
 // ParseDeadline accepts multiple deadline formats:
 // 1. Absolute: "YYYY-MM-DD HH:MM" (e.g., "2025-11-16 14:30")
@@ -39,7 +46,7 @@ func ParseDeadline(input string) (*time.Time, error) {
 		return nil, fmt.Errorf("deadline cannot be empty")
 	}
 
-	if t, err := time.ParseInLocation("2006-01-02 15:05", input, time.Local); err == nil {
+	if t, err := time.ParseInLocation("2006-01-02 15:04", input, time.Local); err == nil {
 		return &t, nil
 	}
 
@@ -52,95 +59,83 @@ func ParseDeadline(input string) (*time.Time, error) {
 	return &deadline, nil
 }
 
+// ParseRelativeTime parses a whitespace-separated sequence of "<number><unit>"
+// tokens (e.g. "2M 1w 3d 4h 30m") into a duration from now.
 func ParseRelativeTime(input string) (time.Duration, error) {
-	originalInput := input
-
-	months := 0
-
-	monthMatches := monthRegex.FindAllStringSubmatch(originalInput, -1)
-	for _, match := range monthMatches {
-		value, err := strconv.Atoi(match[1])
-		if err != nil {
-			return 0, fmt.Errorf("invalid number, %s", match[1])
-		}
-		if value <= 0 {
-			return 0, fmt.Errorf("time values must be positive")
-		}
-		months += value
-	}
-
-	processedInput := monthRegex.ReplaceAllString(originalInput, "")
-	processedInput = strings.ToLower(processedInput)
-
-	matches := unitRegex.FindAllStringSubmatch(processedInput, -1)
-	if len(matches) == 0 && months == 0 {
+	rest := strings.TrimSpace(input)
+	if rest == "" {
 		return 0, fmt.Errorf("no valid time units found (use: m, h, d, w, M)")
 	}
 
-	var reconstructed strings.Builder
-	for _, match := range matches {
-		reconstructed.WriteString(match[0])
-	}
-	for i := 0; i < months; i++ {
-		reconstructed.WriteString("M")
-	}
-
-	inputNoSpace := strings.ReplaceAll(strings.ReplaceAll(originalInput, " ", ""), "\t", "")
-	inputNoSpace = strings.ToLower(inputNoSpace)
-	for _, match := range monthMatches {
-		inputNoSpace = strings.Replace(inputNoSpace, strings.ToLower(match[0]), "M", 1)
-	}
-	reconstructedNoSpaces := strings.ToLower(reconstructed.String())
-
-	if len(reconstructedNoSpaces) != len(inputNoSpace) {
-		return 0, fmt.Errorf("contains invalid characters or format")
-	}
-
-	var totalDuration time.Duration
-	for _, match := range matches {
-		value, err := strconv.Atoi(match[1])
-		if err != nil {
-			return 0, fmt.Errorf("invalid number: %s", match[1])
+	months := 0
+	var total time.Duration
+	for tokens := 0; rest != ""; tokens++ {
+		loc := relativeTokenRegex.FindStringSubmatchIndex(rest)
+		if loc == nil {
+			if tokens == 0 {
+				return 0, fmt.Errorf("no valid time units found (use: m, h, d, w, M)")
+			}
+			return 0, fmt.Errorf("contains invalid characters or format")
 		}
 
+		value, err := strconv.Atoi(rest[loc[2]:loc[3]])
+		if err != nil {
+			return 0, fmt.Errorf("invalid number: %s", rest[loc[2]:loc[3]])
+		}
 		if value <= 0 {
 			return 0, fmt.Errorf("time values must be positive")
 		}
 
-		unit := match[2]
-
-		unitDuration, err := ParseTimeUnit(value, unit)
-		if err != nil {
-			return 0, err
+		unit := rest[loc[4]:loc[5]]
+		if unit == "M" {
+			if value > maxDeadlineMonths-months {
+				return 0, fmt.Errorf("deadline too far in the future (max %d months)", maxDeadlineMonths)
+			}
+			months += value
+		} else {
+			unitDuration, err := ParseTimeUnit(value, strings.ToLower(unit))
+			if err != nil {
+				return 0, err
+			}
+			if unitDuration > maxRelativeDuration-total {
+				return 0, fmt.Errorf("deadline too far in the future (max ~100 years)")
+			}
+			total += unitDuration
 		}
-		totalDuration += unitDuration
+
+		rest = strings.TrimLeft(rest[loc[1]:], " \t")
 	}
 
 	if months > 0 {
 		now := time.Now()
-		targetTime := now.AddDate(0, months, 0)
-		monthsDuration := targetTime.Sub(now)
-		totalDuration += monthsDuration
+		total += now.AddDate(0, months, 0).Sub(now)
 	}
 
-	if totalDuration <= 0 && months == 0 {
+	if total <= 0 {
 		return 0, fmt.Errorf("total duration must be positive")
 	}
 
-	return totalDuration, nil
+	return total, nil
 }
 
+// ParseTimeUnit converts value units of m, h, d or w into a duration. It
+// rejects values that would overflow time.Duration.
 func ParseTimeUnit(value int, unit string) (time.Duration, error) {
+	var unitDuration time.Duration
 	switch unit {
 	case "m":
-		return time.Duration(value) * time.Minute, nil
+		unitDuration = time.Minute
 	case "h":
-		return time.Duration(value) * time.Hour, nil
+		unitDuration = time.Hour
 	case "d":
-		return time.Duration(value) * 24 * time.Hour, nil
+		unitDuration = 24 * time.Hour
 	case "w":
-		return time.Duration(value) * 7 * 24 * time.Hour, nil
+		unitDuration = 7 * 24 * time.Hour
 	default:
 		return 0, fmt.Errorf("invalid time unit: %s (use: m, h, d, w, M)", unit)
 	}
+	if value < 0 || int64(value) > math.MaxInt64/int64(unitDuration) {
+		return 0, fmt.Errorf("time value out of range: %d%s", value, unit)
+	}
+	return time.Duration(value) * unitDuration, nil
 }

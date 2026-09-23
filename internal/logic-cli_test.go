@@ -18,11 +18,15 @@ package internal
 
 import (
 	"bytes"
+	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/spf13/cobra"
 )
 
 // ============================================ MockDatabase ============================================
@@ -264,14 +268,14 @@ func TestListCmd_WithTasks(t *testing.T) {
 		Description: "Desc 1",
 	})
 	if err != nil {
-		return
+		t.Fatalf("setup failed: %v", err)
 	}
 	err = db.CreateTask(&ItemModel{
 		Title:       "Task 2",
 		Description: "Desc 2",
 	})
 	if err != nil {
-		return
+		t.Fatalf("setup failed: %v", err)
 	}
 
 	cmd := NewListCmd(db)
@@ -307,11 +311,14 @@ func TestDeleteTaskCmd_NegativeID(t *testing.T) {
 	db := NewMockModel()
 	cmd := DeleteTaskCmd(db)
 
-	cmd.SetArgs([]string{"-5"})
+	// "--" makes cobra treat -5 as the task-id argument rather than a flag.
+	cmd.SetArgs([]string{"--", "-5"})
+	cmd.SetOut(&bytes.Buffer{})
+	cmd.SetErr(&bytes.Buffer{})
 	err := cmd.Execute()
 
-	if err == nil {
-		t.Errorf("expected error for negative task ID")
+	if err == nil || !strings.Contains(err.Error(), "must be a positive integer") {
+		t.Errorf("expected positive-integer error for negative task ID, got %v", err)
 	}
 }
 
@@ -322,7 +329,7 @@ func TestDeleteTaskCmd_UserCancels(t *testing.T) {
 		Description: "Desc",
 	})
 	if err != nil {
-		return
+		t.Fatalf("setup failed: %v", err)
 	}
 
 	cmd := DeleteTaskCmd(db)
@@ -358,7 +365,7 @@ func TestDeleteTaskCmd_Success(t *testing.T) {
 		Description: "Desc",
 	})
 	if err != nil {
-		return
+		t.Fatalf("setup failed: %v", err)
 	}
 
 	cmd := DeleteTaskCmd(db)
@@ -421,7 +428,7 @@ func TestCompleteTaskCmd_CompleteTask(t *testing.T) {
 		Completed:   false,
 	})
 	if err != nil {
-		return
+		t.Fatalf("setup failed: %v", err)
 	}
 
 	cmd := CompleteTaskCmd(db)
@@ -454,7 +461,7 @@ func TestCompleteTaskCmd_UndoComplete(t *testing.T) {
 		CompletedAt: &now,
 	})
 	if err != nil {
-		return
+		t.Fatalf("setup failed: %v", err)
 	}
 
 	cmd := CompleteTaskCmd(db)
@@ -876,7 +883,7 @@ func TestIntegration_AddCompleteDelete(t *testing.T) {
 	addCmd.SetArgs([]string{"-t", "Integration Task", "-d", "Integration Desc"})
 	err := addCmd.Execute()
 	if err != nil {
-		return
+		t.Fatalf("setup failed: %v", err)
 	}
 
 	// Complete task
@@ -884,7 +891,7 @@ func TestIntegration_AddCompleteDelete(t *testing.T) {
 	completeCmd.SetArgs([]string{"1"})
 	err = completeCmd.Execute()
 	if err != nil {
-		return
+		t.Fatalf("setup failed: %v", err)
 	}
 
 	task, _ := db.GetTaskByID(1)
@@ -899,11 +906,157 @@ func TestIntegration_AddCompleteDelete(t *testing.T) {
 	deleteCmd.SetIn(stdin)
 	err = deleteCmd.Execute()
 	if err != nil {
-		return
+		t.Fatalf("setup failed: %v", err)
 	}
 
 	tasks, _ := db.ListTasks()
 	if len(tasks) != 0 {
 		t.Errorf("expected no tasks after deletion")
+	}
+}
+
+// ============================================ P-005 / P-010 regressions ============================================
+
+func TestDeleteTaskCmd_MissingTaskFailsWithoutPrompt(t *testing.T) {
+	db := NewMockModel()
+	cmd := DeleteTaskCmd(db)
+	cmd.SetArgs([]string{"999"})
+	cmd.SetIn(strings.NewReader("y\n"))
+	out := &bytes.Buffer{}
+	cmd.SetOut(out)
+	cmd.SetErr(&bytes.Buffer{})
+
+	err := cmd.Execute()
+	if err == nil || !errors.Is(err, ErrTaskNotFound) {
+		t.Fatalf("expected ErrTaskNotFound, got %v", err)
+	}
+	if strings.Contains(out.String(), "deleted") || strings.Contains(out.String(), "[y/N]") {
+		t.Fatalf("expected no prompt or success message, got %q", out.String())
+	}
+}
+
+func TestDeleteTaskCmd_AnswerHandling(t *testing.T) {
+	cases := []struct {
+		input       string
+		wantDeleted bool
+	}{
+		{"y\n", true},
+		{"YES\n", true},
+		{"Yes\n", true},
+		{"y", true}, // no trailing newline
+		{"y nope\n", false},
+		{"n\n", false},
+		{"", false},
+	}
+	for _, tc := range cases {
+		t.Run(fmt.Sprintf("%q", tc.input), func(t *testing.T) {
+			db := NewMockModel()
+			if err := db.CreateTask(&ItemModel{Title: "Task", Description: "Desc"}); err != nil {
+				t.Fatalf("setup failed: %v", err)
+			}
+			cmd := DeleteTaskCmd(db)
+			cmd.SetArgs([]string{"1"})
+			cmd.SetIn(strings.NewReader(tc.input))
+			cmd.SetOut(&bytes.Buffer{})
+			if err := cmd.Execute(); err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			tasks, _ := db.ListTasks()
+			if deleted := len(tasks) == 0; deleted != tc.wantDeleted {
+				t.Fatalf("input %q: deleted=%v, want %v", tc.input, deleted, tc.wantDeleted)
+			}
+		})
+	}
+}
+
+func TestConfirm_EndOfInputMeansNo(t *testing.T) {
+	cmd := &cobra.Command{}
+	cmd.SetIn(strings.NewReader(""))
+	cmd.SetOut(&bytes.Buffer{})
+	ok, err := Confirm(cmd, "? ")
+	if ok || err != nil {
+		t.Fatalf("expected (false, nil) at end of input, got (%v, %v)", ok, err)
+	}
+}
+
+func TestRootCmd_HelpVersionAndCompletionDoNotCreateDatabase(t *testing.T) {
+	for _, args := range [][]string{{"--help"}, {"--version"}, {"help"}, {"completion", "bash"}, {"add", "--help"}, {"list", "--bogus"}} {
+		t.Run(strings.Join(args, " "), func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "munus.db")
+			db := NewDeferredDatabase(path)
+			root := NewRootCmd(db)
+			root.Version = "1.2.3"
+			root.SetArgs(args)
+			root.SetOut(&bytes.Buffer{})
+			root.SetErr(&bytes.Buffer{})
+			_ = root.Execute()
+
+			if _, err := os.Stat(path); !os.IsNotExist(err) {
+				t.Fatalf("expected no database file for %v, stat err=%v", args, err)
+			}
+		})
+	}
+}
+
+func TestRootCmd_VersionFlag(t *testing.T) {
+	root := NewRootCmd(NewDeferredDatabase(filepath.Join(t.TempDir(), "munus.db")))
+	root.Version = "v9.9.9"
+	out := &bytes.Buffer{}
+	root.SetOut(out)
+	root.SetArgs([]string{"--version"})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("--version failed: %v", err)
+	}
+	if !strings.Contains(out.String(), "v9.9.9") {
+		t.Fatalf("expected version in output, got %q", out.String())
+	}
+}
+
+func TestRootCmd_SubcommandOpensDeferredDatabase(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "munus.db")
+	db := NewDeferredDatabase(path)
+	defer func() { _ = db.Close() }()
+	root := NewRootCmd(db)
+	root.SetArgs([]string{"add", "-t", "Title", "-d", "Desc"})
+	root.SetOut(&bytes.Buffer{})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("add failed: %v", err)
+	}
+	tasks, err := db.ListTasks()
+	if err != nil || len(tasks) != 1 {
+		t.Fatalf("expected 1 task in opened database, got %v (err %v)", tasks, err)
+	}
+}
+
+func TestRootCmd_ReportsDatabaseOpenFailure(t *testing.T) {
+	db := NewDeferredDatabase(filepath.Join(t.TempDir(), "missing", "munus.db"))
+	root := NewRootCmd(db)
+	root.SetArgs([]string{"list"})
+	root.SetOut(&bytes.Buffer{})
+	errOut := &bytes.Buffer{}
+	root.SetErr(errOut)
+	err := root.Execute()
+	if err == nil || !strings.Contains(err.Error(), "failed to initialize database") {
+		t.Fatalf("expected database initialization error, got %v", err)
+	}
+	if strings.Contains(errOut.String(), "Usage:") {
+		t.Fatalf("expected no usage text for database errors, got %q", errOut.String())
+	}
+}
+
+func TestImportCmdRejectsInvalidOptionValues(t *testing.T) {
+	file := writeTestImportBundle(t, ExportBundle{Version: 1})
+	for _, args := range [][]string{
+		{"--mode", "bogus"},
+		{"--on-conflict", "bogus"},
+		{"--id-strategy", "ict"},
+	} {
+		cmd := NewImportCmd(NewMockModel())
+		cmd.SetArgs(append([]string{"--file", file, "--dry-run"}, args...))
+		cmd.SetOut(&bytes.Buffer{})
+		cmd.SetErr(&bytes.Buffer{})
+		if err := cmd.Execute(); err == nil || !strings.Contains(err.Error(), "invalid") {
+			t.Errorf("expected invalid-option error for %v, got %v", args, err)
+		}
 	}
 }
