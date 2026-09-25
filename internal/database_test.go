@@ -1061,11 +1061,14 @@ func TestOpeningRepairsOrphansAndInstallsTriggersOnce(t *testing.T) {
 	}
 
 	for range 2 {
-		db, err = NewDatabase(path)
+		// Each connection gets its own variable so every cleanup closes its
+		// own handle; Windows cannot remove the temp dir while one is open.
+		reopened, err := NewDatabase(path)
 		if err != nil {
 			t.Fatalf("reopen failed: %v", err)
 		}
-		t.Cleanup(func() { _ = db.Close() })
+		t.Cleanup(func() { _ = reopened.Close() })
+		db = reopened
 	}
 	if n := countRows(t, db, "task_tags"); n != 0 {
 		t.Fatalf("expected orphaned tag link removed, got %d", n)
