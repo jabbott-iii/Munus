@@ -698,7 +698,9 @@ func writeBackup(ctx context.Context, tasks []Task) (string, error) {
 		return "", err
 	}
 	if info.Mode().Perm()&0o077 != 0 {
-		if err := os.Chmod(dir, 0o700); err != nil {
+		// A directory needs its execute bit to be entered, so 0700 (not 0600)
+		// is its owner-only mode; gosec's G302 assumes a regular file.
+		if err := os.Chmod(dir, 0o700); err != nil { // #nosec G302 -- owner-only directory mode, see above
 			return "", fmt.Errorf("restrict backup directory permissions: %w", err)
 		}
 	}
