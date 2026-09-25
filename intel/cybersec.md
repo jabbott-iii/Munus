@@ -93,9 +93,17 @@
 - **Resolution:** 2026-09-24 (uncommitted plan-2 change set). `PrintList`, `RenderTask` and `filterLabel` sanitise tag names. Validated by `TestPrintListSanitizesStoredTags` and `TestRenderTaskAndFilterLabelSanitizeTags`; the three single-line mutations removing the calls are each caught.
 
 ### SEC-011 — gosec G302 on the backup directory `chmod` (Code Scanning alert #6)
-- **Status:** In Progress
+- **Status:** Closed
 - **Affected component:** `internal/ext-export-import.go` (`writeBackup`)
 - **Risk:** None (false positive). gosec rule G302 expects every `os.Chmod` mode to be `0600` or less, but this call sets `~/.munus/backups` to `0700`: a directory needs its execute bit to be entered, so `0700` is its owner-only mode and `0600` would break backups. The call is the SEC-001 remediation that tightens a backup directory created with broader permissions, so it must stay.
 - **Required remediation:** Keep the `0700` chmod and suppress G302 on that statement only, with the reason in the source (`// #nosec G302 -- …`), instead of dismissing the alert or excluding G302 from the scan.
 - **Validation:** gosec v2.29.0 (the version pinned in `security.yml`) run locally with CI's arguments reports no G302 and one suppression; `TestWriteBackupTightensExistingDirectory` still passes; Code Scanning marks alert #6 fixed after the next Security run on `main`.
-- **Resolution:** 2026-09-24 (uncommitted). In-source suppression added; local validation done. Close once alert #6 shows as fixed on GitHub.
+- **Resolution:** Closed 2026-09-24. In-source suppression committed in `b2e354a`; local gosec validation passed and Code Scanning shows alert #6 as "closed as fixed" on `main`.
+
+### SEC-012 — gosec G304 on user-chosen file paths (Code Scanning alerts #4 and #5)
+- **Status:** In Progress
+- **Affected component:** `internal/ext-export-import.go` (`readImportSource`, alert #4), `internal/database.go` (`createPrivateDatabaseFile`, alert #5)
+- **Risk:** None (false positives). G304 flags files opened from a variable path, which matters when the path comes from someone other than the person running the program (for example a web request). Here the import path is the one the user passes to `--file` or types at the TUI prompt, and the database path is the user's own `MUNUS_DB_PATH` (default `./munus.db`); Munus runs with that user's permissions, so the user cannot reach anything they could not already open. Imports stay capped at 32 MiB and validated (SEC-005, SEC-006); the database file is created with `O_EXCL` and `0600`, so an existing file is never opened (SEC-001).
+- **Required remediation:** Suppress G304 on those two calls only, with the reason in the source (`// #nosec G304 -- …`). `filepath.Clean`, which G304 accepts as sanitising, was rejected: it does not restrict the path, only silences the rule, and can change which file a path such as `link/../x` opens. `os.Root` does not fit because users may import from, or keep the database in, any directory.
+- **Validation:** gosec v2.29.0 (the version pinned in `security.yml`) run locally with CI's arguments reports 0 issues and 3 suppressions, and its SARIF output is empty; `go vet` and all tests pass; Code Scanning marks alerts #4 and #5 fixed after the next Security run on `main`.
+- **Resolution:** 2026-09-24 (uncommitted). In-source suppressions added; local validation done. Close once alerts #4 and #5 show as fixed on GitHub.

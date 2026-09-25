@@ -531,7 +531,10 @@ func createPrivateDatabaseFile(path string) {
 	if path == ":memory:" || strings.HasPrefix(path, "file:") || strings.Contains(path, "?") {
 		return
 	}
-	f, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE|os.O_EXCL, 0o600)
+	// The path is the user's own setting (MUNUS_DB_PATH or ./munus.db), so
+	// there is no privilege boundary for G304 to protect; O_EXCL only ever
+	// creates a new file and never opens an existing one.
+	f, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE|os.O_EXCL, 0o600) // #nosec G304 -- user-configured database path, see above
 	if err != nil {
 		return
 	}

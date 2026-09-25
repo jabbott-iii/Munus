@@ -415,7 +415,10 @@ func readImportSource(path string, stdin io.Reader) ([]byte, error) {
 		}
 		return readLimited(stdin)
 	}
-	f, err := os.Open(path)
+	// The path is the import file the user chose (--file or the TUI prompt),
+	// and Munus runs with that user's own permissions, so there is no privilege
+	// boundary for G304 to protect; the read is size-capped and validated.
+	f, err := os.Open(path) // #nosec G304 -- user-chosen import file, see above
 	if err != nil {
 		return nil, err
 	}
