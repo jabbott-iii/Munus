@@ -17,10 +17,14 @@ limitations under the License.
 package internal
 
 import (
+	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -836,7 +840,9 @@ func TestListModelRenderTaskCompleted(t *testing.T) {
 // TestListModelRenderTaskWithDeadline tests rendering of a task with deadline
 func TestListModelRenderTaskWithDeadline(t *testing.T) {
 	list := NewListModel(&MockStorage{})
-	deadline := time.Now().Add(24 * time.Hour)
+	now := time.Date(2026, 3, 10, 9, 0, 0, 0, time.UTC)
+	list.now = func() time.Time { return now }
+	deadline := now.Add(24 * time.Hour)
 	task := &ItemModel{
 		ID:       1,
 		Title:    "Test Task",
@@ -852,7 +858,7 @@ func TestListModelRenderTaskWithDeadline(t *testing.T) {
 
 	result := list.RenderTask(task, 0, false, selectedStyle, normalStyle, completedStyle, overdueStyle, upcomingStyle, descriptionStyle)
 
-	if !strings.Contains(result, "1 days left") && !strings.Contains(result, "day") {
+	if !strings.Contains(result, "(Due tomorrow)") {
 		t.Errorf("Expected deadline info in render output, got: %s", result)
 	}
 }
@@ -1253,7 +1259,7 @@ func TestListModelApplyImportFromTransfer(t *testing.T) {
 
 	t.Run("success", func(t *testing.T) {
 		storage := NewMockModel()
-		if err := storage.CreateTask(&ItemModel{Title: "Existing", Description: "Local"}); err != nil {
+		if err := storage.CreateTask(t.Context(), &ItemModel{Title: "Existing", Description: "Local"}); err != nil {
 			t.Fatalf("failed to seed local task: %v", err)
 		}
 		now := time.Now()
@@ -1313,7 +1319,7 @@ func TestListModelApplyImportFromTransfer(t *testing.T) {
 
 	t.Run("success includes backup path for replace mode", func(t *testing.T) {
 		storage := NewMockModel()
-		if err := storage.CreateTask(&ItemModel{Title: "Existing", Description: "Local"}); err != nil {
+		if err := storage.CreateTask(t.Context(), &ItemModel{Title: "Existing", Description: "Local"}); err != nil {
 			t.Fatalf("failed to seed local task: %v", err)
 		}
 		now := time.Now()
@@ -1578,7 +1584,9 @@ type failingUpdateStorage struct {
 	MockStorage
 }
 
-func (f *failingUpdateStorage) UpdateTask(*ItemModel) error { return errors.New("disk full") }
+func (f *failingUpdateStorage) UpdateTask(context.Context, *ItemModel) error {
+	return errors.New("disk full")
+}
 
 func TestListModelFailedToggleKeepsStoredState(t *testing.T) {
 	storage := &failingUpdateStorage{MockStorage{tasks: []*ItemModel{{ID: 1, Title: "A"}}}}
@@ -1598,7 +1606,7 @@ type notFoundDeleteStorage struct {
 	MockStorage
 }
 
-func (s *notFoundDeleteStorage) DeleteTask(id int) error {
+func (s *notFoundDeleteStorage) DeleteTask(_ context.Context, id int) error {
 	return fmt.Errorf("%w: %d", ErrTaskNotFound, id)
 }
 
@@ -1611,5 +1619,340 @@ func TestListModelDeletingAlreadyRemovedTaskClosesDialog(t *testing.T) {
 	_, cmd := list.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'y'}})
 	if list.confirmingDelete || list.err != nil || cmd == nil {
 		t.Fatalf("expected dialog closed and reload, got confirming=%v err=%v cmd=%v", list.confirmingDelete, list.err, cmd != nil)
+	}
+}
+
+// ============================== plan 2: TUI ==============================
+
+func runeKey(r rune) tea.KeyMsg { return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}} }
+
+func TestListModelImportConfirmRequiresY(t *testing.T) {
+	setTestHome(t)
+	db := newFileTestDB(t)
+	if err := db.CreateTask(t.Context(), &ItemModel{Title: "keep", Description: "x"}); err != nil {
+		t.Fatalf("setup failed: %v", err)
+	}
+	file := writeTestImportBundle(t, ExportBundle{Version: 2})
+
+	newConfirm := func() *ListModel {
+		l := NewListModel(db)
+		loadList(t, l)
+		l.transfer = &transferState{action: transferActionImport, stage: transferStageInput, path: file, importMode: "replace", backup: true}
+		l.Update(tea.KeyMsg{Type: tea.KeyEnter}) // preview
+		if l.transfer == nil || l.transfer.stage != transferStageConfirm {
+			t.Fatalf("expected confirm stage, got %+v", l.transfer)
+		}
+		return l
+	}
+
+	l := newConfirm()
+	l.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if tasks, _ := db.ListTasks(t.Context()); len(tasks) != 1 || l.transfer == nil {
+		t.Fatalf("Enter at the confirm stage must not apply the import (tasks=%d)", len(tasks))
+	}
+	for _, key := range []tea.KeyMsg{runeKey('n'), runeKey('q'), {Type: tea.KeyEsc}} {
+		l := newConfirm()
+		l.Update(key)
+		if l.transfer != nil {
+			t.Errorf("%q should cancel the import", key.String())
+		}
+	}
+	l = newConfirm()
+	if _, cmd := l.Update(tea.KeyMsg{Type: tea.KeyCtrlC}); cmd == nil {
+		t.Error("ctrl+c at the confirm stage should quit")
+	}
+	l = newConfirm()
+	l.Update(runeKey('y'))
+	if tasks, _ := db.ListTasks(t.Context()); len(tasks) != 0 {
+		t.Fatalf("y should apply the replace import, tasks=%d", len(tasks))
+	}
+}
+
+func TestListModelHelpPanel(t *testing.T) {
+	l := NewListModel(&MockStorage{})
+	loadList(t, l)
+	before := l.View()
+	l.Update(runeKey('?'))
+	after := l.View()
+	if before == after || !strings.Contains(after, "cycle status") || !strings.Contains(after, "cycle tag filter") {
+		t.Fatalf("expected help panel after '?', got:\n%s", after)
+	}
+	l.Update(runeKey('?'))
+	if l.View() != before {
+		t.Fatal("expected '?' to hide the help panel again")
+	}
+}
+
+func TestListModelFilters(t *testing.T) {
+	now := time.Date(2026, 3, 10, 9, 0, 0, 0, time.UTC)
+	past := now.Add(-time.Hour)
+	storage := &MockStorage{tasks: []*ItemModel{
+		{ID: 4, Title: "done", Status: StatusDone, Completed: true, Tags: []string{"work"}},
+		{ID: 3, Title: "overdue", Status: StatusTodo, Deadline: &past, Tags: []string{"home"}},
+		{ID: 2, Title: "doing", Status: StatusDoing, Tags: []string{"work"}},
+		{ID: 1, Title: "todo", Status: StatusTodo},
+	}}
+	l := NewListModel(storage)
+	l.now = func() time.Time { return now }
+	loadList(t, l)
+
+	titles := func() string {
+		var out []string
+		for _, task := range l.GetVisibleTasks() {
+			out = append(out, task.Title)
+		}
+		sort.Strings(out)
+		return strings.Join(out, ",")
+	}
+	steps := []struct{ label, want string }{
+		{"pending", "doing,overdue,todo"},
+		{"in progress", "doing"},
+		{"overdue", "overdue"},
+		{"done", "done"},
+		{"", "doing,done,overdue,todo"},
+	}
+	for _, step := range steps {
+		l.Update(runeKey('F'))
+		if got := titles(); got != step.want {
+			t.Fatalf("filter %q: visible %s, want %s", step.label, got, step.want)
+		}
+		if step.label != "" && !strings.Contains(l.View(), "Filter: "+step.label) {
+			t.Fatalf("expected header to show filter %q", step.label)
+		}
+		if l.cursor != 0 || (len(l.GetVisibleTasks()) > 0 && l.GetCurrentTask() == nil) {
+			t.Fatalf("cursor not valid after filter %q", step.label)
+		}
+	}
+
+	for _, want := range []struct{ tag, titles string }{{"home", "overdue"}, {"work", "doing,done"}, {"", "doing,done,overdue,todo"}} {
+		l.Update(runeKey('#'))
+		if l.tagFilter != want.tag || titles() != want.titles {
+			t.Fatalf("tag filter %q: visible %s, want %q / %s", l.tagFilter, titles(), want.tag, want.titles)
+		}
+	}
+}
+
+func TestListModelStatusCycle(t *testing.T) {
+	storage := &MockStorage{tasks: []*ItemModel{{ID: 1, Title: "A", Status: StatusTodo}}}
+	l := NewListModel(storage)
+	loadList(t, l)
+	for _, want := range []TaskStatus{StatusDoing, StatusDone, StatusTodo} {
+		_, cmd := l.Update(runeKey('s'))
+		if cmd == nil {
+			t.Fatal("expected reload after status change")
+		}
+		l.Update(cmd())
+		if got := storage.tasks[0]; got.Status != want || got.Completed != (want == StatusDone) {
+			t.Fatalf("after 's': got %+v, want %q", got, want)
+		}
+	}
+}
+
+func TestListModelFailedStatusCycleKeepsState(t *testing.T) {
+	storage := &failingUpdateStorage{MockStorage{tasks: []*ItemModel{{ID: 1, Title: "A", Status: StatusTodo}}}}
+	l := NewListModel(storage)
+	loadList(t, l)
+	l.Update(runeKey('s'))
+	if l.err == nil || storage.tasks[0].Status != StatusTodo {
+		t.Fatalf("expected error and unchanged status, got err=%v task=%+v", l.err, storage.tasks[0])
+	}
+}
+
+func TestListModelEditFlow(t *testing.T) {
+	deadline := time.Date(2030, 1, 2, 14, 30, 45, 0, time.Local) // seconds prove it is kept exactly
+	db := newFileTestDB(t)
+	task := &ItemModel{Title: "Old", Description: "desc", Deadline: &deadline, Tags: []string{"keep"}}
+	if err := db.CreateTask(t.Context(), task); err != nil {
+		t.Fatalf("setup failed: %v", err)
+	}
+	l := NewListModel(db)
+	l.viewportWidth, l.viewportHeight = 120, 40
+	loadList(t, l)
+
+	model, _ := l.Update(runeKey('u'))
+	form, ok := model.(*FormModel)
+	if !ok {
+		t.Fatalf("expected edit form after 'u', got %T", model)
+	}
+	if form.editingID != task.ID || form.fields[titleField] != "Old" || form.fields[deadlineField] != "2030-01-02 14:30" {
+		t.Fatalf("form not pre-filled: %+v", form.fields)
+	}
+	if !strings.Contains(form.View(), fmt.Sprintf("Edit Task #%d", task.ID)) || form.viewportWidth != 120 {
+		t.Fatalf("expected edit heading and carried size, got width %d", form.viewportWidth)
+	}
+
+	form.fields[titleField] = "New title"
+	form.currentField = deadlineField
+	model, cmd := form.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	back, ok := model.(*ListModel)
+	if !ok || cmd == nil || !strings.Contains(back.statusMessage, "updated") {
+		t.Fatalf("expected list with update message after save, got %T (%v)", model, form.err)
+	}
+	got, _ := db.GetTaskByID(t.Context(), task.ID)
+	if got.Title != "New title" || got.Deadline == nil || !got.Deadline.Equal(deadline) || !slices.Equal(got.Tags, []string{"keep"}) {
+		t.Fatalf("unexpected task after edit: %+v", got)
+	}
+
+	// Emptying the deadline field removes the deadline.
+	edit, _ := back.openEditForm(got)
+	form = edit.(*FormModel)
+	form.fields[deadlineField] = ""
+	form.currentField = deadlineField
+	form.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if got, _ := db.GetTaskByID(t.Context(), task.ID); got.Deadline != nil {
+		t.Fatalf("expected deadline removed, got %v", got.Deadline)
+	}
+
+	// esc while editing returns to the list instead of quitting.
+	edit, _ = back.openEditForm(got)
+	model, _ = edit.(*FormModel).Update(tea.KeyMsg{Type: tea.KeyEsc})
+	if _, ok := model.(*ListModel); !ok {
+		t.Fatalf("expected esc to return to the list while editing, got %T", model)
+	}
+}
+
+func TestListModelEditRejectsInvalidInput(t *testing.T) {
+	storage := &MockStorage{tasks: []*ItemModel{{ID: 1, Title: "Old", Description: "desc"}}}
+	l := NewListModel(storage)
+	loadList(t, l)
+	model, _ := l.Update(runeKey('u'))
+	form := model.(*FormModel)
+	form.fields[deadlineField] = "someday"
+	form.currentField = deadlineField
+	model, _ = form.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if model != form || form.err == nil || storage.tasks[0].Title != "Old" {
+		t.Fatalf("expected validation error and no change, got err=%v", form.err)
+	}
+}
+
+func TestListModelExportDefaultsToIncludeCompleted(t *testing.T) {
+	l := NewListModel(&MockStorage{})
+	loadList(t, l)
+	l.Update(runeKey('x'))
+	if l.transfer == nil || !l.transfer.includeCompleted {
+		t.Fatalf("expected export overlay to include completed tasks by default, got %+v", l.transfer)
+	}
+}
+
+func TestListModelFilterKeysResetCursor(t *testing.T) {
+	storage := &MockStorage{tasks: []*ItemModel{
+		{ID: 4, Title: "d", Status: StatusTodo, Tags: []string{"work"}},
+		{ID: 3, Title: "c", Status: StatusTodo, Tags: []string{"work"}},
+		{ID: 2, Title: "b", Status: StatusTodo, Tags: []string{"work"}},
+		{ID: 1, Title: "a", Status: StatusTodo, Tags: []string{"work"}},
+	}}
+	for _, key := range []rune{'F', '#'} {
+		l := NewListModel(storage)
+		loadList(t, l)
+		l.cursor = 3
+		l.Update(runeKey(key))
+		if l.cursor != 0 || l.currentPage != 0 {
+			t.Errorf("%q: expected cursor and page reset to 0, got cursor %d page %d", key, l.cursor, l.currentPage)
+		}
+	}
+}
+
+func TestListModelActionsOnTaskDeletedElsewhereReload(t *testing.T) {
+	db := newFileTestDB(t)
+	for _, title := range []string{"a", "b", "c"} {
+		if err := db.CreateTask(t.Context(), &ItemModel{Title: title, Description: "x"}); err != nil {
+			t.Fatalf("setup failed: %v", err)
+		}
+	}
+	l := NewListModel(db)
+	loadList(t, l)
+
+	for _, key := range []rune{'s', 'c'} {
+		selected := l.GetCurrentTask()
+		if selected == nil {
+			t.Fatalf("%q: no task selected", key)
+		}
+		// Another process (or the CLI) deletes the selected task.
+		if err := db.DeleteTask(t.Context(), selected.ID); err != nil {
+			t.Fatalf("DeleteTask failed: %v", err)
+		}
+		_, cmd := l.Update(runeKey(key))
+		if l.err != nil || cmd == nil {
+			t.Fatalf("%q: expected a reload instead of an error, got err %v", key, l.err)
+		}
+		l.Update(cmd())
+		if _, err := db.GetTaskByID(t.Context(), selected.ID); !errors.Is(err, ErrTaskNotFound) {
+			t.Fatalf("%q: the deleted task was written back (err %v)", key, err)
+		}
+		for _, task := range l.allTasks {
+			if task.ID == selected.ID {
+				t.Fatalf("%q: the deleted task is still listed", key)
+			}
+		}
+	}
+	if tasks, _ := db.ListTasks(t.Context()); len(tasks) != 1 {
+		t.Fatalf("expected one task left, got %d", len(tasks))
+	}
+}
+
+func TestRenderTaskAndFilterLabelSanitizeTags(t *testing.T) {
+	list := NewListModel(&MockStorage{})
+	task := &ItemModel{ID: 1, Title: "A", Tags: []string{"ok", "evil\x1b]0;PWNED\x07"}}
+	plain := lipgloss.NewStyle()
+	out := list.RenderTask(task, 0, false, plain, plain, plain, plain, plain, plain)
+	if strings.ContainsAny(out, "\x1b\x07") || !strings.Contains(out, "#ok") {
+		t.Fatalf("expected tags rendered with control characters replaced, got %q", out)
+	}
+	list.tagFilter = "evil\x1b[2J"
+	if label := list.filterLabel(); strings.ContainsRune(label, '\x1b') {
+		t.Fatalf("expected a sanitized filter label, got %q", label)
+	}
+}
+
+func TestListModelFiltersSurviveTheForm(t *testing.T) {
+	storage := &MockStorage{tasks: []*ItemModel{{ID: 1, Title: "A", Description: "x", Tags: []string{"work"}}}}
+	l := NewListModel(storage)
+	loadList(t, l)
+	l.filter, l.tagFilter = filterPending, "work"
+
+	for _, open := range []struct {
+		key  rune
+		back tea.KeyMsg
+	}{
+		{'n', tea.KeyMsg{Type: tea.KeyCtrlL}},
+		{'u', tea.KeyMsg{Type: tea.KeyEsc}},
+	} {
+		model, _ := l.Update(runeKey(open.key))
+		form, ok := model.(*FormModel)
+		if !ok {
+			t.Fatalf("%q: expected the form, got %T", open.key, model)
+		}
+		model, _ = form.Update(open.back)
+		back, ok := model.(*ListModel)
+		if !ok || back.filter != filterPending || back.tagFilter != "work" {
+			t.Fatalf("%q: expected the list with its filters restored, got %T %+v", open.key, model, model)
+		}
+	}
+}
+
+func TestListModelImportAppliesThePreviewedFile(t *testing.T) {
+	db := newFileTestDB(t)
+	file := writeTestImportBundle(t, ExportBundle{Version: 2, Tasks: []TaskDTO{{ID: "1", Title: "previewed"}}})
+	l := NewListModel(db)
+	loadList(t, l)
+	l.transfer = &transferState{action: transferActionImport, stage: transferStageInput, path: file, importMode: "merge"}
+	l.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if l.transfer == nil || l.transfer.stage != transferStageConfirm {
+		t.Fatalf("expected confirm stage, got %+v", l.transfer)
+	}
+
+	// The file changes between the preview and the confirmation.
+	changed, err := json.Marshal(ExportBundle{Version: 2, Tasks: []TaskDTO{{ID: "1", Title: "swapped"}}})
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if err := os.WriteFile(file, changed, 0o600); err != nil {
+		t.Fatalf("rewrite import file: %v", err)
+	}
+	l.Update(runeKey('y'))
+
+	tasks, err := db.ListTasks(t.Context())
+	if err != nil || len(tasks) != 1 || tasks[0].Title != "previewed" {
+		t.Fatalf("expected exactly the previewed task imported, got %+v (err %v)", tasks, err)
 	}
 }

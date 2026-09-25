@@ -12,6 +12,7 @@ Before making changes, read:
 5. `intel/maint.md` — authoritative architecture and maintainability guidance.
 6. `intel/map.md`— repository structure map, component descriptions, and relevant
   technical diagrams
+7. `intel/golang.md`— authoritative guidance on Go language usage.
 
 ## Instruction Precedence
 - Follow all applicable platform, organization, and account-level instructions.

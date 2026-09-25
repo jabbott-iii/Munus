@@ -17,8 +17,11 @@ limitations under the License.
 package internal
 
 import (
+	"sort"
+	"strings"
 	"testing"
 	"time"
+	_ "time/tzdata" // fixed zone data so DST tests do not depend on the machine
 )
 
 // TestIsOverdue tests the IsOverdue method
@@ -425,5 +428,108 @@ func TestGetTasksWithoutDeadline(t *testing.T) {
 				t.Errorf("GetTasksWithoutDeadline() returned %d tasks, expected %d", len(result), tt.expected)
 			}
 		})
+	}
+}
+
+func TestDeadlineLabel(t *testing.T) {
+	ny, err := time.LoadLocation("America/New_York") // embedded via time/tzdata
+	if err != nil {
+		t.Fatalf("load location: %v", err)
+	}
+	at := func(loc *time.Location, y int, m time.Month, d, h, min int) time.Time {
+		return time.Date(y, m, d, h, min, 0, 0, loc)
+	}
+	cases := []struct {
+		name       string
+		now        time.Time
+		deadline   time.Time
+		want       string
+		wantUrgent bool
+	}{
+		{"overdue by hours, same day", at(time.UTC, 2026, 3, 10, 18, 0), at(time.UTC, 2026, 3, 10, 13, 0), "Overdue", true},
+		{"overdue since yesterday", at(time.UTC, 2026, 3, 10, 9, 0), at(time.UTC, 2026, 3, 9, 23, 0), "Overdue by 1 day", true},
+		{"overdue by 5 days", at(time.UTC, 2026, 3, 10, 9, 0), at(time.UTC, 2026, 3, 5, 9, 0), "Overdue by 5 days", true},
+		{"later today", at(time.UTC, 2026, 3, 10, 9, 0), at(time.UTC, 2026, 3, 10, 23, 0), "Due today!", true},
+		{"23h ahead crosses midnight", at(time.UTC, 2026, 3, 10, 9, 0), at(time.UTC, 2026, 3, 11, 8, 0), "Due tomorrow", false},
+		{"just after midnight", at(time.UTC, 2026, 3, 10, 23, 30), at(time.UTC, 2026, 3, 11, 0, 30), "Due tomorrow", false},
+		{"three days", at(time.UTC, 2026, 3, 10, 9, 0), at(time.UTC, 2026, 3, 13, 9, 0), "3 days left", false},
+		{"far future", at(time.UTC, 2026, 3, 10, 9, 0), at(time.UTC, 2026, 3, 20, 15, 4), "Mar 20, 3:04 PM", false},
+		// US DST starts 2026-03-08 02:00 local: the day before has only 23 hours.
+		{"across DST start", at(ny, 2026, 3, 7, 12, 0), at(ny, 2026, 3, 9, 1, 0), "2 days left", false},
+		{"across DST end", at(ny, 2026, 10, 31, 23, 0), at(ny, 2026, 11, 1, 23, 30), "Due tomorrow", false},
+		{"deadline in another zone uses now's calendar", at(ny, 2026, 3, 10, 21, 0), at(time.UTC, 2026, 3, 11, 3, 0), "Due today!", true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, urgent := deadlineLabel(tc.deadline, tc.now)
+			if got != tc.want || urgent != tc.wantUrgent {
+				t.Fatalf("deadlineLabel = %q/%v, want %q/%v", got, urgent, tc.want, tc.wantUrgent)
+			}
+		})
+	}
+}
+
+func TestTaskFilterMatches(t *testing.T) {
+	now := time.Date(2026, 3, 10, 9, 0, 0, 0, time.UTC)
+	past := now.Add(-time.Hour)
+	future := now.Add(time.Hour)
+	tasks := map[string]*ItemModel{
+		"todo-overdue": {Status: StatusTodo, Deadline: &past, Tags: []string{"work"}},
+		"doing":        {Status: StatusDoing, Deadline: &future, Tags: []string{"home", "work"}},
+		"done-past":    {Status: StatusDone, Completed: true, Deadline: &past},
+		"legacy-done":  {Completed: true},
+	}
+	cases := []struct {
+		name   string
+		filter taskFilter
+		want   []string
+	}{
+		{"no filter", taskFilter{}, []string{"doing", "done-past", "legacy-done", "todo-overdue"}},
+		{"pending", taskFilter{pending: true}, []string{"doing", "todo-overdue"}},
+		{"completed", taskFilter{completed: true}, []string{"done-past", "legacy-done"}},
+		{"overdue excludes done", taskFilter{overdue: true}, []string{"todo-overdue"}},
+		{"status doing", taskFilter{status: StatusDoing}, []string{"doing"}},
+		{"status done derives legacy rows", taskFilter{status: StatusDone}, []string{"done-past", "legacy-done"}},
+		{"tag", taskFilter{tags: []string{"work"}}, []string{"doing", "todo-overdue"}},
+		{"all tags must match", taskFilter{tags: []string{"work", "home"}}, []string{"doing"}},
+		{"combined AND", taskFilter{pending: true, tags: []string{"work"}, overdue: true}, []string{"todo-overdue"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var got []string
+			for name, task := range tasks {
+				if tc.filter.matches(task, now) {
+					got = append(got, name)
+				}
+			}
+			sort.Strings(got)
+			if strings.Join(got, ",") != strings.Join(tc.want, ",") {
+				t.Fatalf("got %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestStatusTransitions(t *testing.T) {
+	if got := []TaskStatus{nextStatus(StatusTodo), nextStatus(StatusDoing), nextStatus(StatusDone), nextStatus("")}; got[0] != StatusDoing || got[1] != StatusDone || got[2] != StatusTodo || got[3] != StatusDoing {
+		t.Fatalf("unexpected status cycle %v", got)
+	}
+
+	now := time.Date(2026, 3, 10, 9, 0, 0, 0, time.UTC)
+	task := &ItemModel{}
+	task.setStatus(StatusDone, now)
+	if !task.Completed || task.CompletedAt == nil || !task.CompletedAt.Equal(now) {
+		t.Fatalf("setStatus(done) = %+v", task)
+	}
+	task.setStatus(StatusDoing, now)
+	if task.Completed || task.CompletedAt != nil || task.Status != StatusDoing {
+		t.Fatalf("setStatus(doing) = %+v", task)
+	}
+
+	if _, err := parseTaskStatus("blocked"); err == nil {
+		t.Fatal("expected invalid status error")
+	}
+	if s, err := parseTaskStatus(" Done "); err != nil || s != StatusDone {
+		t.Fatalf("parseTaskStatus(\" Done \") = %q, %v", s, err)
 	}
 }

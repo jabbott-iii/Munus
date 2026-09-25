@@ -25,6 +25,9 @@ import (
 	"time"
 )
 
+// deadlineInputLayout is the absolute deadline format accepted from users.
+const deadlineInputLayout = "2006-01-02 15:04"
+
 // Upper bounds keep relative deadlines far from time.Duration overflow and
 // stop oversized inputs from doing unbounded work.
 const (
@@ -46,7 +49,7 @@ func ParseDeadline(input string) (*time.Time, error) {
 		return nil, fmt.Errorf("deadline cannot be empty")
 	}
 
-	if t, err := time.ParseInLocation("2006-01-02 15:04", input, time.Local); err == nil {
+	if t, err := time.ParseInLocation(deadlineInputLayout, input, time.Local); err == nil {
 		return &t, nil
 	}
 

@@ -12,7 +12,8 @@ permissions:
 jobs:
   # go-sqlite3 needs CGO, so each target is built with a native C toolchain on
   # a runner of the matching OS (darwin/amd64 is cross-compiled by clang on the
-  # Apple Silicon runner). Third-party actions are pinned to full commit SHAs.
+  # Apple Silicon runner; windows/arm64 uses a pinned llvm-mingw toolchain).
+  # Third-party actions and downloads are pinned by commit SHA or SHA-256.
   build:
     name: Build ${{ matrix.goos }}/${{ matrix.goarch }}
     runs-on: ${{ matrix.runner }}
@@ -25,6 +26,7 @@ jobs:
           - { goos: darwin, goarch: arm64, runner: macos-latest, smoke: true }
           - { goos: darwin, goarch: amd64, runner: macos-latest, smoke: false }
           - { goos: windows, goarch: amd64, runner: windows-latest, smoke: true }
+          - { goos: windows, goarch: arm64, runner: windows-11-arm, smoke: true }
 
     steps:
       - name: Checkout
@@ -35,6 +37,26 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
+
+      # The windows-11-arm image has no C compiler targeting aarch64-w64-mingw32,
+      # which cgo needs; install a pinned, checksum-verified llvm-mingw.
+      - name: Install llvm-mingw (windows/arm64)
+        if: matrix.goos == 'windows' && matrix.goarch == 'arm64'
+        shell: pwsh
+        env:
+          LLVM_MINGW_VERSION: "20260908"
+          LLVM_MINGW_SHA256: "7fe35f60407473c420ac72b25137f54385b0affd2c42efd507c0062fc626ab56"
+        run: |
+          $name = "llvm-mingw-$env:LLVM_MINGW_VERSION-ucrt-aarch64"
+          $zip = Join-Path $env:RUNNER_TEMP "$name.zip"
+          Invoke-WebRequest -Uri "https://github.com/mstorsjo/llvm-mingw/releases/download/$env:LLVM_MINGW_VERSION/$name.zip" -OutFile $zip
+          $hash = (Get-FileHash -Algorithm SHA256 -Path $zip).Hash.ToLowerInvariant()
+          if ($hash -ne $env:LLVM_MINGW_SHA256) { throw "llvm-mingw checksum mismatch: $hash" }
+          # Windows' bundled bsdtar reads zip files; Git's GNU tar (possibly first on PATH) cannot.
+          & "$env:SystemRoot\System32\tar.exe" -xf $zip -C $env:RUNNER_TEMP
+          if ($LASTEXITCODE -ne 0) { throw "extracting llvm-mingw failed with exit code $LASTEXITCODE" }
+          Add-Content -Path $env:GITHUB_PATH -Value (Join-Path $env:RUNNER_TEMP "$name\bin")
+          Add-Content -Path $env:GITHUB_ENV -Value "CC=aarch64-w64-mingw32-clang"
 
       - name: Set release metadata
         id: meta

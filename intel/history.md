@@ -27,3 +27,32 @@ Do not edit or remove existing entries. Append new entries at the bottom.
   SHA-pinned actions, gosec SARIF upload, codecov v5, non-root Docker image, `.dockerignore`.
 - README rewritten against the code; test hygiene fixes; coverage 80.4% → 84.3%.
 - Maintainer decisions recorded in `plan.md`. Independent review of the diff: findings fixed, or documented in `notes.md` where out of scope.
+
+## 2026-09-24 — Change set committed and validated on GitHub
+- Maintainer committed and pushed the change set as `e32fd8a` (workflow patch applied).
+- CI (ubuntu/macos/windows), Docker and Security workflows passed on `e32fd8a`, covering checks not
+  runnable in the analysis sandbox (golangci-lint, `go mod tidy`, macOS/Windows tests, Docker build).
+- SEC-002 and SEC-004 closed; SEC-003 awaits confirmation in Code Scanning; release workflow awaits a tag.
+
+## 2026-09-24 — Plan P-001…P-014 fully validated
+- Release `v2.1.1` (tag on `e32fd8a`) built, smoke-tested and published by the new `cd.yml`.
+- gosec results confirmed in Code Scanning (SEC-003 closed); Codecov upload confirmed (P-014).
+- All security items SEC-001…SEC-009 are Closed.
+
+## 2026-09-24 — Plan 2 drafted
+- Follow-on defects re-verified against `v2.1.1` (N-018, N-020, N-023, N-024 and four Info items).
+- Maintainer selected features (edit, list filters, status + tags), export-includes-completed default,
+  Makefile dev targets, windows/arm64 release, Alpine pins and a drafted `CONTRIBUTING.md`.
+- `plan.md` now holds plan 2 (P-015…P-028, target v2.2.0) above the completed plan 1 table.
+
+## 2026-09-24 — Plan 2 implemented (uncommitted)
+- Reviewed `intel/golang.md`; plan 2 amended with P-029 (context propagation) and P-030 (conformance)
+  on maintainer approval, then implemented in full (P-015…P-030) as an uncommitted change set.
+- Features: task status (`todo`/`doing`/`done`) and tags with a v2.1.1-compatible migration and
+  consistency triggers; `munus edit` and TUI editing (`u`) and status cycling (`s`); list filters
+  (CLI flags, TUI `F`/`#`); export schema v2 including completed tasks by default; stdin import;
+  TUI help panel; stricter TUI import confirmation; calendar-day deadline labels.
+- Tooling/docs: Makefile dev targets, `CONTRIBUTING.md` draft, pinned Alpine images and packages,
+  windows/arm64 release build (workflow change delivered as a patch), README updated.
+- An independent review found 12 issues (one security item, SEC-010); all fixed with regression
+  tests. Local checks pass; CI, Docker and a tagged release are still needed (see `notes.md`).

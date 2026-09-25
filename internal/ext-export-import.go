@@ -18,24 +18,29 @@ package internal
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
-	"sync/atomic"
 	"time"
 )
 
-// MaxImportFileSize caps how much data an import will read into memory.
-const MaxImportFileSize = 32 << 20 // 32 MiB
+// maxImportFileSize caps how much data an import will read into memory.
+const maxImportFileSize = 32 << 20 // 32 MiB
 
 // maxImportedTaskID bounds IDs kept from an import file. Larger IDs are treated
 // like non-numeric IDs (a new ID is assigned) so a crafted file cannot push
 // SQLite's AUTOINCREMENT counter to its limit and block future inserts.
 const maxImportedTaskID = 1<<31 - 1
+
+// stdinImportPath is the --file value that reads an import from standard input.
+const stdinImportPath = "-"
 
 // databaseFiler is implemented by storage backed by a file on disk.
 type databaseFiler interface {
@@ -44,53 +49,97 @@ type databaseFiler interface {
 
 //---------------------------------------------types export/import---------------------------------//
 
-func (s *TaskServiceAdapter) ListTasks() ([]Task, error) {
-	items, err := s.storage.ListTasks()
+func taskFromItem(item *ItemModel) Task {
+	return Task{
+		ID:          strconv.Itoa(item.ID),
+		Title:       item.Title,
+		Description: item.Description,
+		Completed:   item.Completed,
+		Deadline:    item.Deadline,
+		CompletedAt: item.CompletedAt,
+		Status:      item.Status,
+		Tags:        slices.Clone(item.Tags),
+		CreatedAt:   item.CreatedAt,
+		UpdatedAt:   item.UpdatedAt,
+	}
+}
+
+// itemFromTask converts t for storage. Tasks whose ID is a positive integer
+// keep that ID; any other ID (empty, or a placeholder from rename/regenerate)
+// receives a new database-assigned ID.
+func itemFromTask(t Task) *ItemModel {
+	id, _ := parseTaskID(t.ID)
+	return &ItemModel{
+		ID:          id,
+		Title:       t.Title,
+		Description: t.Description,
+		Completed:   t.Completed,
+		Deadline:    t.Deadline,
+		CompletedAt: t.CompletedAt,
+		Status:      taskStatusOf(t),
+		Tags:        slices.Clone(t.Tags),
+		CreatedAt:   t.CreatedAt,
+		UpdatedAt:   t.UpdatedAt,
+	}
+}
+
+// taskStatusOf returns t's status, deriving it from Completed when unset.
+func taskStatusOf(t Task) TaskStatus {
+	if t.Status != "" {
+		return t.Status
+	}
+	if t.Completed {
+		return StatusDone
+	}
+	return StatusTodo
+}
+
+func (s *TaskServiceAdapter) ListTasks(ctx context.Context) ([]Task, error) {
+	items, err := s.storage.ListTasks(ctx)
 	if err != nil {
 		return nil, err
 	}
-
 	out := make([]Task, 0, len(items))
 	for _, item := range items {
-		out = append(out, Task{
-			ID:          fmt.Sprintf("%d", item.ID),
-			Title:       item.Title,
-			Description: item.Description,
-			Completed:   item.Completed,
-			Deadline:    item.Deadline,
-			CompletedAt: item.CompletedAt,
-			CreatedAt:   item.CreatedAt,
-			UpdatedAt:   item.UpdatedAt,
-		})
+		out = append(out, taskFromItem(item))
 	}
 	return out, nil
 }
 
-// ReplaceAll replaces every stored task with tasks. Tasks whose ID is a
-// positive integer keep that ID; any other ID (empty, or a generated
-// placeholder from rename/regenerate) receives a new database-assigned ID.
+// ReplaceAll replaces every stored task with tasks (see itemFromTask for IDs).
 // Database storage performs the replacement in a single transaction.
-func (s *TaskServiceAdapter) ReplaceAll(tasks []Task) error {
+func (s *TaskServiceAdapter) ReplaceAll(ctx context.Context, tasks []Task) error {
 	if s.storage == nil {
 		return fmt.Errorf("task storage is not configured")
 	}
-
 	items := make([]*ItemModel, 0, len(tasks))
 	for _, t := range tasks {
-		id, _ := parseTaskID(t.ID)
-		items = append(items, &ItemModel{
-			ID:          id,
-			Title:       t.Title,
-			Description: t.Description,
-			Completed:   t.Completed,
-			Deadline:    t.Deadline,
-			CompletedAt: t.CompletedAt,
-			CreatedAt:   t.CreatedAt,
-			UpdatedAt:   t.UpdatedAt,
-		})
+		items = append(items, itemFromTask(t))
 	}
+	return s.storage.ReplaceAllTasks(ctx, items)
+}
 
-	return s.storage.ReplaceAllTasks(items)
+// replaceAllFunc reads the current tasks and replaces them with fn's result as
+// one atomic storage operation.
+func (s *TaskServiceAdapter) replaceAllFunc(ctx context.Context, fn func(current []Task) ([]Task, error)) error {
+	if s.storage == nil {
+		return fmt.Errorf("task storage is not configured")
+	}
+	return s.storage.ReplaceAllTasksFunc(ctx, func(items []*ItemModel) ([]*ItemModel, error) {
+		current := make([]Task, 0, len(items))
+		for _, item := range items {
+			current = append(current, taskFromItem(item))
+		}
+		next, err := fn(current)
+		if err != nil {
+			return nil, err
+		}
+		out := make([]*ItemModel, 0, len(next))
+		for _, t := range next {
+			out = append(out, itemFromTask(t))
+		}
+		return out, nil
+	})
 }
 
 // parseTaskID returns the numeric database ID encoded in an exported task ID.
@@ -102,54 +151,57 @@ func parseTaskID(id string) (int, bool) {
 	return n, true
 }
 
-// func (s *TaskServiceAdapter) InsertFiles([]Task) error { return nil }
-
 //-----------------------------------Export-------------------------------//
 
-func PlanExport(svc *TaskServiceAdapter, f ExportFilter) (ExportPlan, error) {
-	tasks, err := svc.ListTasks()
+func PlanExport(ctx context.Context, svc *TaskServiceAdapter, f ExportFilter) (ExportPlan, error) {
+	tasks, err := svc.ListTasks(ctx)
 	if err != nil {
 		return ExportPlan{}, err
 	}
 	var p ExportPlan
 	for _, t := range filterTasks(tasks, f) {
 		p.Total++
-		if t.Completed {
+		switch taskStatusOf(t) {
+		case StatusDone:
 			p.Done++
-		} else {
+		case StatusDoing:
+			p.Doing++
+		default:
 			p.Todo++
 		}
 	}
 	return p, nil
 }
 
-func ExportToBytes(svc *TaskServiceAdapter, f ExportFilter, pretty bool) ([]byte, error) {
-	tasks, err := svc.ListTasks()
+func ExportToBytes(ctx context.Context, svc *TaskServiceAdapter, f ExportFilter, pretty bool) ([]byte, error) {
+	tasks, err := svc.ListTasks(ctx)
 	if err != nil {
 		return nil, err
 	}
-	filtered := filterTasks(tasks, f)
+	return marshalBundle(filterTasks(tasks, f), pretty)
+}
 
+func marshalBundle(tasks []Task, pretty bool) ([]byte, error) {
 	out := ExportBundle{
-		Version:    1,
+		Version:    exportSchemaVersion,
 		ExportedAt: time.Now().UTC(),
-		Tasks:      make([]TaskDTO, 0, len(filtered)),
+		Tasks:      make([]TaskDTO, 0, len(tasks)),
 	}
-	for _, t := range filtered {
+	for _, t := range tasks {
+		t.Status = taskStatusOf(t)
 		out.Tasks = append(out.Tasks, toDTO(TaskDTO(t)))
 	}
-
 	if pretty {
 		return json.MarshalIndent(out, "", "  ")
 	}
 	return json.Marshal(out)
 }
 
-func ExportToFile(svc *TaskServiceAdapter, f ExportFilter, path string, pretty bool) error {
+func ExportToFile(ctx context.Context, svc *TaskServiceAdapter, f ExportFilter, path string, pretty bool) error {
 	if err := refuseDatabaseTarget(svc, path); err != nil {
 		return err
 	}
-	b, err := ExportToBytes(svc, f, pretty)
+	b, err := ExportToBytes(ctx, svc, f, pretty)
 	if err != nil {
 		return err
 	}
@@ -171,7 +223,7 @@ func refuseDatabaseTarget(svc *TaskServiceAdapter, path string) error {
 	}
 	dbInfo, err := os.Stat(filer.databaseFile())
 	if err != nil {
-		return nil
+		return nil // the database file cannot be inspected, so it cannot be compared
 	}
 	if os.SameFile(target, dbInfo) {
 		return fmt.Errorf("refusing to export over the active database %q", path)
@@ -189,11 +241,13 @@ func writeFileAtomic(path string, data []byte) (err error) {
 	}
 	defer func() {
 		if err != nil {
+			// Best-effort cleanup of the temp file; the original error is returned.
 			_ = os.Remove(tmp.Name())
 		}
 	}()
 
 	if _, err = tmp.Write(data); err != nil {
+		// The write error is what matters; the deferred cleanup removes the file.
 		_ = tmp.Close()
 		return err
 	}
@@ -211,6 +265,8 @@ func toDTO(t TaskDTO) TaskDTO {
 		Deadline:    t.Deadline,
 		Completed:   t.Completed,
 		CompletedAt: t.CompletedAt,
+		Status:      t.Status,
+		Tags:        slices.Clone(t.Tags),
 		CreatedAt:   t.CreatedAt,
 		UpdatedAt:   t.UpdatedAt,
 	}
@@ -245,18 +301,31 @@ func normalizeImportConfig(cfg ImportConfig) (ImportConfig, error) {
 	return cfg, nil
 }
 
-// PlanImport previews ApplyImport without changing storage. It uses the same
-// merge logic as ApplyImport so the preview matches the result.
-func PlanImport(svc *TaskServiceAdapter, file string, cfg ImportConfig) (ImportPlan, error) {
+// PlanImport previews ApplyImport for the file at path without changing storage.
+func PlanImport(ctx context.Context, svc *TaskServiceAdapter, file string, cfg ImportConfig) (ImportPlan, error) {
 	cfg, err := normalizeImportConfig(cfg)
 	if err != nil {
 		return ImportPlan{}, err
 	}
-	incoming, version, err := readImportFile(file, cfg.Strict)
+	data, err := readImportSource(file, nil)
 	if err != nil {
 		return ImportPlan{}, err
 	}
-	current, err := svc.ListTasks()
+	return planImportData(ctx, svc, data, cfg)
+}
+
+// planImportData previews applyImportData. It uses the same merge logic so the
+// preview matches the result.
+func planImportData(ctx context.Context, svc *TaskServiceAdapter, data []byte, cfg ImportConfig) (ImportPlan, error) {
+	cfg, err := normalizeImportConfig(cfg)
+	if err != nil {
+		return ImportPlan{}, err
+	}
+	incoming, version, err := parseImportData(data, cfg.Strict)
+	if err != nil {
+		return ImportPlan{}, err
+	}
+	current, err := svc.ListTasks(ctx)
 	if err != nil {
 		return ImportPlan{}, err
 	}
@@ -272,7 +341,7 @@ func PlanImport(svc *TaskServiceAdapter, file string, cfg ImportConfig) (ImportP
 		return plan, nil
 	}
 
-	_, res := merge(current, incoming, cfg)
+	_, res := mergeVersion(current, incoming, cfg, version)
 	plan.ToCreate = res.Created
 	plan.ToUpdate = res.Updated
 	plan.Unchanged = res.Unchanged
@@ -281,66 +350,102 @@ func PlanImport(svc *TaskServiceAdapter, file string, cfg ImportConfig) (ImportP
 	return plan, nil
 }
 
-func ApplyImport(svc *TaskServiceAdapter, file string, cfg ImportConfig) (ImportResult, error) {
+// ApplyImport imports the file at path.
+func ApplyImport(ctx context.Context, svc *TaskServiceAdapter, file string, cfg ImportConfig) (ImportResult, error) {
 	cfg, err := normalizeImportConfig(cfg)
 	if err != nil {
 		return ImportResult{}, err
 	}
-	incoming, _, err := readImportFile(file, cfg.Strict)
+	data, err := readImportSource(file, nil)
 	if err != nil {
 		return ImportResult{}, err
 	}
-	current, err := svc.ListTasks()
-	if err != nil {
-		return ImportResult{}, err
-	}
-
-	res := ImportResult{}
-	if cfg.Backup {
-		p, err := writeBackup(current)
-		if err != nil {
-			return res, err
-		}
-		res.BackupPath = p
-	}
-
-	switch cfg.Mode {
-	case "replace":
-		if cfg.IDStrategy == "regenerate" {
-			for i := range incoming {
-				incoming[i].ID = ""
-			}
-		}
-		if err := svc.ReplaceAll(incoming); err != nil {
-			return res, err
-		}
-		res.Created = len(incoming)
-		return res, nil
-	default: // merge
-		merged, mr := merge(current, incoming, cfg)
-		if err := svc.ReplaceAll(merged); err != nil {
-			return res, err
-		}
-		mr.BackupPath = res.BackupPath
-		return mr, nil
-	}
+	return applyImportData(ctx, svc, data, cfg)
 }
 
-func readImportFile(path string, strict bool) ([]Task, int, error) {
+// applyImportData imports data. The current tasks are read, backed up and
+// replaced in one storage transaction, so a write made concurrently is either
+// part of the snapshot or happens after the import; it is never lost.
+func applyImportData(ctx context.Context, svc *TaskServiceAdapter, data []byte, cfg ImportConfig) (ImportResult, error) {
+	cfg, err := normalizeImportConfig(cfg)
+	if err != nil {
+		return ImportResult{}, err
+	}
+	incoming, version, err := parseImportData(data, cfg.Strict)
+	if err != nil {
+		return ImportResult{}, err
+	}
+
+	var res ImportResult
+	err = svc.replaceAllFunc(ctx, func(current []Task) ([]Task, error) {
+		res = ImportResult{}
+		if cfg.Backup {
+			p, err := writeBackup(ctx, current)
+			if err != nil {
+				return nil, err
+			}
+			res.BackupPath = p
+		}
+
+		if cfg.Mode == "replace" {
+			next := slices.Clone(incoming)
+			if cfg.IDStrategy == "regenerate" {
+				for i := range next {
+					next[i].ID = ""
+				}
+			}
+			res.Created = len(next)
+			return next, nil
+		}
+
+		merged, mr := mergeVersion(current, incoming, cfg, version)
+		mr.BackupPath = res.BackupPath
+		res = mr
+		return merged, nil
+	})
+	return res, err
+}
+
+// readImportSource reads at most maxImportFileSize bytes from the file at path,
+// or from stdin when path is "-".
+func readImportSource(path string, stdin io.Reader) ([]byte, error) {
+	if path == stdinImportPath {
+		if stdin == nil {
+			return nil, errors.New("reading an import from standard input is not supported here")
+		}
+		return readLimited(stdin)
+	}
 	f, err := os.Open(path)
 	if err != nil {
-		return nil, 0, err
+		return nil, err
 	}
+	// Read-only file: a close error cannot lose data.
 	defer func() { _ = f.Close() }()
+	return readLimited(f)
+}
 
-	b, err := io.ReadAll(io.LimitReader(f, MaxImportFileSize+1))
+func readLimited(r io.Reader) ([]byte, error) {
+	b, err := io.ReadAll(io.LimitReader(r, maxImportFileSize+1))
+	if err != nil {
+		return nil, err
+	}
+	if len(b) > maxImportFileSize {
+		return nil, fmt.Errorf("import file exceeds maximum size of %d bytes", maxImportFileSize)
+	}
+	return b, nil
+}
+
+// readImportFile reads and validates the import file at path.
+func readImportFile(path string, strict bool) ([]Task, int, error) {
+	data, err := readImportSource(path, nil)
 	if err != nil {
 		return nil, 0, err
 	}
-	if len(b) > MaxImportFileSize {
-		return nil, 0, fmt.Errorf("import file exceeds maximum size of %d bytes", MaxImportFileSize)
-	}
+	return parseImportData(data, strict)
+}
 
+// parseImportData decodes and validates an export bundle (schema version 1 or 2).
+func parseImportData(b []byte, strict bool) ([]Task, int, error) {
 	var bundle ExportBundle
 	if strict {
 		dec := json.NewDecoder(bytes.NewReader(b))
@@ -354,7 +459,7 @@ func readImportFile(path string, strict bool) ([]Task, int, error) {
 		}
 	}
 
-	if bundle.Version != 1 {
+	if bundle.Version != 1 && bundle.Version != exportSchemaVersion {
 		return nil, 0, fmt.Errorf("unsupported import version: %d", bundle.Version)
 	}
 
@@ -371,7 +476,7 @@ func readImportFile(path string, strict bool) ([]Task, int, error) {
 			dto.Title = stripControlCharacters(dto.Title, false)
 			dto.Description = stripControlCharacters(dto.Description, true)
 		}
-		if err := ValidateTaskText(dto.Title, dto.Description); err != nil {
+		if err := validateTaskText(dto.Title, dto.Description); err != nil {
 			return nil, 0, fmt.Errorf("tasks[%d]: %w", i, err)
 		}
 		// Canonicalise numeric IDs so "01" and "1" refer to the same task.
@@ -384,6 +489,20 @@ func readImportFile(path string, strict bool) ([]Task, int, error) {
 			}
 			seen[dto.ID] = struct{}{}
 		}
+
+		status, err := importedStatus(dto, bundle.Version, strict)
+		if err != nil {
+			return nil, 0, fmt.Errorf("tasks[%d]: %w", i, err)
+		}
+		dto.Status = status
+		dto.Completed = status == StatusDone
+
+		tags, err := normalizeTags(dto.Tags)
+		if err != nil {
+			return nil, 0, fmt.Errorf("tasks[%d]: %w", i, err)
+		}
+		dto.Tags = tags
+
 		// Keep completion time consistent with the completed flag; files
 		// written before completed_at existed fall back to updated_at.
 		if !dto.Completed {
@@ -400,6 +519,31 @@ func readImportFile(path string, strict bool) ([]Task, int, error) {
 	return out, bundle.Version, nil
 }
 
+// importedStatus returns the status of an imported task. Version 1 files have
+// no status, so it is derived from completed. In version 2 files status wins
+// over completed. Strict mode rejects an unknown status or a contradiction;
+// otherwise an unknown status falls back to the one derived from completed.
+func importedStatus(dto TaskDTO, version int, strict bool) (TaskStatus, error) {
+	derived := StatusTodo
+	if dto.Completed {
+		derived = StatusDone
+	}
+	if version == 1 || dto.Status == "" {
+		return derived, nil
+	}
+	status, err := parseTaskStatus(string(dto.Status))
+	if err != nil {
+		if strict {
+			return "", err
+		}
+		return derived, nil
+	}
+	if strict && (status == StatusDone) != dto.Completed {
+		return "", fmt.Errorf("completed=%t contradicts status %q", dto.Completed, status)
+	}
+	return status, nil
+}
+
 func fromDTO(d Task) Task {
 	return Task{
 		ID:          d.ID,
@@ -408,28 +552,56 @@ func fromDTO(d Task) Task {
 		Completed:   d.Completed,
 		Deadline:    d.Deadline,
 		CompletedAt: d.CompletedAt,
+		Status:      d.Status,
+		Tags:        slices.Clone(d.Tags),
 		CreatedAt:   d.CreatedAt,
 		UpdatedAt:   d.UpdatedAt,
 	}
 }
 
-// merge combines current and incoming tasks. Tasks that end up with a
-// generated placeholder ID (see newID) are assigned a real ID on write.
+// merge combines current tasks with incoming tasks from a current-schema file.
 func merge(current, incoming []Task, cfg ImportConfig) ([]Task, ImportResult) {
+	return mergeVersion(current, incoming, cfg, exportSchemaVersion)
+}
+
+// mergeVersion combines current and incoming tasks. Tasks that need a new
+// database ID get a placeholder ID ("tsk_new_<n>") that is unique within this
+// merge; the storage layer replaces it with a real ID on write. Version 1
+// files carry no tags and no "doing" status, so for them an existing task
+// keeps its tags and its "doing" status unless the file marks it done.
+func mergeVersion(current, incoming []Task, cfg ImportConfig, version int) ([]Task, ImportResult) {
 	res := ImportResult{}
 	conflictPolicy := effectiveOnConflict(cfg)
 	byID := map[string]Task{}
 	order := make([]string, 0, len(current))
 
+	// Reserve every ID already in play so a placeholder can never collide
+	// with a current or incoming task ID.
+	reserved := make(map[string]struct{}, len(current)+len(incoming))
 	for _, t := range current {
 		byID[t.ID] = t
 		order = append(order, t.ID)
+		reserved[t.ID] = struct{}{}
+	}
+	for _, t := range incoming {
+		reserved[t.ID] = struct{}{}
+	}
+	next := 0
+	newPlaceholder := func() string {
+		for {
+			next++
+			id := "tsk_new_" + strconv.Itoa(next)
+			if _, taken := reserved[id]; !taken {
+				reserved[id] = struct{}{}
+				return id
+			}
+		}
 	}
 
 	for _, in := range incoming {
 		id := in.ID
 		if id == "" || cfg.IDStrategy == "regenerate" {
-			id = newID()
+			id = newPlaceholder()
 			in.ID = id
 		}
 
@@ -439,6 +611,13 @@ func merge(current, incoming []Task, cfg ImportConfig) ([]Task, ImportResult) {
 			order = append(order, id)
 			res.Created++
 			continue
+		}
+
+		if version == 1 {
+			in.Tags = slices.Clone(ex.Tags)
+			if taskStatusOf(ex) == StatusDoing && taskStatusOf(in) == StatusTodo {
+				in.Status = StatusDoing
+			}
 		}
 
 		if equalTask(ex, in) {
@@ -454,7 +633,7 @@ func merge(current, incoming []Task, cfg ImportConfig) ([]Task, ImportResult) {
 			res.Skipped++
 			res.SkippedIDs = append(res.SkippedIDs, id)
 		case "rename":
-			in.ID = newID()
+			in.ID = newPlaceholder()
 			byID[in.ID] = in
 			order = append(order, in.ID)
 			res.Created++
@@ -494,16 +673,13 @@ func formatTaskIDs(ids []string) string {
 	return strings.Join(ids, ", ")
 }
 
-func writeBackup(tasks []Task) (string, error) {
-	bundle := ExportBundle{
-		Version:    1,
-		ExportedAt: time.Now().UTC(),
-		Tasks:      make([]TaskDTO, 0, len(tasks)),
+// writeBackup writes tasks as an export bundle to a new, unique, owner-only
+// file in ~/.munus/backups and returns its path.
+func writeBackup(ctx context.Context, tasks []Task) (string, error) {
+	if err := ctx.Err(); err != nil {
+		return "", err
 	}
-	for _, t := range tasks {
-		bundle.Tasks = append(bundle.Tasks, toDTO(TaskDTO(t)))
-	}
-	b, err := json.MarshalIndent(bundle, "", "  ")
+	b, err := marshalBundle(tasks, true)
 	if err != nil {
 		return "", err
 	}
@@ -517,8 +693,14 @@ func writeBackup(tasks []Task) (string, error) {
 		return "", err
 	}
 	// Tighten a directory created with broader permissions by older versions.
-	if info, err := os.Stat(dir); err == nil && info.Mode().Perm()&0o077 != 0 {
-		_ = os.Chmod(dir, 0o700)
+	info, err := os.Stat(dir)
+	if err != nil {
+		return "", err
+	}
+	if info.Mode().Perm()&0o077 != 0 {
+		if err := os.Chmod(dir, 0o700); err != nil {
+			return "", fmt.Errorf("restrict backup directory permissions: %w", err)
+		}
 	}
 
 	// CreateTemp gives each backup a unique, owner-only (0600) file, so two
@@ -528,11 +710,13 @@ func writeBackup(tasks []Task) (string, error) {
 		return "", err
 	}
 	if _, err := f.Write(b); err != nil {
+		// Best-effort cleanup of the partial backup; the write error is returned.
 		_ = f.Close()
 		_ = os.Remove(f.Name())
 		return "", err
 	}
 	if err := f.Close(); err != nil {
+		// Best-effort cleanup of the partial backup; the close error is returned.
 		_ = os.Remove(f.Name())
 		return "", err
 	}
@@ -542,8 +726,15 @@ func writeBackup(tasks []Task) (string, error) {
 func equalTask(a, b Task) bool {
 	return a.Title == b.Title &&
 		a.Description == b.Description &&
-		a.Completed == b.Completed &&
-		equalDeadline(a.Deadline, b.Deadline)
+		taskStatusOf(a) == taskStatusOf(b) &&
+		equalDeadline(a.Deadline, b.Deadline) &&
+		slices.Equal(sortedTags(a.Tags), sortedTags(b.Tags))
+}
+
+func sortedTags(tags []string) []string {
+	out := slices.Clone(tags)
+	slices.Sort(out)
+	return out
 }
 
 func equalDeadline(a, b *time.Time) bool {
@@ -555,25 +746,10 @@ func equalDeadline(a, b *time.Time) bool {
 
 func filterTasks(in []Task, f ExportFilter) []Task {
 	out := make([]Task, 0, len(in))
-
 	for _, t := range in {
-		if f.IncludeCompleted {
-			out = append(out, t)
-			continue
-		}
-
-		if !t.Completed {
+		if f.IncludeCompleted || taskStatusOf(t) != StatusDone {
 			out = append(out, t)
 		}
 	}
-
 	return out
-}
-
-var newIDCounter atomic.Uint64
-
-// newID returns a unique placeholder ID for tasks that need a new database ID.
-// The counter keeps IDs unique even when the clock does not advance.
-func newID() string {
-	return fmt.Sprintf("tsk_%d_%d", time.Now().UnixNano(), newIDCounter.Add(1))
 }

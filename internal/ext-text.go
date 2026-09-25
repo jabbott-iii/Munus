@@ -18,15 +18,22 @@ package internal
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 	"unicode"
 	"unicode/utf8"
 )
 
-// ValidateTaskText enforces the shared title/description limits and rejects
+// Tag limits.
+const (
+	maxTagLength   = 32
+	maxTagsPerTask = 10
+)
+
+// validateTaskText enforces the shared title/description limits and rejects
 // terminal control characters (for example ESC sequences) that could alter the
 // terminal when the task is displayed. Descriptions may contain newlines and tabs.
-func ValidateTaskText(title, description string) error {
+func validateTaskText(title, description string) error {
 	if len(title) > MaxTitleLength {
 		return fmt.Errorf("title exceeds maximum length of %d", MaxTitleLength)
 	}
@@ -94,4 +101,48 @@ func stripControlCharacters(s string, allowLineBreaks bool) string {
 		}
 		return r
 	}, s)
+}
+
+// normalizeTags trims, lowercases, de-duplicates and sorts tag names and
+// validates them: 1–32 characters of letters, digits, '-' or '_', at most 10.
+func normalizeTags(tags []string) ([]string, error) {
+	if len(tags) == 0 {
+		return nil, nil
+	}
+	seen := make(map[string]struct{}, len(tags))
+	out := make([]string, 0, len(tags))
+	for _, raw := range tags {
+		tag := strings.ToLower(strings.TrimSpace(raw))
+		if err := validateTag(tag); err != nil {
+			return nil, err
+		}
+		if _, ok := seen[tag]; ok {
+			continue
+		}
+		seen[tag] = struct{}{}
+		out = append(out, tag)
+	}
+	if len(out) > maxTagsPerTask {
+		return nil, fmt.Errorf("too many tags: %d (maximum %d)", len(out), maxTagsPerTask)
+	}
+	sort.Strings(out)
+	return out, nil
+}
+
+func validateTag(tag string) error {
+	if tag == "" {
+		return fmt.Errorf("tag must not be empty")
+	}
+	if !utf8.ValidString(tag) {
+		return fmt.Errorf("tag must be valid UTF-8")
+	}
+	if n := utf8.RuneCountInString(tag); n > maxTagLength {
+		return fmt.Errorf("tag %q exceeds maximum length of %d", tag, maxTagLength)
+	}
+	for _, r := range tag {
+		if !unicode.IsLetter(r) && !unicode.IsDigit(r) && r != '-' && r != '_' {
+			return fmt.Errorf("tag %q may only contain letters, digits, '-' and '_'", tag)
+		}
+	}
+	return nil
 }

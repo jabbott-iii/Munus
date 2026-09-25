@@ -17,9 +17,13 @@ limitations under the License.
 package internal
 
 import (
+	"context"
 	"errors"
+	"fmt"
+	"slices"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	tea "github.com/charmbracelet/bubbletea"
 )
@@ -33,7 +37,7 @@ type mockCreateErrorStorage struct {
 	createErr error
 }
 
-func (m *mockCreateErrorStorage) CreateTask(*ItemModel) error {
+func (m *mockCreateErrorStorage) CreateTask(_ context.Context, _ *ItemModel) error {
 	return m.createErr
 }
 
@@ -748,5 +752,84 @@ func TestSubmitFormTrimsWhitespace(t *testing.T) {
 	}
 	if task.Description != "Test Description" {
 		t.Errorf("Expected trimmed description 'Test Description', got %q", task.Description)
+	}
+}
+
+func TestFormCarriesWindowSizeToList(t *testing.T) {
+	form := NewFormModel(&MockStorage{})
+	form.Update(tea.WindowSizeMsg{Width: 200, Height: 60})
+	model, cmd := form.Update(tea.KeyMsg{Type: tea.KeyCtrlL})
+	list, ok := model.(*ListModel)
+	if !ok || cmd == nil {
+		t.Fatalf("expected list model and command, got %T", model)
+	}
+	if list.viewportWidth != 200 || list.viewportHeight != 60 {
+		t.Fatalf("expected viewport 200x60, got %dx%d", list.viewportWidth, list.viewportHeight)
+	}
+
+	list.Update(tea.WindowSizeMsg{Width: 150, Height: 50})
+	model, _ = list.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'n'}})
+	back, ok := model.(*FormModel)
+	if !ok || back.viewportWidth != 150 || back.viewportHeight != 50 {
+		t.Fatalf("expected form to keep the list's size, got %T %+v", model, model)
+	}
+}
+
+func TestFormEditsMultiByteTextByRune(t *testing.T) {
+	form := NewFormModel(&MockStorage{})
+	form.fields[titleField] = "Café"
+	form.cursor = 4
+
+	form.Update(tea.KeyMsg{Type: tea.KeyBackspace})
+	if form.fields[titleField] != "Caf" || form.cursor != 3 {
+		t.Fatalf("backspace: got %q cursor %d", form.fields[titleField], form.cursor)
+	}
+	form.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'é'}})
+	form.Update(tea.KeyMsg{Type: tea.KeyLeft})
+	form.Update(tea.KeyMsg{Type: tea.KeyLeft})
+	form.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'ß'}})
+	if got := form.fields[titleField]; got != "Caßfé" || form.cursor != 3 || !utf8.ValidString(got) {
+		t.Fatalf("insert: got %q cursor %d", got, form.cursor)
+	}
+	if view := form.View(); !strings.Contains(view, "Caß█fé") {
+		t.Fatalf("expected the cursor between runes in the view:\n%s", view)
+	}
+	form.Update(tea.KeyMsg{Type: tea.KeyEnd})
+	if form.cursor != utf8.RuneCountInString("Caßfé") {
+		t.Fatalf("end: cursor %d", form.cursor)
+	}
+}
+
+func TestFormByteLimitCountsMultiByteRunes(t *testing.T) {
+	form := NewFormModel(&MockStorage{})
+	form.fields[titleField] = strings.Repeat("a", MaxTitleLength-1)
+	form.cursor = MaxTitleLength - 1
+
+	form.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'é'}}) // 2 bytes: over the limit
+	if len(form.fields[titleField]) != MaxTitleLength-1 {
+		t.Fatalf("expected a 2-byte rune past the limit to be refused, got %d bytes", len(form.fields[titleField]))
+	}
+	form.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'a'}})
+	if len(form.fields[titleField]) != MaxTitleLength {
+		t.Fatalf("expected a 1-byte rune to fit, got %d bytes", len(form.fields[titleField]))
+	}
+}
+
+func TestFormReturnToListRequestsWindowSize(t *testing.T) {
+	form := NewFormModel(&MockStorage{})
+	_, cmd := form.Update(tea.KeyMsg{Type: tea.KeyCtrlL})
+	if cmd == nil {
+		t.Fatal("expected a command when returning to the list")
+	}
+	batch, ok := cmd().(tea.BatchMsg)
+	if !ok || len(batch) != 2 {
+		t.Fatalf("expected a batch of load and window-size commands, got %T", cmd())
+	}
+	var kinds []string
+	for _, c := range batch {
+		kinds = append(kinds, fmt.Sprintf("%T", c()))
+	}
+	if !slices.Contains(kinds, "internal.DataLoadedMsg") || !slices.Contains(kinds, "tea.windowSizeMsg") {
+		t.Fatalf("expected data load and window size requests, got %v", kinds)
 	}
 }

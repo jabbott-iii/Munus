@@ -4,6 +4,8 @@
 # Binaries for programs and plugins
 *.exe
 *.exe~
+# Binary produced by `make build`
+/munus
 *.dll
 *.so
 *.dylib

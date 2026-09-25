@@ -18,10 +18,14 @@ package internal
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -33,7 +37,7 @@ type MockStorage struct {
 	err   error
 }
 
-func (m *MockStorage) CreateTask(task *ItemModel) error {
+func (m *MockStorage) CreateTask(_ context.Context, task *ItemModel) error {
 	if m.err != nil {
 		return m.err
 	}
@@ -41,7 +45,7 @@ func (m *MockStorage) CreateTask(task *ItemModel) error {
 	return nil
 }
 
-func (m *MockStorage) GetTaskByID(id int) (*ItemModel, error) {
+func (m *MockStorage) GetTaskByID(_ context.Context, id int) (*ItemModel, error) {
 	if m.err != nil {
 		return nil, m.err
 	}
@@ -53,14 +57,14 @@ func (m *MockStorage) GetTaskByID(id int) (*ItemModel, error) {
 	return nil, nil
 }
 
-func (m *MockStorage) ListTasks() ([]*ItemModel, error) {
+func (m *MockStorage) ListTasks(_ context.Context) ([]*ItemModel, error) {
 	if m.err != nil {
 		return nil, m.err
 	}
 	return m.tasks, nil
 }
 
-func (m *MockStorage) UpdateTask(task *ItemModel) error {
+func (m *MockStorage) UpdateTask(_ context.Context, task *ItemModel) error {
 	if m.err != nil {
 		return m.err
 	}
@@ -73,7 +77,7 @@ func (m *MockStorage) UpdateTask(task *ItemModel) error {
 	return nil
 }
 
-func (m *MockStorage) DeleteTask(id int) error {
+func (m *MockStorage) DeleteTask(_ context.Context, id int) error {
 	if m.err != nil {
 		return m.err
 	}
@@ -86,13 +90,23 @@ func (m *MockStorage) DeleteTask(id int) error {
 	return nil
 }
 
-func (m *MockStorage) ReplaceAllTasks(tasks []*ItemModel) error {
+func (m *MockStorage) ReplaceAllTasks(_ context.Context, tasks []*ItemModel) error {
 	if m.err != nil {
 		return m.err
 	}
 	m.tasks = tasks
 	return nil
+}
 
+func (m *MockStorage) ReplaceAllTasksFunc(ctx context.Context, fn func([]*ItemModel) ([]*ItemModel, error)) error {
+	if m.err != nil {
+		return m.err
+	}
+	next, err := fn(m.tasks)
+	if err != nil {
+		return err
+	}
+	return m.ReplaceAllTasks(ctx, next)
 }
 
 // Helper function to create a test adapter
@@ -166,7 +180,7 @@ func TestListTasks(t *testing.T) {
 	}
 	adapter := NewTestAdapter(storage)
 
-	tasks, err := adapter.ListTasks()
+	tasks, err := adapter.ListTasks(t.Context())
 	if err != nil {
 		t.Fatalf("ListTasks failed: %v", err)
 	}
@@ -188,7 +202,7 @@ func TestListTasksError(t *testing.T) {
 	storage := &MockStorage{err: new(testError)}
 	adapter := NewTestAdapter(storage)
 
-	tasks, err := adapter.ListTasks()
+	tasks, err := adapter.ListTasks(t.Context())
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
@@ -211,7 +225,7 @@ func TestReplaceAll(t *testing.T) {
 		},
 	}
 
-	if err := adapter.ReplaceAll(tasks); err != nil {
+	if err := adapter.ReplaceAll(t.Context(), tasks); err != nil {
 		t.Fatalf("ReplaceAll failed: %v", err)
 	}
 	if len(storage.tasks) != 1 {
@@ -226,7 +240,7 @@ func TestReplaceAllAssignsNewIDsToNonNumericIDs(t *testing.T) {
 	storage := &MockStorage{}
 	adapter := NewTestAdapter(storage)
 
-	if err := adapter.ReplaceAll([]Task{{ID: newID(), Title: "Renamed"}, {ID: "", Title: "Blank"}, {ID: "0", Title: "Zero"}}); err != nil {
+	if err := adapter.ReplaceAll(t.Context(), []Task{{ID: "tsk_new_1", Title: "Renamed"}, {ID: "", Title: "Blank"}, {ID: "0", Title: "Zero"}}); err != nil {
 		t.Fatalf("ReplaceAll failed: %v", err)
 	}
 	for _, task := range storage.tasks {
@@ -240,7 +254,7 @@ func TestReplaceAllNilStorage(t *testing.T) {
 	adapter := &TaskServiceAdapter{storage: nil}
 
 	var tasks []Task
-	err := adapter.ReplaceAll(tasks)
+	err := adapter.ReplaceAll(t.Context(), tasks)
 	if err == nil {
 		t.Fatal("expected error for nil storage, got nil")
 	}
@@ -307,7 +321,7 @@ func TestPlanExport(t *testing.T) {
 	adapter := NewTestAdapter(storage)
 
 	filter := ExportFilter{IncludeCompleted: false}
-	plan, err := PlanExport(adapter, filter)
+	plan, err := PlanExport(t.Context(), adapter, filter)
 	if err != nil {
 		t.Fatalf("PlanExport failed: %v", err)
 	}
@@ -330,7 +344,7 @@ func TestPlanExportIncludeCompleted(t *testing.T) {
 	adapter := NewTestAdapter(storage)
 
 	filter := ExportFilter{IncludeCompleted: true}
-	plan, err := PlanExport(adapter, filter)
+	plan, err := PlanExport(t.Context(), adapter, filter)
 	if err != nil {
 		t.Fatalf("PlanExport failed: %v", err)
 	}
@@ -355,7 +369,7 @@ func TestExportToBytes(t *testing.T) {
 	filter := ExportFilter{IncludeCompleted: true}
 
 	// Test non-pretty format
-	data, err := ExportToBytes(adapter, filter, false)
+	data, err := ExportToBytes(t.Context(), adapter, filter, false)
 	if err != nil {
 		t.Fatalf("ExportToBytes failed: %v", err)
 	}
@@ -365,8 +379,8 @@ func TestExportToBytes(t *testing.T) {
 		t.Fatalf("failed to unmarshal exported data: %v", err)
 	}
 
-	if bundle.Version != 1 {
-		t.Errorf("expected version 1, got %d", bundle.Version)
+	if bundle.Version != exportSchemaVersion {
+		t.Errorf("expected version %d, got %d", exportSchemaVersion, bundle.Version)
 	}
 	if len(bundle.Tasks) != 3 {
 		t.Errorf("expected 3 tasks, got %d", len(bundle.Tasks))
@@ -382,7 +396,7 @@ func TestExportToBytesPretty(t *testing.T) {
 	filter := ExportFilter{IncludeCompleted: true}
 
 	// Test pretty format
-	data, err := ExportToBytes(adapter, filter, true)
+	data, err := ExportToBytes(t.Context(), adapter, filter, true)
 	if err != nil {
 		t.Fatalf("ExportToBytes failed: %v", err)
 	}
@@ -407,7 +421,7 @@ func TestExportToFile(t *testing.T) {
 	adapter := NewTestAdapter(storage)
 
 	filter := ExportFilter{IncludeCompleted: true}
-	err := ExportToFile(adapter, filter, filePath, false)
+	err := ExportToFile(t.Context(), adapter, filter, filePath, false)
 	if err != nil {
 		t.Fatalf("ExportToFile failed: %v", err)
 	}
@@ -499,19 +513,29 @@ func TestEqualTask(t *testing.T) {
 	}
 }
 
-func TestNewID(t *testing.T) {
-	id1 := newID()
-	time.Sleep(1 * time.Millisecond) // Ensure different timestamp
-	id2 := newID()
+func TestMergePlaceholderIDsAreUniqueAndAvoidExistingIDs(t *testing.T) {
+	current := []Task{{ID: "tsk_new_1", Title: "Existing placeholder-like ID"}}
+	incoming := []Task{
+		{ID: "tsk_new_2", Title: "Incoming placeholder-like ID"},
+		{ID: "", Title: "No ID A"},
+		{ID: "", Title: "No ID B"},
+	}
 
-	if id1 == "" || id2 == "" {
-		t.Error("expected non-empty IDs")
+	merged, res := merge(current, incoming, ImportConfig{Mode: "merge"})
+	if res.Created != 3 || len(merged) != 4 {
+		t.Fatalf("expected 3 created / 4 merged, got %+v / %d", res, len(merged))
 	}
-	if id1 == id2 {
-		t.Error("expected unique IDs")
+	seen := map[string]bool{}
+	for _, task := range merged {
+		if seen[task.ID] {
+			t.Fatalf("duplicate ID %q in merge result %+v", task.ID, merged)
+		}
+		seen[task.ID] = true
 	}
-	if !bytes.HasPrefix([]byte(id1), []byte("tsk_")) {
-		t.Errorf("expected ID to start with 'tsk_', got %q", id1)
+	for _, task := range merged[2:] {
+		if !strings.HasPrefix(task.ID, "tsk_new_") || task.ID == "tsk_new_1" || task.ID == "tsk_new_2" {
+			t.Errorf("expected a fresh placeholder for %q, got %q", task.Title, task.ID)
+		}
 	}
 }
 
@@ -728,7 +752,7 @@ func TestPlanImport(t *testing.T) {
 	adapter := NewTestAdapter(storage)
 
 	cfg := ImportConfig{Strict: false}
-	plan, err := PlanImport(adapter, filePath, cfg)
+	plan, err := PlanImport(t.Context(), adapter, filePath, cfg)
 	if err != nil {
 		t.Fatalf("PlanImport failed: %v", err)
 	}
@@ -781,7 +805,7 @@ func TestPlanImportSkipExistingShowsConflicts(t *testing.T) {
 		},
 	}
 
-	plan, err := PlanImport(NewTestAdapter(storage), filePath, ImportConfig{Mode: "merge", SkipExisting: true})
+	plan, err := PlanImport(t.Context(), NewTestAdapter(storage), filePath, ImportConfig{Mode: "merge", SkipExisting: true})
 	if err != nil {
 		t.Fatalf("PlanImport failed: %v", err)
 	}
@@ -876,7 +900,7 @@ func TestApplyImportDefaultOverwrite(t *testing.T) {
 	db, cleanup := setupTestDB(t)
 	defer cleanup()
 
-	if err := db.CreateTask(&ItemModel{Title: "Existing Task", Description: "Local"}); err != nil {
+	if err := db.CreateTask(t.Context(), &ItemModel{Title: "Existing Task", Description: "Local"}); err != nil {
 		t.Fatalf("failed to seed task: %v", err)
 	}
 
@@ -904,7 +928,7 @@ func TestApplyImportDefaultOverwrite(t *testing.T) {
 		},
 	})
 
-	res, err := ApplyImport(&TaskServiceAdapter{storage: db}, filePath, ImportConfig{Mode: "merge"})
+	res, err := ApplyImport(t.Context(), &TaskServiceAdapter{storage: db}, filePath, ImportConfig{Mode: "merge"})
 	if err != nil {
 		t.Fatalf("ApplyImport failed: %v", err)
 	}
@@ -913,7 +937,7 @@ func TestApplyImportDefaultOverwrite(t *testing.T) {
 		t.Errorf("unexpected import result: %+v", res)
 	}
 
-	tasks, err := db.ListTasks()
+	tasks, err := db.ListTasks(t.Context())
 	if err != nil {
 		t.Fatalf("ListTasks failed: %v", err)
 	}
@@ -937,7 +961,7 @@ func TestApplyImportSkipExisting(t *testing.T) {
 	db, cleanup := setupTestDB(t)
 	defer cleanup()
 
-	if err := db.CreateTask(&ItemModel{Title: "Existing Task", Description: "Local"}); err != nil {
+	if err := db.CreateTask(t.Context(), &ItemModel{Title: "Existing Task", Description: "Local"}); err != nil {
 		t.Fatalf("failed to seed task: %v", err)
 	}
 
@@ -965,7 +989,7 @@ func TestApplyImportSkipExisting(t *testing.T) {
 		},
 	})
 
-	res, err := ApplyImport(&TaskServiceAdapter{storage: db}, filePath, ImportConfig{Mode: "merge", SkipExisting: true})
+	res, err := ApplyImport(t.Context(), &TaskServiceAdapter{storage: db}, filePath, ImportConfig{Mode: "merge", SkipExisting: true})
 	if err != nil {
 		t.Fatalf("ApplyImport failed: %v", err)
 	}
@@ -977,7 +1001,7 @@ func TestApplyImportSkipExisting(t *testing.T) {
 		t.Errorf("expected skipped IDs [1], got %v", res.SkippedIDs)
 	}
 
-	tasks, err := db.ListTasks()
+	tasks, err := db.ListTasks(t.Context())
 	if err != nil {
 		t.Fatalf("ListTasks failed: %v", err)
 	}
@@ -1026,7 +1050,7 @@ func TestWriteBackup(t *testing.T) {
 
 	setTestHome(t)
 
-	path, err := writeBackup(tasks)
+	path, err := writeBackup(t.Context(), tasks)
 	if err != nil {
 		t.Fatalf("writeBackup failed: %v", err)
 	}
@@ -1078,7 +1102,7 @@ func setTestHome(t *testing.T) string {
 
 func tasksByID(t *testing.T, db *Database) map[int]*ItemModel {
 	t.Helper()
-	tasks, err := db.ListTasks()
+	tasks, err := db.ListTasks(t.Context())
 	if err != nil {
 		t.Fatalf("ListTasks failed: %v", err)
 	}
@@ -1099,22 +1123,22 @@ func TestApplyImportMergeRoundTripKeepsIDsAndCompletedAt(t *testing.T) {
 		{Title: "B", Description: "b", Completed: true, CompletedAt: &completedAt},
 		{Title: "C", Description: "c"},
 	} {
-		if err := db.CreateTask(task); err != nil {
+		if err := db.CreateTask(t.Context(), task); err != nil {
 			t.Fatalf("CreateTask failed: %v", err)
 		}
 	}
-	if err := db.DeleteTask(1); err != nil {
+	if err := db.DeleteTask(t.Context(), 1); err != nil {
 		t.Fatalf("DeleteTask failed: %v", err)
 	}
 	before := tasksByID(t, db)
 
 	file := filepath.Join(t.TempDir(), "export.json")
-	if err := ExportToFile(svc, ExportFilter{IncludeCompleted: true}, file, true); err != nil {
+	if err := ExportToFile(t.Context(), svc, ExportFilter{IncludeCompleted: true}, file, true); err != nil {
 		t.Fatalf("ExportToFile failed: %v", err)
 	}
 
 	for i := 1; i <= 2; i++ {
-		res, err := ApplyImport(svc, file, ImportConfig{Mode: "merge"})
+		res, err := ApplyImport(t.Context(), svc, file, ImportConfig{Mode: "merge"})
 		if err != nil {
 			t.Fatalf("import #%d failed: %v", i, err)
 		}
@@ -1146,7 +1170,7 @@ func TestApplyImportPreservesIncomingIDs(t *testing.T) {
 		{ID: "legacy-id", Title: "Legacy", CreatedAt: now, UpdatedAt: now},
 	}})
 
-	if _, err := ApplyImport(&TaskServiceAdapter{storage: db}, file, ImportConfig{Mode: "merge"}); err != nil {
+	if _, err := ApplyImport(t.Context(), &TaskServiceAdapter{storage: db}, file, ImportConfig{Mode: "merge"}); err != nil {
 		t.Fatalf("ApplyImport failed: %v", err)
 	}
 	got := tasksByID(t, db)
@@ -1160,7 +1184,7 @@ func TestApplyImportPreservesIncomingIDs(t *testing.T) {
 
 func TestApplyImportReplaceKeepsIDsAndCompletedAt(t *testing.T) {
 	db := newFileTestDB(t)
-	if err := db.CreateTask(&ItemModel{Title: "Old", Description: "x"}); err != nil {
+	if err := db.CreateTask(t.Context(), &ItemModel{Title: "Old", Description: "x"}); err != nil {
 		t.Fatalf("CreateTask failed: %v", err)
 	}
 	completedAt := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
@@ -1169,7 +1193,7 @@ func TestApplyImportReplaceKeepsIDsAndCompletedAt(t *testing.T) {
 		{ID: "", Title: "No ID"},
 	}})
 
-	res, err := ApplyImport(&TaskServiceAdapter{storage: db}, file, ImportConfig{Mode: "replace"})
+	res, err := ApplyImport(t.Context(), &TaskServiceAdapter{storage: db}, file, ImportConfig{Mode: "replace"})
 	if err != nil {
 		t.Fatalf("ApplyImport failed: %v", err)
 	}
@@ -1217,7 +1241,7 @@ func TestReadImportFileFillsCompletedAtForLegacyFiles(t *testing.T) {
 
 func TestApplyImportMergeUpdatesChangedDeadline(t *testing.T) {
 	db := newFileTestDB(t)
-	if err := db.CreateTask(&ItemModel{Title: "A", Description: "x"}); err != nil {
+	if err := db.CreateTask(t.Context(), &ItemModel{Title: "A", Description: "x"}); err != nil {
 		t.Fatalf("CreateTask failed: %v", err)
 	}
 	deadline := time.Date(2031, 5, 6, 0, 0, 0, 0, time.UTC)
@@ -1226,14 +1250,14 @@ func TestApplyImportMergeUpdatesChangedDeadline(t *testing.T) {
 	}})
 	svc := &TaskServiceAdapter{storage: db}
 
-	plan, err := PlanImport(svc, file, ImportConfig{})
+	plan, err := PlanImport(t.Context(), svc, file, ImportConfig{})
 	if err != nil {
 		t.Fatalf("PlanImport failed: %v", err)
 	}
 	if plan.ToUpdate != 1 || plan.Unchanged != 0 {
 		t.Fatalf("expected deadline change to be an update, got %+v", plan)
 	}
-	if _, err := ApplyImport(svc, file, ImportConfig{}); err != nil {
+	if _, err := ApplyImport(t.Context(), svc, file, ImportConfig{}); err != nil {
 		t.Fatalf("ApplyImport failed: %v", err)
 	}
 	got := tasksByID(t, db)[1]
@@ -1264,18 +1288,18 @@ func TestEqualTaskComparesDeadline(t *testing.T) {
 
 func TestPlanImportMatchesApplyForRegenerate(t *testing.T) {
 	db := newFileTestDB(t)
-	if err := db.CreateTask(&ItemModel{Title: "A", Description: "x"}); err != nil {
+	if err := db.CreateTask(t.Context(), &ItemModel{Title: "A", Description: "x"}); err != nil {
 		t.Fatalf("CreateTask failed: %v", err)
 	}
 	file := writeTestImportBundle(t, ExportBundle{Version: 1, Tasks: []TaskDTO{{ID: "1", Title: "A", Description: "x"}}})
 	svc := &TaskServiceAdapter{storage: db}
 	cfg := ImportConfig{Mode: "merge", IDStrategy: "regenerate"}
 
-	plan, err := PlanImport(svc, file, cfg)
+	plan, err := PlanImport(t.Context(), svc, file, cfg)
 	if err != nil {
 		t.Fatalf("PlanImport failed: %v", err)
 	}
-	res, err := ApplyImport(svc, file, cfg)
+	res, err := ApplyImport(t.Context(), svc, file, cfg)
 	if err != nil {
 		t.Fatalf("ApplyImport failed: %v", err)
 	}
@@ -1298,11 +1322,11 @@ func TestImportRejectsInvalidOptionsBeforeBackup(t *testing.T) {
 		{Mode: "merge", OnConflict: "bogus", Backup: true},
 		{Mode: "merge", IDStrategy: "ict", Backup: true},
 	} {
-		if _, err := PlanImport(svc, file, cfg); err == nil {
-			t.Errorf("PlanImport(%+v): expected error", cfg)
+		if _, err := PlanImport(t.Context(), svc, file, cfg); err == nil {
+			t.Errorf("PlanImport(t.Context(), %+v): expected error", cfg)
 		}
-		if _, err := ApplyImport(svc, file, cfg); err == nil {
-			t.Errorf("ApplyImport(%+v): expected error", cfg)
+		if _, err := ApplyImport(t.Context(), svc, file, cfg); err == nil {
+			t.Errorf("ApplyImport(t.Context(), %+v): expected error", cfg)
 		}
 	}
 	if _, err := os.Stat(filepath.Join(home, ".munus")); !os.IsNotExist(err) {
@@ -1371,19 +1395,19 @@ func TestBackupOfLegacyControlCharactersCanBeRestored(t *testing.T) {
 	db := newFileTestDB(t)
 	svc := &TaskServiceAdapter{storage: db}
 	// Rows written before validation existed may contain control characters.
-	if err := db.CreateTask(&ItemModel{Title: "legacy", Description: "line1\r\nline2\x07"}); err != nil {
+	if err := db.CreateTask(t.Context(), &ItemModel{Title: "legacy", Description: "line1\r\nline2\x07"}); err != nil {
 		t.Fatalf("setup failed: %v", err)
 	}
 	empty := writeTestImportBundle(t, ExportBundle{Version: 1})
-	res, err := ApplyImport(svc, empty, ImportConfig{Mode: "replace", Backup: true})
+	res, err := ApplyImport(t.Context(), svc, empty, ImportConfig{Mode: "replace", Backup: true})
 	if err != nil {
 		t.Fatalf("replace import failed: %v", err)
 	}
 
-	if _, err := ApplyImport(svc, res.BackupPath, ImportConfig{Mode: "replace"}); err != nil {
+	if _, err := ApplyImport(t.Context(), svc, res.BackupPath, ImportConfig{Mode: "replace"}); err != nil {
 		t.Fatalf("restoring the backup failed: %v", err)
 	}
-	tasks, _ := db.ListTasks()
+	tasks, _ := db.ListTasks(t.Context())
 	if len(tasks) != 1 || tasks[0].Description != "line1\nline2" {
 		t.Fatalf("expected sanitised legacy task restored, got %+v", tasks)
 	}
@@ -1405,7 +1429,7 @@ func TestImportHugeIDGetsNewDatabaseID(t *testing.T) {
 	file := writeTestImportBundle(t, ExportBundle{Version: 1, Tasks: []TaskDTO{
 		{ID: "9223372036854775807", Title: "Huge"}, {ID: "2147483648", Title: "Above cap"},
 	}})
-	if _, err := ApplyImport(svc, file, ImportConfig{Mode: "replace"}); err != nil {
+	if _, err := ApplyImport(t.Context(), svc, file, ImportConfig{Mode: "replace"}); err != nil {
 		t.Fatalf("ApplyImport failed: %v", err)
 	}
 	for id := range tasksByID(t, db) {
@@ -1413,7 +1437,7 @@ func TestImportHugeIDGetsNewDatabaseID(t *testing.T) {
 			t.Fatalf("expected oversized IDs to be replaced, found ID %d", id)
 		}
 	}
-	if err := db.CreateTask(&ItemModel{Title: "after", Description: "x"}); err != nil {
+	if err := db.CreateTask(t.Context(), &ItemModel{Title: "after", Description: "x"}); err != nil {
 		t.Fatalf("expected later inserts to keep working, got %v", err)
 	}
 }
@@ -1424,11 +1448,11 @@ func TestApplyImportReplaceWithRegenerateAssignsNewIDs(t *testing.T) {
 	file := writeTestImportBundle(t, ExportBundle{Version: 1, Tasks: []TaskDTO{{ID: "500", Title: "A"}, {ID: "501", Title: "B"}}})
 	cfg := ImportConfig{Mode: "replace", IDStrategy: "regenerate"}
 
-	plan, err := PlanImport(svc, file, cfg)
+	plan, err := PlanImport(t.Context(), svc, file, cfg)
 	if err != nil {
 		t.Fatalf("PlanImport failed: %v", err)
 	}
-	res, err := ApplyImport(svc, file, cfg)
+	res, err := ApplyImport(t.Context(), svc, file, cfg)
 	if err != nil {
 		t.Fatalf("ApplyImport failed: %v", err)
 	}
@@ -1464,13 +1488,13 @@ func TestExportRefusesDatabaseOpenedWithParameters(t *testing.T) {
 		t.Fatalf("NewDatabase failed: %v", err)
 	}
 	defer func() { _ = db.Close() }()
-	if err := db.CreateTask(&ItemModel{Title: "A", Description: "x"}); err != nil {
+	if err := db.CreateTask(t.Context(), &ItemModel{Title: "A", Description: "x"}); err != nil {
 		t.Fatalf("setup failed: %v", err)
 	}
 	if entries, _ := os.ReadDir(dir); len(entries) != 1 || entries[0].Name() != "u.db" {
 		t.Fatalf("expected only u.db in %s, got %v", dir, entries)
 	}
-	if err := ExportToFile(&TaskServiceAdapter{storage: db}, ExportFilter{}, real, true); err == nil {
+	if err := ExportToFile(t.Context(), &TaskServiceAdapter{storage: db}, ExportFilter{}, real, true); err == nil {
 		t.Fatal("expected export over the parameterised database to be refused")
 	}
 }
@@ -1478,7 +1502,7 @@ func TestExportRefusesDatabaseOpenedWithParameters(t *testing.T) {
 func TestExportToFileWithLongName(t *testing.T) {
 	db := newFileTestDB(t)
 	target := filepath.Join(t.TempDir(), strings.Repeat("n", 240)+".json")
-	if err := ExportToFile(&TaskServiceAdapter{storage: db}, ExportFilter{}, target, true); err != nil {
+	if err := ExportToFile(t.Context(), &TaskServiceAdapter{storage: db}, ExportFilter{}, target, true); err != nil {
 		t.Fatalf("expected long file name to export, got %v", err)
 	}
 }
@@ -1495,7 +1519,7 @@ func TestWriteBackupTightensExistingDirectory(t *testing.T) {
 	if err := os.Chmod(dir, 0o755); err != nil {
 		t.Fatalf("setup failed: %v", err)
 	}
-	if _, err := writeBackup(nil); err != nil {
+	if _, err := writeBackup(t.Context(), nil); err != nil {
 		t.Fatalf("writeBackup failed: %v", err)
 	}
 	if info, _ := os.Stat(dir); info.Mode().Perm() != 0o700 {
@@ -1509,7 +1533,7 @@ func TestReadImportFileRejectsOversizedFile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
-	if err := f.Truncate(MaxImportFileSize + 1); err != nil {
+	if err := f.Truncate(maxImportFileSize + 1); err != nil {
 		t.Fatalf("truncate: %v", err)
 	}
 	_ = f.Close()
@@ -1523,14 +1547,14 @@ func TestReadImportFileRejectsOversizedFile(t *testing.T) {
 
 func TestExportToFileRefusesActiveDatabase(t *testing.T) {
 	db := newFileTestDB(t)
-	if err := db.CreateTask(&ItemModel{Title: "A", Description: "x"}); err != nil {
+	if err := db.CreateTask(t.Context(), &ItemModel{Title: "A", Description: "x"}); err != nil {
 		t.Fatalf("CreateTask failed: %v", err)
 	}
-	err := ExportToFile(&TaskServiceAdapter{storage: db}, ExportFilter{}, db.DatabasePath(), true)
+	err := ExportToFile(t.Context(), &TaskServiceAdapter{storage: db}, ExportFilter{}, db.path, true)
 	if err == nil || !strings.Contains(err.Error(), "active database") {
 		t.Fatalf("expected refusal to overwrite database, got %v", err)
 	}
-	if tasks, err := db.ListTasks(); err != nil || len(tasks) != 1 {
+	if tasks, err := db.ListTasks(t.Context()); err != nil || len(tasks) != 1 {
 		t.Fatalf("database damaged after refused export: tasks=%v err=%v", tasks, err)
 	}
 }
@@ -1541,11 +1565,11 @@ func TestExportToFileOverwritesOtherFilesWithOwnerOnlyPermissions(t *testing.T) 
 	if err := os.WriteFile(target, []byte("old"), 0o644); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
-	if err := ExportToFile(&TaskServiceAdapter{storage: db}, ExportFilter{}, target, true); err != nil {
+	if err := ExportToFile(t.Context(), &TaskServiceAdapter{storage: db}, ExportFilter{}, target, true); err != nil {
 		t.Fatalf("ExportToFile failed: %v", err)
 	}
 	data, _ := os.ReadFile(target)
-	if !bytes.Contains(data, []byte(`"version": 1`)) {
+	if !bytes.Contains(data, []byte(`"version": 2`)) {
 		t.Fatalf("expected export content, got %q", data)
 	}
 	if runtime.GOOS != "windows" {
@@ -1575,7 +1599,7 @@ func TestExportToFileDoesNotFollowPlantedTmpSymlink(t *testing.T) {
 		t.Fatalf("symlink: %v", err)
 	}
 
-	if err := ExportToFile(&TaskServiceAdapter{storage: db}, ExportFilter{}, target, true); err != nil {
+	if err := ExportToFile(t.Context(), &TaskServiceAdapter{storage: db}, ExportFilter{}, target, true); err != nil {
 		t.Fatalf("ExportToFile failed: %v", err)
 	}
 	if data, _ := os.ReadFile(victim); string(data) != "secret" {
@@ -1590,11 +1614,11 @@ func TestWriteBackupIsUniqueAndOwnerOnly(t *testing.T) {
 	home := setTestHome(t)
 	tasks := []Task{{ID: "1", Title: "Task 1"}}
 
-	first, err := writeBackup(tasks)
+	first, err := writeBackup(t.Context(), tasks)
 	if err != nil {
 		t.Fatalf("writeBackup failed: %v", err)
 	}
-	second, err := writeBackup(tasks)
+	second, err := writeBackup(t.Context(), tasks)
 	if err != nil {
 		t.Fatalf("writeBackup failed: %v", err)
 	}
@@ -1616,11 +1640,280 @@ func TestWriteBackupIsUniqueAndOwnerOnly(t *testing.T) {
 func TestExportIncludesCompletedAt(t *testing.T) {
 	completedAt := time.Date(2026, 3, 4, 5, 6, 7, 0, time.UTC)
 	storage := &MockStorage{tasks: []*ItemModel{{ID: 1, Title: "Done", Completed: true, CompletedAt: &completedAt}}}
-	b, err := ExportToBytes(NewTestAdapter(storage), ExportFilter{IncludeCompleted: true}, false)
+	b, err := ExportToBytes(t.Context(), NewTestAdapter(storage), ExportFilter{IncludeCompleted: true}, false)
 	if err != nil {
 		t.Fatalf("ExportToBytes failed: %v", err)
 	}
 	if !bytes.Contains(b, []byte(`"completed_at":"2026-03-04T05:06:07Z"`)) {
 		t.Fatalf("expected completed_at in export, got %s", b)
+	}
+}
+
+// ============================== plan 2: schema v2, status, tags ==============================
+
+func TestExportV2RoundTripKeepsStatusTagsAndCompletedTasks(t *testing.T) {
+	db := newFileTestDB(t)
+	svc := &TaskServiceAdapter{storage: db}
+	for _, task := range []*ItemModel{
+		{Title: "todo", Description: "x", Tags: []string{"home"}},
+		{Title: "doing", Description: "x", Status: StatusDoing, Tags: []string{"work", "urgent"}},
+		{Title: "done", Description: "x", Status: StatusDone, Completed: true},
+	} {
+		if err := db.CreateTask(t.Context(), task); err != nil {
+			t.Fatalf("setup failed: %v", err)
+		}
+	}
+	before, _ := db.ListTasks(t.Context())
+
+	file := filepath.Join(t.TempDir(), "export.json")
+	if err := ExportToFile(t.Context(), svc, ExportFilter{IncludeCompleted: true}, file, true); err != nil {
+		t.Fatalf("ExportToFile failed: %v", err)
+	}
+	raw, _ := os.ReadFile(file)
+	for _, want := range []string{`"version": 2`, `"status": "doing"`, `"urgent"`, `"status": "done"`} {
+		if !strings.Contains(string(raw), want) {
+			t.Fatalf("export missing %s:\n%s", want, raw)
+		}
+	}
+
+	if _, err := ApplyImport(t.Context(), svc, file, ImportConfig{Mode: "replace"}); err != nil {
+		t.Fatalf("replace import failed: %v", err)
+	}
+	after, _ := db.ListTasks(t.Context())
+	if len(after) != len(before) {
+		t.Fatalf("expected %d tasks after round trip, got %d", len(before), len(after))
+	}
+	for i := range before {
+		b, a := before[i], after[i]
+		if a.ID != b.ID || a.Status != b.Status || !slices.Equal(a.Tags, b.Tags) || a.Completed != b.Completed {
+			t.Fatalf("round trip changed task:\n before %+v\n after  %+v", b, a)
+		}
+	}
+}
+
+func TestImportStatusRules(t *testing.T) {
+	cases := []struct {
+		name       string
+		version    int
+		dto        TaskDTO
+		strict     bool
+		wantStatus TaskStatus
+		wantErr    string
+	}{
+		{name: "v1 derives todo", version: 1, dto: TaskDTO{ID: "1", Title: "a"}, wantStatus: StatusTodo},
+		{name: "v1 derives done", version: 1, dto: TaskDTO{ID: "1", Title: "a", Completed: true}, wantStatus: StatusDone},
+		{name: "v1 ignores status field", version: 1, dto: TaskDTO{ID: "1", Title: "a", Status: StatusDoing}, wantStatus: StatusTodo},
+		{name: "v2 doing", version: 2, dto: TaskDTO{ID: "1", Title: "a", Status: StatusDoing}, wantStatus: StatusDoing},
+		{name: "v2 missing status derives", version: 2, dto: TaskDTO{ID: "1", Title: "a", Completed: true}, wantStatus: StatusDone},
+		{name: "v2 status wins", version: 2, dto: TaskDTO{ID: "1", Title: "a", Status: StatusDone}, wantStatus: StatusDone},
+		{name: "v2 strict contradiction", version: 2, dto: TaskDTO{ID: "1", Title: "a", Status: StatusDone}, strict: true, wantErr: "contradicts"},
+		{name: "v2 unknown status falls back when not strict", version: 2, dto: TaskDTO{ID: "1", Title: "a", Status: "blocked", Completed: true}, wantStatus: StatusDone},
+		{name: "v2 unknown status rejected when strict", version: 2, dto: TaskDTO{ID: "1", Title: "a", Status: "blocked"}, strict: true, wantErr: "invalid status"},
+		{name: "v2 invalid tag", version: 2, dto: TaskDTO{ID: "1", Title: "a", Tags: []string{"bad tag"}}, wantErr: "letters, digits"},
+		{name: "unsupported version", version: 3, dto: TaskDTO{ID: "1", Title: "a"}, wantErr: "unsupported import version"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			file := writeTestImportBundle(t, ExportBundle{Version: tc.version, Tasks: []TaskDTO{tc.dto}})
+			tasks, _, err := readImportFile(file, tc.strict)
+			if tc.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+					t.Fatalf("expected error containing %q, got %v", tc.wantErr, err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if tasks[0].Status != tc.wantStatus || tasks[0].Completed != (tc.wantStatus == StatusDone) {
+				t.Fatalf("got status %q completed %v, want %q", tasks[0].Status, tasks[0].Completed, tc.wantStatus)
+			}
+		})
+	}
+}
+
+func TestMergeDetectsStatusAndTagChanges(t *testing.T) {
+	current := []Task{{ID: "1", Title: "a", Status: StatusTodo, Tags: []string{"x"}}}
+	for name, in := range map[string]Task{
+		"status": {ID: "1", Title: "a", Status: StatusDoing, Tags: []string{"x"}},
+		"tags":   {ID: "1", Title: "a", Status: StatusTodo, Tags: []string{"y"}},
+	} {
+		if _, res := merge(current, []Task{in}, ImportConfig{Mode: "merge"}); res.Updated != 1 {
+			t.Errorf("%s change: expected 1 update, got %+v", name, res)
+		}
+	}
+	same := Task{ID: "1", Title: "a", Tags: []string{"x"}} // empty status derives todo
+	if _, res := merge(current, []Task{same}, ImportConfig{Mode: "merge"}); res.Unchanged != 1 {
+		t.Errorf("expected unchanged, got %+v", res)
+	}
+}
+
+func TestPlanExportCountsStatuses(t *testing.T) {
+	storage := &MockStorage{tasks: []*ItemModel{
+		{ID: 1, Title: "a", Status: StatusTodo},
+		{ID: 2, Title: "b", Status: StatusDoing},
+		{ID: 3, Title: "c", Status: StatusDone, Completed: true},
+		{ID: 4, Title: "legacy", Completed: true},
+	}}
+	plan, err := PlanExport(t.Context(), NewTestAdapter(storage), ExportFilter{IncludeCompleted: true})
+	if err != nil {
+		t.Fatalf("PlanExport failed: %v", err)
+	}
+	if plan.Total != 4 || plan.Todo != 1 || plan.Doing != 1 || plan.Done != 2 {
+		t.Fatalf("unexpected plan %+v", plan)
+	}
+	pending, _ := PlanExport(t.Context(), NewTestAdapter(storage), ExportFilter{})
+	if pending.Total != 2 || pending.Done != 0 {
+		t.Fatalf("unexpected pending-only plan %+v", pending)
+	}
+}
+
+// staleSnapshotStorage returns an outdated list from ListTasks, while
+// ReplaceAllTasksFunc sees the up-to-date tasks, as a transaction would.
+type staleSnapshotStorage struct {
+	MockStorage
+	stale []*ItemModel
+}
+
+func (s *staleSnapshotStorage) ListTasks(context.Context) ([]*ItemModel, error) {
+	return s.stale, nil
+}
+
+func TestApplyImportUsesTransactionalSnapshot(t *testing.T) {
+	storage := &staleSnapshotStorage{
+		stale: []*ItemModel{{ID: 1, Title: "old", Description: "x"}},
+		MockStorage: MockStorage{tasks: []*ItemModel{
+			{ID: 1, Title: "old", Description: "x"},
+			{ID: 2, Title: "added concurrently", Description: "x"},
+		}},
+	}
+	file := writeTestImportBundle(t, ExportBundle{Version: 2, Tasks: []TaskDTO{{ID: "3", Title: "imported"}}})
+
+	if _, err := ApplyImport(t.Context(), NewTestAdapter(storage), file, ImportConfig{Mode: "merge"}); err != nil {
+		t.Fatalf("ApplyImport failed: %v", err)
+	}
+	if findTaskByTitle(storage.tasks, "added concurrently") == nil {
+		t.Fatalf("task written after the plan was lost: %+v", storage.tasks)
+	}
+	if findTaskByTitle(storage.tasks, "imported") == nil || len(storage.tasks) != 3 {
+		t.Fatalf("expected 3 tasks after import, got %+v", storage.tasks)
+	}
+}
+
+func TestImportAndExportHonourCancelledContext(t *testing.T) {
+	setTestHome(t)
+	db := newFileTestDB(t)
+	svc := &TaskServiceAdapter{storage: db}
+	file := writeTestImportBundle(t, ExportBundle{Version: 2, Tasks: []TaskDTO{{ID: "1", Title: "a"}}})
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+
+	if _, err := ApplyImport(ctx, svc, file, ImportConfig{Backup: true}); !errors.Is(err, context.Canceled) {
+		t.Errorf("ApplyImport: got %v, want context.Canceled", err)
+	}
+	if _, err := PlanImport(ctx, svc, file, ImportConfig{}); !errors.Is(err, context.Canceled) {
+		t.Errorf("PlanImport: got %v, want context.Canceled", err)
+	}
+	if _, err := ExportToBytes(ctx, svc, ExportFilter{}, false); !errors.Is(err, context.Canceled) {
+		t.Errorf("ExportToBytes: got %v, want context.Canceled", err)
+	}
+	if _, err := writeBackup(ctx, nil); !errors.Is(err, context.Canceled) {
+		t.Errorf("writeBackup: got %v, want context.Canceled", err)
+	}
+	if tasks, _ := db.ListTasks(t.Context()); len(tasks) != 0 {
+		t.Fatalf("expected nothing imported, got %d tasks", len(tasks))
+	}
+}
+
+func TestReadImportSource(t *testing.T) {
+	data, err := readImportSource(stdinImportPath, strings.NewReader(`{"version":2}`))
+	if err != nil || string(data) != `{"version":2}` {
+		t.Fatalf("stdin read = %q, %v", data, err)
+	}
+	if _, err := readImportSource(stdinImportPath, nil); err == nil {
+		t.Fatal("expected error when stdin is unavailable")
+	}
+	big := io.LimitReader(zeroReader{}, maxImportFileSize+1)
+	if _, err := readImportSource(stdinImportPath, big); err == nil || !strings.Contains(err.Error(), "maximum size") {
+		t.Fatalf("expected size limit error for oversized stdin, got %v", err)
+	}
+}
+
+type zeroReader struct{}
+
+func (zeroReader) Read(p []byte) (int, error) {
+	clear(p)
+	return len(p), nil
+}
+
+func TestApplyImportV1MergeKeepsTagsAndDoingStatus(t *testing.T) {
+	db := newFileTestDB(t)
+	seed := []*ItemModel{
+		{ID: 1, Title: "in progress", Description: "x", Status: StatusDoing, Tags: []string{"work"}},
+		{ID: 2, Title: "finish me", Description: "x", Status: StatusDoing, Tags: []string{"home"}},
+		{ID: 3, Title: "retitle me", Description: "x", Tags: []string{"misc"}},
+	}
+	if err := db.ReplaceAllTasks(t.Context(), seed); err != nil {
+		t.Fatalf("setup failed: %v", err)
+	}
+	// A version 1 file, as written by Munus v2.1.1, knows nothing about tags
+	// or the doing status.
+	file := writeTestImportBundle(t, ExportBundle{Version: 1, Tasks: []TaskDTO{
+		{ID: "1", Title: "in progress", Description: "x"},
+		{ID: "2", Title: "finish me", Description: "x", Completed: true},
+		{ID: "3", Title: "retitled", Description: "x"},
+	}})
+	svc := &TaskServiceAdapter{storage: db}
+
+	plan, err := PlanImport(t.Context(), svc, file, ImportConfig{})
+	if err != nil {
+		t.Fatalf("PlanImport failed: %v", err)
+	}
+	if plan.Unchanged != 1 || plan.ToUpdate != 2 {
+		t.Fatalf("expected 1 unchanged and 2 updates, got %+v", plan)
+	}
+	res, err := ApplyImport(t.Context(), svc, file, ImportConfig{})
+	if err != nil {
+		t.Fatalf("ApplyImport failed: %v", err)
+	}
+	if res.Unchanged != 1 || res.Updated != 2 {
+		t.Fatalf("expected apply to match the plan, got %+v", res)
+	}
+
+	got := tasksByID(t, db)
+	checks := []struct {
+		id     int
+		title  string
+		status TaskStatus
+		tags   []string
+	}{
+		{1, "in progress", StatusDoing, []string{"work"}},
+		{2, "finish me", StatusDone, []string{"home"}},
+		{3, "retitled", StatusTodo, []string{"misc"}},
+	}
+	for _, c := range checks {
+		task := got[c.id]
+		if task == nil || task.Title != c.title || task.Status != c.status || !slices.Equal(task.Tags, c.tags) {
+			t.Errorf("task %d = %+v, want title %q status %q tags %v", c.id, task, c.title, c.status, c.tags)
+		}
+	}
+}
+
+func TestApplyImportV2MergeReplacesTagsAndStatus(t *testing.T) {
+	db := newFileTestDB(t)
+	if err := db.ReplaceAllTasks(t.Context(), []*ItemModel{
+		{ID: 1, Title: "A", Description: "x", Status: StatusDoing, Tags: []string{"work"}},
+	}); err != nil {
+		t.Fatalf("setup failed: %v", err)
+	}
+	file := writeTestImportBundle(t, ExportBundle{Version: 2, Tasks: []TaskDTO{
+		{ID: "1", Title: "A", Description: "x", Status: StatusTodo},
+	}})
+	if _, err := ApplyImport(t.Context(), &TaskServiceAdapter{storage: db}, file, ImportConfig{}); err != nil {
+		t.Fatalf("ApplyImport failed: %v", err)
+	}
+	got := tasksByID(t, db)[1]
+	if got == nil || got.Status != StatusTodo || len(got.Tags) != 0 {
+		t.Fatalf("expected a version 2 file to set status and tags exactly, got %+v", got)
 	}
 }

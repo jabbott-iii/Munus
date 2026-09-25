@@ -17,9 +17,12 @@ limitations under the License.
 package internal
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -47,30 +50,42 @@ func (m *FormModel) Init() tea.Cmd {
 
 func (m *FormModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
+	case tea.WindowSizeMsg:
+		m.viewportWidth = msg.Width
+		m.viewportHeight = msg.Height
+		return m, nil
+
 	case tea.KeyMsg:
 		if model, cmd, handled := m.handleVimKey(msg); handled {
 			return model, cmd
 		}
 
 		switch msg.String() {
-		case "ctrl+c", "esc":
+		case "esc":
+			// While editing, esc abandons the edit instead of quitting.
+			if m.editingID != 0 {
+				return m.toList("")
+			}
+			m.done = true
+			return m, tea.Quit
+
+		case "ctrl+c":
 			m.done = true
 			return m, tea.Quit
 
 		case "ctrl+l":
-			lm := NewListModelWithOptions(m.storage, tuiOptions{vimEnabled: m.vimEnabled})
-			return lm, lm.Init()
+			return m.toList("")
 
 		case "tab", "down":
 			if m.currentField < deadlineField {
 				m.currentField++
-				m.cursor = len(m.fields[m.currentField])
+				m.cursor = utf8.RuneCountInString(m.fields[m.currentField])
 			}
 
 		case "shift+tab", "up":
 			if m.currentField > titleField {
 				m.currentField--
-				m.cursor = len(m.fields[m.currentField])
+				m.cursor = utf8.RuneCountInString(m.fields[m.currentField])
 			}
 
 		case "enter":
@@ -82,20 +97,20 @@ func (m *FormModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.err = err
 				} else {
 					m.submitted = true
-					if m.vimEnabled {
-						lm := NewListModelWithOptions(m.storage, tuiOptions{vimEnabled: m.vimEnabled})
-						lm.statusMessage = "🗹 Task created successfully!"
-						return lm, lm.Init()
+					if m.editingID != 0 || m.vimEnabled {
+						return m.toList(m.successMessage())
 					}
 					fm := NewFormModel(m.storage)
+					fm.viewportWidth, fm.viewportHeight = m.viewportWidth, m.viewportHeight
+					fm.listFilter, fm.listTagFilter = m.listFilter, m.listTagFilter
 					return fm, fm.Init()
 				}
 			}
 
 		case "backspace":
 			if m.cursor > 0 {
-				field := m.fields[m.currentField]
-				m.fields[m.currentField] = field[:m.cursor-1] + field[m.cursor:]
+				field := []rune(m.fields[m.currentField])
+				m.fields[m.currentField] = string(field[:m.cursor-1]) + string(field[m.cursor:])
 				m.cursor--
 			}
 
@@ -105,7 +120,7 @@ func (m *FormModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 
 		case "right":
-			if m.cursor < len(m.fields[m.currentField]) {
+			if m.cursor < utf8.RuneCountInString(m.fields[m.currentField]) {
 				m.cursor++
 			}
 
@@ -113,24 +128,23 @@ func (m *FormModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.cursor = 0
 
 		case "end":
-			m.cursor = len(m.fields[m.currentField])
+			m.cursor = utf8.RuneCountInString(m.fields[m.currentField])
 
 		default:
-			if len(msg.String()) == 1 {
-				var canAddChar bool
+			if text, ok := typedText(msg); ok {
+				var limit int
 				switch m.currentField {
 				case titleField:
-					canAddChar = len(m.fields[titleField]) < MaxTitleLength
+					limit = MaxTitleLength
 				case descriptionField:
-					canAddChar = len(m.fields[descriptionField]) < MaxDescriptionLength
+					limit = MaxDescriptionLength
 				case deadlineField:
-					canAddChar = len(m.fields[deadlineField]) < MaxDeadlineLength
-				default:
-					canAddChar = false
+					limit = MaxDeadlineLength
 				}
-				if canAddChar {
-					field := m.fields[m.currentField]
-					m.fields[m.currentField] = field[:m.cursor] + msg.String() + field[m.cursor:]
+				// Limits are in bytes, matching validateTaskText.
+				if len(m.fields[m.currentField])+len(text) <= limit {
+					field := []rune(m.fields[m.currentField])
+					m.fields[m.currentField] = string(field[:m.cursor]) + text + string(field[m.cursor:])
 					m.cursor++
 				}
 			}
@@ -163,13 +177,13 @@ func (m *FormModel) handleVimKey(msg tea.KeyMsg) (tea.Model, tea.Cmd, bool) {
 	case tea.KeyTab, tea.KeyDown:
 		if m.currentField < deadlineField {
 			m.currentField++
-			m.cursor = len(m.fields[m.currentField])
+			m.cursor = utf8.RuneCountInString(m.fields[m.currentField])
 		}
 		return m, nil, true
 	case tea.KeyShiftTab, tea.KeyUp:
 		if m.currentField > titleField {
 			m.currentField--
-			m.cursor = len(m.fields[m.currentField])
+			m.cursor = utf8.RuneCountInString(m.fields[m.currentField])
 		}
 		return m, nil, true
 	case tea.KeyEnter:
@@ -182,20 +196,20 @@ func (m *FormModel) handleVimKey(msg tea.KeyMsg) (tea.Model, tea.Cmd, bool) {
 		case "o":
 			if m.currentField < deadlineField {
 				m.currentField++
-				m.cursor = len(m.fields[m.currentField])
+				m.cursor = utf8.RuneCountInString(m.fields[m.currentField])
 			}
 			m.formMode = formModeInsert
 			return m, nil, true
 		case "j":
 			if m.currentField < deadlineField {
 				m.currentField++
-				m.cursor = len(m.fields[m.currentField])
+				m.cursor = utf8.RuneCountInString(m.fields[m.currentField])
 			}
 			return m, nil, true
 		case "k":
 			if m.currentField > titleField {
 				m.currentField--
-				m.cursor = len(m.fields[m.currentField])
+				m.cursor = utf8.RuneCountInString(m.fields[m.currentField])
 			}
 			return m, nil, true
 		case "h":
@@ -257,7 +271,11 @@ func (m *FormModel) View() string {
 		PaddingLeft(2)
 
 	var s strings.Builder
-	s.WriteString(titleStyle.Render("Create New Task"))
+	heading := "Create New Task"
+	if m.editingID != 0 {
+		heading = fmt.Sprintf("Edit Task #%d", m.editingID)
+	}
+	s.WriteString(titleStyle.Render(heading))
 	s.WriteString("\n\n")
 
 	if m.vimEnabled {
@@ -280,7 +298,7 @@ func (m *FormModel) View() string {
 		if titleContent == "" {
 			titleContent = "Enter a title (required)"
 		}
-		s.WriteString(inactiveStyle.Render(titleContent))
+		s.WriteString(inactiveStyle.Render(sanitizeForTerminal(titleContent, false)))
 	}
 	s.WriteString("\n\n")
 
@@ -295,7 +313,7 @@ func (m *FormModel) View() string {
 		if descContent == "" {
 			descContent = "Enter a description (required)"
 		}
-		s.WriteString(inactiveStyle.Render(descContent))
+		s.WriteString(inactiveStyle.Render(sanitizeForTerminal(descContent, false)))
 	}
 	s.WriteString("\n\n")
 
@@ -312,7 +330,7 @@ func (m *FormModel) View() string {
 		if deadlineContent == "" {
 			deadlineContent = "e.g., 2026-07-26 13:30 or 2d 3h (optional)"
 		}
-		s.WriteString(inactiveStyle.Render(deadlineContent))
+		s.WriteString(inactiveStyle.Render(sanitizeForTerminal(deadlineContent, false)))
 	}
 
 	if m.err != nil {
@@ -328,29 +346,65 @@ func (m *FormModel) View() string {
 			s.WriteString(helpStyle.Render("Vim normal • j/k: fields • h/esc: list • l/Enter: next/submit • i/a/o: insert • ctrl+c: Quit"))
 		}
 	} else {
-		s.WriteString(helpStyle.Render("shift+tab/↑ | tab/↓: Navigation • Enter: Submit • ctrl+l: List • ctrl+c: Quit"))
+		if m.editingID != 0 {
+			s.WriteString(helpStyle.Render("shift+tab/↑ | tab/↓: Navigation • Enter: Save • esc/ctrl+l: Back to list • ctrl+c: Quit"))
+		} else {
+			s.WriteString(helpStyle.Render("shift+tab/↑ | tab/↓: Navigation • Enter: Submit • ctrl+l: List • ctrl+c: Quit"))
+		}
 		s.WriteString(helpStyle.Render("\nTyping is always literal in form fields; list-only Vim navigation is disabled while editing."))
 	}
 
 	return s.String()
 }
 
-func (m *FormModel) addCursor(text string) string {
-	if m.cursor >= len(text) {
-		return text + "█"
+// typedText returns the single character a key press inserts, if any. Pasted
+// text (several runes at once) is ignored, as before.
+func typedText(msg tea.KeyMsg) (string, bool) {
+	if msg.Type == tea.KeyRunes && len(msg.Runes) == 1 && !unicode.IsControl(msg.Runes[0]) {
+		return string(msg.Runes), true
 	}
-	return text[:m.cursor] + "█" + text[m.cursor:]
+	if s := msg.String(); len(s) == 1 && !unicode.IsControl(rune(s[0])) {
+		return s, true
+	}
+	return "", false
+}
+
+// addCursor renders text with the cursor block at the rune position m.cursor.
+// Text is sanitised so stored control characters cannot reach the terminal.
+func (m *FormModel) addCursor(text string) string {
+	runes := []rune(sanitizeForTerminal(text, false))
+	if m.cursor >= len(runes) {
+		return string(runes) + "█"
+	}
+	return string(runes[:m.cursor]) + "█" + string(runes[m.cursor:])
 }
 
 func (m *FormModel) returnToList() (tea.Model, tea.Cmd, bool) {
+	model, cmd := m.toList("")
+	return model, cmd, true
+}
+
+// toList switches to the task list, carrying the known terminal size and
+// asking for a fresh one so dialogs are sized correctly.
+func (m *FormModel) toList(status string) (tea.Model, tea.Cmd) {
 	lm := NewListModelWithOptions(m.storage, tuiOptions{vimEnabled: m.vimEnabled})
-	return lm, lm.Init(), true
+	lm.viewportWidth, lm.viewportHeight = m.viewportWidth, m.viewportHeight
+	lm.filter, lm.tagFilter = m.listFilter, m.listTagFilter
+	lm.statusMessage = status
+	return lm, tea.Batch(lm.Init(), tea.WindowSize())
+}
+
+func (m *FormModel) successMessage() string {
+	if m.editingID != 0 {
+		return fmt.Sprintf("🗹 Task %d updated!", m.editingID)
+	}
+	return "🗹 Task created successfully!"
 }
 
 func (m *FormModel) advanceOrSubmit() (tea.Model, tea.Cmd, bool) {
 	if m.currentField < deadlineField {
 		m.currentField++
-		m.cursor = len(m.fields[m.currentField])
+		m.cursor = utf8.RuneCountInString(m.fields[m.currentField])
 		return m, nil, true
 	}
 
@@ -360,9 +414,8 @@ func (m *FormModel) advanceOrSubmit() (tea.Model, tea.Cmd, bool) {
 	}
 
 	m.submitted = true
-	lm := NewListModelWithOptions(m.storage, tuiOptions{vimEnabled: m.vimEnabled})
-	lm.statusMessage = "🗹 Task created successfully!"
-	return lm, lm.Init(), true
+	model, cmd := m.toList(m.successMessage())
+	return model, cmd, true
 }
 
 func (m *FormModel) submitForm() error {
@@ -379,8 +432,11 @@ func (m *FormModel) submitForm() error {
 	if len(m.fields[descriptionField]) > MaxDescriptionLength {
 		return fmt.Errorf("description exceeds maximum length of %d characters", MaxDescriptionLength)
 	}
-	if err := ValidateTaskText(strings.TrimSpace(m.fields[titleField]), strings.TrimSpace(m.fields[descriptionField])); err != nil {
+	if err := validateTaskText(strings.TrimSpace(m.fields[titleField]), strings.TrimSpace(m.fields[descriptionField])); err != nil {
 		return err
+	}
+	if m.editingID != 0 {
+		return m.submitEdit()
 	}
 
 	var deadline *time.Time
@@ -402,5 +458,34 @@ func (m *FormModel) submitForm() error {
 		Completed:   false,
 	}
 
-	return m.storage.CreateTask(&task)
+	// The TUI event loop is the top-level boundary, so it supplies the context.
+	return m.storage.CreateTask(context.Background(), &task)
+}
+
+// submitEdit saves the form into the task being edited. An unchanged deadline
+// field keeps the stored deadline exactly; an emptied one removes it.
+func (m *FormModel) submitEdit() error {
+	ctx := context.Background()
+	task, err := m.storage.GetTaskByID(ctx, m.editingID)
+	if err != nil {
+		return err
+	}
+	if task == nil {
+		return fmt.Errorf("%w: %d", ErrTaskNotFound, m.editingID)
+	}
+
+	title := strings.TrimSpace(m.fields[titleField])
+	description := strings.TrimSpace(m.fields[descriptionField])
+	edits := taskEdits{title: &title, description: &description}
+	if deadline := strings.TrimSpace(m.fields[deadlineField]); deadline != strings.TrimSpace(m.originalDeadline) {
+		if deadline == "" {
+			edits.clearDeadline = true
+		} else {
+			edits.deadline = &deadline
+		}
+	}
+	if err := applyTaskEdits(task, edits, time.Now()); err != nil {
+		return err
+	}
+	return m.storage.UpdateTask(ctx, task)
 }

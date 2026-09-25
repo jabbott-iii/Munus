@@ -1,9 +1,11 @@
-FROM golang:1.26-alpine AS builder
+# Builder and runtime use the same pinned Alpine release (same musl), which also
+# keeps the package pins below valid; see intel/maint.md for how to bump them.
+FROM golang:1.26-alpine3.24 AS builder
 
 WORKDIR /src
 
 # Install build deps for CGO sqlite3 driver
-RUN apk add --no-cache build-base
+RUN apk add --no-cache build-base=0.5-r4
 
 # Cache dependencies first
 COPY go.mod go.sum ./
@@ -14,11 +16,11 @@ RUN go mod download
 COPY . .
 RUN CGO_ENABLED=1 go build -o /out/munus .
 
-FROM alpine:3.22
+FROM alpine:3.24
 
 # go-sqlite3 compiles SQLite into the binary, so no sqlite runtime package is
 # needed. Run as an unprivileged user that owns the data directory.
-RUN apk add --no-cache ca-certificates \
+RUN apk add --no-cache ca-certificates=20260909-r0 \
     && addgroup -S -g 10001 munus \
     && adduser -S -D -H -u 10001 -G munus -h /app/data munus \
     && mkdir -p /app/data \

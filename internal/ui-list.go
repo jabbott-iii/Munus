@@ -17,10 +17,13 @@ limitations under the License.
 package internal
 
 import (
+	"context"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -33,8 +36,11 @@ func (m *ListModel) Init() tea.Cmd {
 	return m.loadData
 }
 
+// The TUI event loop is the top-level boundary for interactive operations, so
+// storage calls made from it use context.Background().
+
 func (m *ListModel) loadData() tea.Msg {
-	tasks, err := m.storage.ListTasks()
+	tasks, err := m.storage.ListTasks(context.Background())
 	if err != nil {
 		return ErrMsg{err}
 	}
@@ -51,12 +57,8 @@ func (m *ListModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case DataLoadedMsg:
 		m.loading = false
 		m.err = nil
-		m.tasks = msg.tasks
-		// Every incomplete task with a deadline is listed (soonest first) so
-		// none become unreachable once there are more than a page of them.
-		m.topUpcoming = GetTopUpcomingTasks(m.tasks, len(m.tasks))
-		m.tasksNoDeadline = GetTasksWithoutDeadline(m.tasks)
-		m.clampCursor()
+		m.allTasks = msg.tasks
+		m.applyFilter()
 		return m, nil
 
 	case ErrMsg:
@@ -168,11 +170,37 @@ func (m *ListModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.GetCurrentTask() == nil {
 				return m, nil
 			}
-			if err := m.ToggleComplete(); err != nil {
+			if err := m.ToggleComplete(); err != nil && !errors.Is(err, ErrTaskNotFound) {
+				m.err = err
+				return m, nil
+			}
+			// A task deleted elsewhere simply disappears on reload.
+			return m, m.loadData
+
+		case "s":
+			if m.GetCurrentTask() == nil {
+				return m, nil
+			}
+			if err := m.CycleStatus(); err != nil && !errors.Is(err, ErrTaskNotFound) {
 				m.err = err
 				return m, nil
 			}
 			return m, m.loadData
+
+		case "u":
+			if task := m.GetCurrentTask(); task != nil {
+				return m.openEditForm(task)
+			}
+
+		case "F":
+			m.filter = (m.filter + 1) % (filterDone + 1)
+			m.cursor, m.currentPage = 0, 0
+			m.applyFilter()
+
+		case "#":
+			m.tagFilter = nextTag(m.knownTags(), m.tagFilter)
+			m.cursor, m.currentPage = 0, 0
+			m.applyFilter()
 
 		case "d":
 			if m.vimEnabled && m.confirmingDelete && m.taskToDelete != nil && m.deletePrimed {
@@ -200,7 +228,10 @@ func (m *ListModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.taskToDelete = nil
 				return m, nil
 			}
-			return NewFormModelWithOptions(m.storage, tuiOptions{vimEnabled: m.vimEnabled}), nil
+			fm := NewFormModelWithOptions(m.storage, tuiOptions{vimEnabled: m.vimEnabled})
+			fm.viewportWidth, fm.viewportHeight = m.viewportWidth, m.viewportHeight
+			fm.listFilter, fm.listTagFilter = m.filter, m.tagFilter
+			return fm, nil
 
 		case "y":
 			if m.confirmingDelete && m.taskToDelete != nil {
@@ -234,9 +265,10 @@ func (m *ListModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.err = nil
 			m.statusMessage = ""
 			m.transfer = &transferState{
-				action: transferActionExport,
-				stage:  transferStageInput,
-				path:   fmt.Sprintf("munus-export-%s.json", time.Now().Format("20060102")),
+				action:           transferActionExport,
+				stage:            transferStageInput,
+				path:             fmt.Sprintf("munus-export-%s.json", time.Now().Format("20060102")),
+				includeCompleted: true,
 			}
 			m.transfer.cursor = len(m.transfer.path)
 			return m, nil
@@ -316,6 +348,9 @@ func (m *ListModel) View() string {
 	var s strings.Builder
 
 	s.WriteString(titleStyle.Render(" Task List"))
+	if label := m.filterLabel(); label != "" {
+		s.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("#9CA3AF")).Render("  Filter: " + label))
+	}
 
 	s.WriteString(sectionStyle.Render(" Upcoming Deadlines"))
 	s.WriteString("\n")
@@ -381,7 +416,11 @@ func (m *ListModel) View() string {
 	} else {
 		s.WriteString(helpStyle.Render("\n\nshift+tab/↑ | tab/↓: Navigate • e: Expand • c: Complete • d: Delete prompt • y: Confirm delete • esc: Cancel delete • n: New/No • r: Refresh • ctrl+c: Quit"))
 	}
-	s.WriteString(helpStyle.Render("\n?: Help • x: Export to File • i: Import from File"))
+	s.WriteString(helpStyle.Render("\n?: Help • u: Edit • s: Status • F: Filter • #: Tag filter • x: Export • i: Import"))
+	if m.showHelp {
+		s.WriteString("\n")
+		s.WriteString(helpStyle.Render(m.helpText()))
+	}
 
 	if m.statusMessage != "" {
 		s.WriteString("\n")
@@ -463,25 +502,29 @@ func (m *ListModel) RenderTask(task *ItemModel, index int, isSelected bool,
 	var s strings.Builder
 
 	checkbox := "[ ]"
-	if task.Completed {
+	switch itemStatus(task) {
+	case StatusDone:
 		checkbox = "[✔]"
+	case StatusDoing:
+		checkbox = "[~]"
 	}
 
 	deadlineInfo := ""
 	if task.Deadline != nil && !task.Completed {
-		days := task.DaysUntilDeadline()
-		if days < 0 {
-			deadlineInfo = overdueStyle.Render(fmt.Sprintf(" (Overdue by %d days)", -days))
-		} else if days == 0 {
-			deadlineInfo = overdueStyle.Render(" (Due today!)")
-		} else if days <= 3 {
-			deadlineInfo = upcomingStyle.Render(fmt.Sprintf(" (%d days left)", days))
+		label, urgent := deadlineLabel(*task.Deadline, m.clock())
+		if urgent {
+			deadlineInfo = overdueStyle.Render(" (" + label + ")")
 		} else {
-			deadlineInfo = fmt.Sprintf(" (%s)", task.Deadline.Format("Jan 2, 3:04 PM"))
+			deadlineInfo = upcomingStyle.Render(" (" + label + ")")
 		}
 	}
 
-	line := fmt.Sprintf("%s %s%s", checkbox, sanitizeForTerminal(task.Title, false), deadlineInfo)
+	tagInfo := ""
+	if len(task.Tags) > 0 {
+		tagInfo = sanitizeForTerminal(" #"+strings.Join(task.Tags, " #"), false)
+	}
+
+	line := fmt.Sprintf("%s %s%s%s", checkbox, sanitizeForTerminal(task.Title, false), tagInfo, deadlineInfo)
 
 	if isSelected {
 		s.WriteString(selectedStyle.Render(line))
@@ -526,6 +569,143 @@ func (m *ListModel) EnsureCursorVisible() {
 	}
 }
 
+// clock returns the current time used for deadline labels and filters.
+func (m *ListModel) clock() time.Time {
+	if m.now == nil {
+		return time.Now()
+	}
+	return m.now()
+}
+
+// applyFilter recomputes the visible sections from allTasks and the active
+// status and tag filters.
+func (m *ListModel) applyFilter() {
+	if m.filter == filterAll && m.tagFilter == "" {
+		m.tasks = m.allTasks
+	} else {
+		m.tasks = filterItems(m.allTasks, m.currentFilter(), m.clock())
+	}
+	// Every incomplete task with a deadline is listed (soonest first) so
+	// none become unreachable once there are more than a page of them.
+	m.topUpcoming = GetTopUpcomingTasks(m.tasks, len(m.tasks))
+	m.tasksNoDeadline = GetTasksWithoutDeadline(m.tasks)
+	m.clampCursor()
+}
+
+func (m *ListModel) currentFilter() taskFilter {
+	var f taskFilter
+	switch m.filter {
+	case filterPending:
+		f.pending = true
+	case filterDoing:
+		f.status = StatusDoing
+	case filterOverdue:
+		f.overdue = true
+	case filterDone:
+		f.completed = true
+	}
+	if m.tagFilter != "" {
+		f.tags = []string{m.tagFilter}
+	}
+	return f
+}
+
+// filterLabel describes the active filters, or "" when none is active.
+func (m *ListModel) filterLabel() string {
+	var parts []string
+	switch m.filter {
+	case filterPending:
+		parts = append(parts, "pending")
+	case filterDoing:
+		parts = append(parts, "in progress")
+	case filterOverdue:
+		parts = append(parts, "overdue")
+	case filterDone:
+		parts = append(parts, "done")
+	}
+	if m.tagFilter != "" {
+		parts = append(parts, "#"+sanitizeForTerminal(m.tagFilter, false))
+	}
+	return strings.Join(parts, " · ")
+}
+
+// knownTags returns the sorted, distinct tags of all loaded tasks.
+func (m *ListModel) knownTags() []string {
+	seen := map[string]struct{}{}
+	var tags []string
+	for _, t := range m.allTasks {
+		for _, tag := range t.Tags {
+			if _, ok := seen[tag]; !ok {
+				seen[tag] = struct{}{}
+				tags = append(tags, tag)
+			}
+		}
+	}
+	sort.Strings(tags)
+	return tags
+}
+
+// nextTag returns the tag after current in tags, or "" (no tag filter) after
+// the last one.
+func nextTag(tags []string, current string) string {
+	if current == "" {
+		if len(tags) == 0 {
+			return ""
+		}
+		return tags[0]
+	}
+	for i, tag := range tags {
+		if tag == current && i+1 < len(tags) {
+			return tags[i+1]
+		}
+	}
+	return ""
+}
+
+// helpText lists every list-view key binding.
+func (m *ListModel) helpText() string {
+	move, expand, del := "↑/↓, tab/shift+tab", "e", "d, then y"
+	if m.vimEnabled {
+		move, expand, del = "↑/↓, j/k, g/G", "e or l", "d, then y or d"
+	}
+	lines := []string{
+		"Keys:",
+		"  " + move + " — move",
+		"  pgup/pgdown or b/f — previous/next page",
+		"  " + expand + " — expand the selected task",
+		"  c — toggle complete",
+		"  s — cycle status: todo → doing → done",
+		"  u — edit the selected task",
+		"  " + del + " — delete (n or esc cancels)",
+		"  n — new task",
+		"  F — cycle filter: all → pending → in progress → overdue → done",
+		"  # — cycle tag filter",
+		"  x / i — export / import",
+		"  r — refresh",
+		"  ? or h — toggle this help",
+		"  q or ctrl+c — quit",
+	}
+	return strings.Join(lines, "\n")
+}
+
+// openEditForm switches to the task form pre-filled with task.
+func (m *ListModel) openEditForm(task *ItemModel) (tea.Model, tea.Cmd) {
+	fm := NewFormModelWithOptions(m.storage, tuiOptions{vimEnabled: m.vimEnabled})
+	fm.editingID = task.ID
+	// Control characters stored before validation existed are dropped, so
+	// saving the edit also cleans the task.
+	fm.fields[titleField] = stripControlCharacters(task.Title, false)
+	fm.fields[descriptionField] = stripControlCharacters(task.Description, true)
+	if task.Deadline != nil {
+		fm.fields[deadlineField] = task.Deadline.In(time.Local).Format(deadlineInputLayout)
+	}
+	fm.originalDeadline = fm.fields[deadlineField]
+	fm.cursor = utf8.RuneCountInString(fm.fields[titleField])
+	fm.viewportWidth, fm.viewportHeight = m.viewportWidth, m.viewportHeight
+	fm.listFilter, fm.listTagFilter = m.filter, m.tagFilter
+	return fm, nil
+}
+
 // clampCursor keeps the cursor on an existing row (for example after the last
 // row is deleted) and keeps the current page in range.
 func (m *ListModel) clampCursor() {
@@ -567,8 +747,24 @@ func (m *ListModel) ToggleComplete() error {
 		task.MarkComplete()
 	}
 
-	if err := m.storage.UpdateTask(task); err != nil {
+	if err := m.storage.UpdateTask(context.Background(), task); err != nil {
 		*task = previous // keep the list consistent with what is stored
+		return err
+	}
+	return nil
+}
+
+// CycleStatus moves the selected task to the next status (todo → doing →
+// done → todo). On a storage error the task keeps its previous state.
+func (m *ListModel) CycleStatus() error {
+	task := m.GetCurrentTask()
+	if task == nil {
+		return fmt.Errorf("no task selected")
+	}
+	previous := *task
+	task.setStatus(nextStatus(itemStatus(task)), time.Now())
+	if err := m.storage.UpdateTask(context.Background(), task); err != nil {
+		*task = previous
 		return err
 	}
 	return nil
@@ -580,7 +776,7 @@ func (m *ListModel) confirmDelete() (tea.Model, tea.Cmd) {
 	}
 
 	// A task already removed elsewhere is treated as deleted.
-	if err := m.storage.DeleteTask(m.taskToDelete.ID); err != nil && !errors.Is(err, ErrTaskNotFound) {
+	if err := m.storage.DeleteTask(context.Background(), m.taskToDelete.ID); err != nil && !errors.Is(err, ErrTaskNotFound) {
 		m.err = err
 		return m, nil
 	}
@@ -600,12 +796,16 @@ func (m *ListModel) handleTransferKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	state := m.transfer
 
+	// Only an explicit "y" applies an import; Enter is ignored here so a
+	// double Enter on the path prompt cannot confirm (for example) a replace.
 	if state.stage == transferStageConfirm {
 		switch msg.String() {
-		case "esc", "n":
+		case "ctrl+c":
+			return m, tea.Quit
+		case "esc", "n", "q":
 			m.transfer = nil
 			return m, nil
-		case "y", "enter":
+		case "y":
 			return m.applyImportFromTransfer()
 		}
 		return m, nil
@@ -687,12 +887,13 @@ func (m *ListModel) exportFromTransfer() (tea.Model, tea.Cmd) {
 
 	filter := ExportFilter{IncludeCompleted: m.transfer.includeCompleted}
 	svc := &TaskServiceAdapter{storage: m.storage}
-	plan, err := PlanExport(svc, filter)
+	ctx := context.Background()
+	plan, err := PlanExport(ctx, svc, filter)
 	if err != nil {
 		m.transfer.operationError = err
 		return m, nil
 	}
-	if err := ExportToFile(svc, filter, path, true); err != nil {
+	if err := ExportToFile(ctx, svc, filter, path, true); err != nil {
 		m.transfer.operationError = err
 		return m, nil
 	}
@@ -713,7 +914,12 @@ func (m *ListModel) planImportFromTransfer() (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
-	plan, err := PlanImport(&TaskServiceAdapter{storage: m.storage}, path, ImportConfig{
+	data, err := readImportSource(path, nil)
+	if err != nil {
+		m.transfer.operationError = err
+		return m, nil
+	}
+	plan, err := planImportData(context.Background(), &TaskServiceAdapter{storage: m.storage}, data, ImportConfig{
 		Mode:         m.transfer.importMode,
 		SkipExisting: m.transfer.skipExisting,
 		OnConflict:   "overwrite",
@@ -729,6 +935,7 @@ func (m *ListModel) planImportFromTransfer() (tea.Model, tea.Cmd) {
 	m.transfer.path = path
 	m.transfer.cursor = len(path)
 	m.transfer.plan = &plan
+	m.transfer.data = data
 	m.transfer.stage = transferStageConfirm
 	m.transfer.operationError = nil
 	return m, nil
@@ -739,7 +946,17 @@ func (m *ListModel) applyImportFromTransfer() (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
-	res, err := ApplyImport(&TaskServiceAdapter{storage: m.storage}, m.transfer.path, ImportConfig{
+	// Apply exactly the bytes that were previewed, even if the file changed
+	// since; read the file only if no preview data is held.
+	data := m.transfer.data
+	if data == nil {
+		var err error
+		if data, err = readImportSource(m.transfer.path, nil); err != nil {
+			m.transfer.operationError = err
+			return m, nil
+		}
+	}
+	res, err := applyImportData(context.Background(), &TaskServiceAdapter{storage: m.storage}, data, ImportConfig{
 		Mode:         m.transfer.importMode,
 		SkipExisting: m.transfer.skipExisting,
 		OnConflict:   "overwrite",
@@ -869,7 +1086,7 @@ func (m *ListModel) renderTransferOverlay(baseView string) string {
 				}
 			}
 			dialog.WriteString("\n")
-			dialog.WriteString(helpStyle.Render("[y] Import  [n] Cancel"))
+			dialog.WriteString(helpStyle.Render("[y] Import  [n/esc] Cancel"))
 		} else {
 			dialog.WriteString("Path:\n")
 			dialog.WriteString(inputStyle.Render(m.addTransferCursor(m.transfer.path)))

@@ -5,6 +5,10 @@
 - Do not weaken input validation (title ≤ 100, description ≤ 500 chars; positive task IDs;
   strict-mode JSON import), confirmation prompts on destructive actions, or CI security scans.
 - Security-sensitive changes require human review (`AGENTS.md`).
+- Tag names are validated (1–32 letters, digits, `-`, `_`; at most 10 per task) and, like all
+  stored text, pass through `sanitizeForTerminal` before reaching the terminal.
+- Tools downloaded by workflows are pinned by version and verified by SHA-256 before use
+  (llvm-mingw in `cd.yml`); actions stay pinned to commit SHAs.
 
 ## Issues
 
@@ -17,28 +21,28 @@
 - **Resolution:** 2026-09-23 (uncommitted change set). New DB files are pre-created `0600` (existing DB files untouched); exports use `os.CreateTemp` (`0600`) + rename; backups use `os.CreateTemp` in `~/.munus/backups` created/tightened to `0700`. Validated by `TestNewDatabaseCreatesOwnerOnlyFile`, `TestExportToFileOverwritesOtherFilesWithOwnerOnlyPermissions`, `TestWriteBackupIsUniqueAndOwnerOnly`, `TestWriteBackupTightensExistingDirectory` and a binary check (`ls -l` → `-rw-------`, `drwx------`). Windows ACLs not changed.
 
 ### SEC-002 — Third-party GitHub Actions not pinned (one tracks `@master`)
-- **Status:** In Progress
+- **Status:** Closed
 - **Affected component:** `.github/workflows/security.yml` (`securego/gosec@master`), all workflows (actions on mutable major tags)
 - **Risk:** Medium. A compromised or changed upstream action runs with the workflow's token; `cd.yml` has `contents: write`.
 - **Required remediation:** Pin third-party actions to full commit SHAs (at minimum `securego/gosec`, `softprops/action-gh-release`, `golangci/golangci-lint-action`, `codecov/codecov-action`).
 - **Validation:** Workflow review; workflows still pass.
-- **Resolution:** All third-party and GitHub actions pinned to full commit SHAs (tag in comment); release `contents: write` scoped to the release job only. Pending validation: workflows must run green on GitHub (actionlint + shellcheck pass locally).
+- **Resolution:** Closed 2026-09-24: validated by green CI, Docker and Security workflow runs on `e32fd8a` (push to `main`). Implementation: all third-party and GitHub actions pinned to full commit SHAs (tag in comment); release `contents: write` scoped to the release job only.
 
 ### SEC-003 — gosec results are discarded
-- **Status:** In Progress
+- **Status:** Closed
 - **Affected component:** `.github/workflows/security.yml`
 - **Risk:** Low–Medium. gosec runs with `-no-fail` and writes `results.sarif`, but no step uploads it, so findings are never surfaced.
 - **Required remediation:** Add `github/codeql-action/upload-sarif` for `results.sarif` (keeping `-no-fail` is acceptable if findings are triaged in Code Scanning).
 - **Validation:** gosec alerts visible in the repo's Code Scanning tab.
-- **Resolution:** `github/codeql-action/upload-sarif` (pinned) uploads `results.sarif` with category `gosec`; gosec pinned to v2.29.0. Pending validation: gosec alerts visible in Code Scanning after a GitHub run.
+- **Resolution:** Closed 2026-09-24: Security workflow (CodeQL + gosec + SARIF upload) passed on `e32fd8a` and the maintainer confirmed gosec results appear in Code Scanning. `github/codeql-action/upload-sarif` (pinned) uploads `results.sarif` with category `gosec`; gosec pinned to v2.29.0.
 
 ### SEC-004 — Container runs as root
-- **Status:** In Progress
+- **Status:** Closed
 - **Affected component:** `Dockerfile`
 - **Risk:** Low. Interactive local tool, but running as root widens impact of any bug writing to mounted volumes. Also: no `.dockerignore`, so `.git/` and local `*.db` files are sent in the build context and copied into the builder stage (not the final image).
 - **Required remediation:** Add a non-root user owning `/app/data` and `USER` directive; add `.dockerignore` excluding `.git`, `*.db`, `.idea`; update README volume guidance.
 - **Validation:** `docker run --rm munus:latest --help` succeeds; `id` in container is non-root; persisted DB writable; build context excludes ignored paths.
-- **Resolution:** Dockerfile runs as UID 10001 owning `/app/data`, `HOME=/app/data`, no `sqlite-libs`, no hard-coded `GOARCH`; `.dockerignore` added; README bind-mount guidance uses `--user`; `docker.yml` adds a DB-on-volume smoke test. Pending validation: image build/run (Docker Hub is blocked from the analysis sandbox; hadolint shows only the pre-existing DL3018).
+- **Resolution:** Closed 2026-09-24: Docker workflow run 35920166266 on `e32fd8a` built the image and passed the `--help` and DB-on-named-volume smoke tests running as UID 10001 (bind-mount `--user` path not exercised in CI). Dockerfile runs as UID 10001 owning `/app/data`, `HOME=/app/data`, no `sqlite-libs`, no hard-coded `GOARCH`; `.dockerignore` added; README bind-mount guidance uses `--user`; `docker.yml` adds a DB-on-volume smoke test.
 
 ### SEC-005 — Terminal escape-sequence injection from imported task text
 - **Status:** Closed
@@ -79,3 +83,11 @@
 - **Required remediation:** Only preserve imported numeric IDs within a safe range; assign new IDs otherwise.
 - **Validation:** Test that a file with IDs ≥ 2^31 imports with new IDs and later inserts still succeed.
 - **Resolution:** 2026-09-23. IDs are preserved only in `1..2^31-1`; larger IDs are treated as placeholders. Validated by `TestImportHugeIDGetsNewDatabaseID` (mutation-checked).
+
+### SEC-010 — Terminal escape-sequence injection through tag names
+- **Status:** Closed
+- **Affected component:** `internal/logic-cli.go` (`PrintList`), `internal/ui-list.go` (`RenderTask`, `filterLabel`)
+- **Risk:** Low. Found by the independent review of the plan-2 change set; never released. Tags are validated on save, but tag names already in the database (written by another tool editing the SQLite file) were printed raw by `munus list` and the TUI, so control sequences could reach the terminal (same class as SEC-005).
+- **Required remediation:** Pass tag names through `sanitizeForTerminal` wherever they are written to the terminal.
+- **Validation:** Tests store a tag containing ESC/BEL directly in the database and assert the CLI list output, the TUI row and the TUI filter label contain no control characters; mutation check removing each sanitiser call fails a test.
+- **Resolution:** 2026-09-24 (uncommitted plan-2 change set). `PrintList`, `RenderTask` and `filterLabel` sanitise tag names. Validated by `TestPrintListSanitizesStoredTags` and `TestRenderTaskAndFilterLabelSanitizeTags`; the three single-line mutations removing the calls are each caught.

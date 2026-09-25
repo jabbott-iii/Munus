@@ -45,7 +45,7 @@ func TestValidateTaskText(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			err := ValidateTaskText(tc.title, tc.desc)
+			err := validateTaskText(tc.title, tc.desc)
 			if tc.wantErr == "" {
 				if err != nil {
 					t.Fatalf("unexpected error: %v", err)
@@ -105,7 +105,7 @@ func TestAddCmdRejectsControlCharacters(t *testing.T) {
 	if err := cmd.Execute(); err == nil || !strings.Contains(err.Error(), "control characters") {
 		t.Fatalf("expected control character error, got %v", err)
 	}
-	if tasks, _ := db.ListTasks(); len(tasks) != 0 {
+	if tasks, _ := db.ListTasks(t.Context()); len(tasks) != 0 {
 		t.Fatalf("expected no task to be created, got %d", len(tasks))
 	}
 }
@@ -130,5 +130,43 @@ func TestDeleteDialogSanitizesTitle(t *testing.T) {
 	list.taskToDelete = &ItemModel{ID: 1, Title: "evil\x1b]0;PWNED\x07"}
 	if view := list.View(); strings.Contains(view, "\x1b]0;PWNED") {
 		t.Fatalf("expected delete dialog title to be sanitized, got %q", view)
+	}
+}
+
+func TestNormalizeTags(t *testing.T) {
+	cases := []struct {
+		name    string
+		in      []string
+		want    []string
+		wantErr string
+	}{
+		{name: "nil", in: nil, want: nil},
+		{name: "trim, lowercase, dedupe, sort", in: []string{" Work", "home", "WORK", "a-b_c"}, want: []string{"a-b_c", "home", "work"}},
+		{name: "unicode letters", in: []string{"café", "日本"}, want: []string{"café", "日本"}},
+		{name: "empty", in: []string{" "}, wantErr: "must not be empty"},
+		{name: "space inside", in: []string{"two words"}, wantErr: "letters, digits"},
+		{name: "punctuation", in: []string{"a,b"}, wantErr: "letters, digits"},
+		{name: "control character", in: []string{"a\x1b"}, wantErr: "letters, digits"},
+		{name: "too long", in: []string{strings.Repeat("x", maxTagLength+1)}, wantErr: "maximum length"},
+		{name: "max length ok", in: []string{strings.Repeat("é", maxTagLength)}, want: []string{strings.Repeat("é", maxTagLength)}},
+		{name: "too many", in: []string{"a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k"}, wantErr: "too many tags"},
+		{name: "duplicates do not count twice", in: []string{"a", "A", "b", "c", "d", "e", "f", "g", "h", "i", "j"}, want: []string{"a", "b", "c", "d", "e", "f", "g", "h", "i", "j"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := normalizeTags(tc.in)
+			if tc.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+					t.Fatalf("expected error containing %q, got %v", tc.wantErr, err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if strings.Join(got, ",") != strings.Join(tc.want, ",") {
+				t.Fatalf("got %v, want %v", got, tc.want)
+			}
+		})
 	}
 }
