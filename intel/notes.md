@@ -123,10 +123,17 @@ unless noted. Security items live in `cybersec.md`.
   other external tool editing the database directly can still store tags that bypass validation
   (output is sanitised, SEC-010).
 - The root package (`main.go`, `database_path.go`) has 25% statement coverage.
+- Release archives (`cd.yml`) and the Docker image contain only the binary, not `LICENSE` or
+  `NOTICE`; the MIT, BSD and Apache-2.0 licenses of the bundled modules ask for their notices to
+  accompany binary distributions. Linux release binaries also link glibc statically; its LGPL
+  terms for static linking have not been reviewed.
 - Existing DB files keep their permissions; only newly created ones are `0600`.
 - Over-length text stored by pre-validation versions (via unchecked import) cannot be re-imported.
 - `CONTRIBUTING.md` was empty in `e32fd8a`; plan 2 (P-025) drafts it from repository facts for
-  maintainer review. `NOTICE` is still empty (left untouched).
+  maintainer review. `NOTICE` lists every third-party module compiled into the release binaries
+  (all 29 in `go.mod`, three of them Windows-only), plus embedded SQLite and the Go standard library;
+  holders and licenses were read from each module's own license file (2026-09-24). Update it when
+  `go.mod` changes.
 
 ## Documentation drift (README) — resolved 2026-09-23
 List flags, add examples, artifact names, Docker volume path/user, undocumented flags and
