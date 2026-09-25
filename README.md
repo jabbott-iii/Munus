@@ -1,5 +1,3 @@
-<img width="812" height="542" alt="munusv2" src="https://github.com/user-attachments/assets/3ec01b8f-bfde-4fae-a114-78f50171dcf7" />
-
 # Munus
 
 Munus is a terminal task manager for people who live in the shell. It offers a
