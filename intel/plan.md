@@ -7,10 +7,69 @@ maintainer on 2026-09-27. Plan 3 below is the active plan: it addresses the find
 review (`notes.md` N-026…, `cybersec.md` SEC-013…). Per decision D-1, `v2.2.0` = plan 2 + plan 3
 phase A (with P-043): committed as `c9eeb97` (+ `ad5c231`, history) and released as `v2.2.0` on
 2026-09-27 with green CI, Docker, Security and release runs (maintainer-confirmed). Phases B and C
-(target `v2.2.1`) are implemented as an uncommitted change set (2026-09-27) awaiting maintainer
-review; the workflow changes are delivered as a patch.
+were committed as `df70f29` (with the workflow patch applied) and released as `v2.2.1` on 2026-09-27,
+again with all checks green (maintainer-confirmed). Plan 3 is complete. Plan 4 below is a draft built
+from the items still open in `notes.md` (residual risks) and earlier deferrals; it awaits maintainer
+decisions D-9…D-19.
 
-## Plan 3 — drafted and decided 2026-09-27 (phase A released in v2.2.0; phases B and C → v2.2.1)
+## Plan 4 — drafted 2026-09-27 (proposed: phase A → v2.2.2, phases B and C → v2.3.0) — awaiting maintainer decisions
+
+Sources: `notes.md` "Residual risks / open questions" and N-036 (TUI file I/O on the event loop), the
+P-029 deviation, and the plan-2 deferral (TUI types in `database.go`). No security item is open
+(SEC-001…SEC-018 are Closed); phase A is about licensing and release integrity. The licensing items
+are engineering notes, not legal advice; the maintainer should confirm the obligations.
+
+### Decisions needed (maintainer)
+
+| ID | Decision | Options | Recommendation |
+|---|---|---|---|
+| D-9 | Third-party license texts in binary distributions (P-046) | (a) generate the full license texts at release time (a pinned license tool in `cd.yml` and the Docker build); (b) commit a generated `THIRD_PARTY_LICENSES` file, ship it in every archive and the image, and let CI fail when it no longer matches `go.mod` | (b): reviewable, works in the Docker build without extra tooling, CI keeps it current |
+| D-10 | Linux release binaries currently link glibc statically (LGPL-2.1) (P-047) | (a) build fully static with musl in an Alpine container, as the Docker image already does; (b) link glibc dynamically (needs glibc ≥ the runner's, 2.39 on `ubuntu-24.04`); (c) keep static glibc and publish what LGPL-2.1 §6 asks for (relinkable object files) | (a): no LGPL obligations and still one portable static binary |
+| D-11 | Build provenance for release archives (P-049) | (a) add SHA-pinned `actions/attest-build-provenance` to the release job; (b) not now | (a) |
+| D-12 | Dependency update automation (P-050) | (a) Dependabot for GitHub Actions, Go modules and Docker (weekly, grouped), keeping SHA pins and tags current; (b) not now | (a) |
+| D-13 | Over-length text in older exports (P-051) | default import (a) shortens titles over 100 bytes and descriptions over 500 bytes at a character boundary and reports how many tasks were shortened (`--strict` rejects); (b) keep rejecting the whole file | (a): same reasoning as D-3, backups always restore |
+| D-14 | SQLite busy timeout (P-053) | (a) default 15 s instead of go-sqlite3's 5 s (a DSN that sets `_busy_timeout` wins); (b) keep 5 s | (a) |
+| D-15 | TUI file I/O on the event loop (P-054) | (a) read/write import and export files in Bubble Tea commands with a "working…" state (esc/ctrl+c stay responsive); (b) keep synchronous and document it | (a) |
+| D-16 | TUI model types in `database.go` (P-056, deferred since plan 2) | (a) move them to the UI files and update the `maint.md` convention; (b) keep deferred | (b): no user value, large diff |
+| D-17 | Ctrl+C behaviour (P-057, P-029 deviation) | (a) keep the default (the process exits; SQLite rolls back an unfinished transaction) and record it as final; (b) graceful cancellation (`signal.NotifyContext` plus a cancellable `Confirm`) | (a) |
+| D-18 | `AGENTS.md` housekeeping (P-058) | (a) remove the trailing space in `` `CONTRIBUTING.md ` `` (two places); (b) leave `AGENTS.md` untouched | (a) |
+| D-19 | Release numbering | (a) phase A as `v2.2.2` (packaging only), phases B and C as `v2.3.0` (behaviour changes); (b) everything in `v2.3.0` | (a) |
+
+The plan-2/plan-3 Go rules, validation and "workflow and `Makefile` changes as a patch" apply unchanged.
+
+### Phase A — licensing and release integrity
+
+| ID | Priority | Item | Ref | Acceptance | Status |
+|---|---|---|---|---|---|
+| P-046 | High | **License texts with every binary.** Release archives and the Docker image carry `LICENSE`, `NOTICE` and the full license texts of every module compiled into the binary (plus the SQLite public-domain notice and the Go BSD license), per D-9. `NOTICE` today only names the licenses. | notes residual risk | Each archive and `/usr/share/licenses/munus` in the image contain the three files; CI fails when a module in `go.mod` has no entry | Proposed |
+| P-047 | High | **No statically linked glibc.** Linux release binaries per D-10. | notes residual risk | `file` reports a static binary without glibc (a) or the documented alternative; the binary runs in an old-distro container (for example `debian:11`) and in Alpine; README install notes still hold | Proposed |
+| P-048 | Low | **darwin/amd64 built and smoke-run natively** on `macos-15-intel` (a standard runner until the macOS 15 image retires in Fall 2027) instead of being cross-compiled untested. | notes residual risk | `cd.yml` smoke step runs on Intel macOS; revisit before Fall 2027 | Proposed |
+| P-049 | Low | **Build provenance** attestation for the archives and `checksums.txt`, per D-11 (release job gets `id-token: write` and `attestations: write` only). | new | `gh attestation verify` succeeds for a downloaded archive | Proposed |
+| P-050 | Low | **Dependabot** configuration per D-12. | new | Config validates; the first update PRs keep SHA pins | Proposed |
+
+### Phase B — data and robustness
+
+| ID | Priority | Item | Ref | Acceptance | Status |
+|---|---|---|---|---|---|
+| P-051 | Medium | **Older exports with over-length text restore**, per D-13 (text stored before the limits existed, or by other tools). | notes residual risk | An export of a database with a 5,000-character title imports by default with a "shortened" count and is rejected by `--strict` with the task index; the fuzz round-trip property covers it | Proposed |
+| P-052 | Low | **Status changes decided on stored data.** TUI `c`/`s` and `complete --undo` compute the new status from the status stored at write time, inside the same transaction (e.g. `Storage.UpdateTaskStatus(ctx, id, func(current TaskStatus) TaskStatus, now)`), closing the remaining stale-read windows. | notes residual risk | Tests change the status through a second handle between load and key press / command | Proposed |
+| P-053 | Low | **Busy timeout** per D-14. | N-037 | DSN helper tests (default added, user value kept); README configuration note | Proposed |
+| P-054 | Medium | **TUI import/export off the event loop**, per D-15; storage work stays one transaction. | N-036 | A model test with a blocking reader: the UI keeps handling keys; esc cancels waiting; `go test -race` | Proposed |
+
+### Phase C — maintainability and housekeeping
+
+| ID | Priority | Item | Ref | Acceptance | Status |
+|---|---|---|---|---|---|
+| P-055 | Low | **Testable entry point:** `main` delegates to `run(ctx, args, env, stdout, stderr) int` so version stamping, `MUNUS_DB_PATH`, error output and exit codes are tested. | notes (root coverage 25%) | Root package coverage ≥ 80% | Proposed |
+| P-056 | Low | **TUI types out of `database.go`**, per D-16. | plan 2 deferral | `maint.md` convention updated; no behaviour change | Proposed |
+| P-057 | Info | **Ctrl+C**, per D-17. | P-029 deviation | (a) `notes.md`/`maint.md` record it as final; (b) cancellation tests | Proposed |
+| P-058 | Info | **`AGENTS.md` typo**, per D-18. | notes (documentation drift) | — | Proposed |
+
+### Suggested order
+D-9…D-19 → P-046, P-047, P-048 (one `cd.yml`/Dockerfile patch) → P-049, P-050 → release `v2.2.2` →
+P-052, P-053 → P-051 → P-054 → P-055 → P-056…P-058 → release `v2.3.0`.
+
+## Plan 3 — drafted and decided 2026-09-27 (phase A released in v2.2.0; phases B and C in v2.2.1)
 
 Source: the 2026-09-27 review of `48b4da2` (`notes.md` N-026…N-036, `cybersec.md` SEC-013…SEC-018);
 every item was reproduced with the HEAD binary or a test. Checked against `v2.1.1`: SEC-014, SEC-015,
@@ -72,20 +131,20 @@ README/`intel` updates where behaviour changes, a `history.md` entry, and green 
 
 | ID | Priority | Item | Ref | Acceptance | Status |
 |---|---|---|---|---|---|
-| P-037 | Medium | **Concurrent first open.** Triggers use `CREATE TRIGGER IF NOT EXISTS`; schema creation and migration are safe when several processes open a new or older database at once (take the write lock only when a migration is needed and re-check under it, so an up-to-date DB still opens read-only). | N-027 | The review's reproduction (3 parallel `add` × 40 new DBs; 3 parallel `list` × 40 trigger-less DBs) has 0 failures; read-only open test passes; `go test -race` | Done (uncommitted) |
-| P-038 | Low | **CLI error handling.** Each command validates its arguments and flag values (cobra `Args` validators for task IDs and import flag combinations, required/grouped flags, then value checks such as `--status`, `--deadline`, `--tag`, `--mode`) and only then calls `openForCommand`, which turns off usage and opens the database; usage is printed only for argument and flag errors (D-8). | N-033, N-034 | `add -t x` and `list --pending --completed` create no DB file; `complete 999` prints one error line; help, version and completion tests still pass | Done (uncommitted) |
-| P-039 | Low | **Form cursor.** Enter moves to the end of the next field, as Tab and ↓ do. | N-030 | Model test: edit form, Enter, type → text appended | Done (uncommitted) |
-| P-040 | Low | **Calendar relative deadlines.** `d`/`w` use calendar arithmetic (D-6); the parser takes the current time as an input (`ParseDeadline` wraps it with `time.Now()`). | N-031 | Deterministic tests across both 2026 US DST changes with fixed zones (`time/tzdata`); SEC-008 bounds tests unchanged | Done (uncommitted) |
-| P-041 | Low | **Docker time zones.** Pinned `tzdata` in the runtime image (same Alpine release as the other pins); README documents `-e TZ=…`. | N-032 | hadolint clean; `docker.yml` smoke test with `TZ` set stores a deadline with the expected offset (workflow patch) | Done (uncommitted) — `tzdata=2026d-r0` taken from aports `3.24-stable`; `docker.yml` confirms it |
-| P-042 | Info | **Small fixes.** `export -f -` writes to standard output (like `import -f -` reads it); `ApplyImport` honours `DryRun` (plan only, no write); `openDatabase` closes the connection when a migration fails; the TUI path prompt accepts multi-byte characters. Deferred: moving TUI import/export off the `Update` path (needs a design; P-035 bounds the worst case). | N-035, N-036 | Tests for each; `export -f - \| import -f - --dry-run` round-trips | Done (uncommitted) |
+| P-037 | Medium | **Concurrent first open.** Triggers use `CREATE TRIGGER IF NOT EXISTS`; schema creation and migration are safe when several processes open a new or older database at once (take the write lock only when a migration is needed and re-check under it, so an up-to-date DB still opens read-only). | N-027 | The review's reproduction (3 parallel `add` × 40 new DBs; 3 parallel `list` × 40 trigger-less DBs) has 0 failures; read-only open test passes; `go test -race` | Done — released in v2.2.1 |
+| P-038 | Low | **CLI error handling.** Each command validates its arguments and flag values (cobra `Args` validators for task IDs and import flag combinations, required/grouped flags, then value checks such as `--status`, `--deadline`, `--tag`, `--mode`) and only then calls `openForCommand`, which turns off usage and opens the database; usage is printed only for argument and flag errors (D-8). | N-033, N-034 | `add -t x` and `list --pending --completed` create no DB file; `complete 999` prints one error line; help, version and completion tests still pass | Done — released in v2.2.1 |
+| P-039 | Low | **Form cursor.** Enter moves to the end of the next field, as Tab and ↓ do. | N-030 | Model test: edit form, Enter, type → text appended | Done — released in v2.2.1 |
+| P-040 | Low | **Calendar relative deadlines.** `d`/`w` use calendar arithmetic (D-6); the parser takes the current time as an input (`ParseDeadline` wraps it with `time.Now()`). | N-031 | Deterministic tests across both 2026 US DST changes with fixed zones (`time/tzdata`); SEC-008 bounds tests unchanged | Done — released in v2.2.1 |
+| P-041 | Low | **Docker time zones.** Pinned `tzdata` in the runtime image (same Alpine release as the other pins); README documents `-e TZ=…`. | N-032 | hadolint clean; `docker.yml` smoke test with `TZ` set stores a deadline with the expected offset (workflow patch) | Done — released in v2.2.1 (`tzdata=2026d-r0`; the `docker.yml` time-zone step passed) |
+| P-042 | Info | **Small fixes.** `export -f -` writes to standard output (like `import -f -` reads it); `ApplyImport` honours `DryRun` (plan only, no write); `openDatabase` closes the connection when a migration fails; the TUI path prompt accepts multi-byte characters. Deferred: moving TUI import/export off the `Update` path (needs a design; P-035 bounds the worst case). | N-035, N-036 | Tests for each; `export -f - \| import -f - --dry-run` round-trips | Done — released in v2.2.1 |
 
 ### Phase C — tooling, CI/CD and hygiene
 
 | ID | Priority | Item | Ref | Acceptance | Status |
 |---|---|---|---|---|---|
 | P-043 | Low | **Fuzz targets in the repository.** `FuzzParseDeadline`, `FuzzSanitizeForTerminal` and `FuzzParseImportData` (import invariants plus export round trip), with seed corpora that run in `go test`; `make fuzz` runs each for `FUZZTIME` (default 30s). | review | `go test ./...` runs the seeds; each target runs 60 s clean once P-032 lands | Done — released in v2.2.0 (the `make fuzz` Makefile change was applied from a patch) |
-| P-044 | Low | **CI/CD hardening (workflow patch).** Go toolchain per D-5; `cache: false` for the `cd.yml` build job; govulncheck job in `security.yml` (`go run golang.org/x/vuln/cmd/govulncheck@v1.8.0`, version-pinned and verified by the Go checksum database, instead of a new action). | SEC-018 | CI and CD logs show the patched Go version; govulncheck clean; actionlint clean | Done (uncommitted) — actionlint (with shellcheck) clean; CI/CD logs to confirm |
-| P-045 | Low | **Ignore rules.** `.gitignore` adds `munus-export-*.json`, `*.db-journal`, `*.db-wal`, `*.db-shm`; `.dockerignore` adds `**/*.db-wal`, `**/*.db-shm`. | SEC-018 | `git check-ignore` matches each pattern; Docker build context excludes them | Done (uncommitted) |
+| P-044 | Low | **CI/CD hardening (workflow patch).** Go toolchain per D-5; `cache: false` for the `cd.yml` build job; govulncheck job in `security.yml` (`go run golang.org/x/vuln/cmd/govulncheck@v1.8.0`, version-pinned and verified by the Go checksum database, instead of a new action). | SEC-018 | CI and CD logs show the patched Go version; govulncheck clean; actionlint clean | Done — released in v2.2.1 (CI, CD and Security, including govulncheck, green) |
+| P-045 | Low | **Ignore rules.** `.gitignore` adds `munus-export-*.json`, `*.db-journal`, `*.db-wal`, `*.db-shm`; `.dockerignore` adds `**/*.db-wal`, `**/*.db-shm`. | SEC-018 | `git check-ignore` matches each pattern; Docker build context excludes them | Done — released in v2.2.1 |
 
 ### Implementation notes — phases B and C (2026-09-27)
 - P-037 found and fixed a further defect (N-037): concurrent writers on v2.2.0 failed with "database
@@ -132,9 +191,7 @@ targets for 60 s each, and `GOOS=windows`/`GOOS=darwin go vet ./...` with CGO of
 be run are listed as not run.
 
 ### Suggested order
-Phase A and P-043 shipped in `v2.2.0` (2026-09-27). Phases B and C are done (uncommitted): maintainer
-review → apply the workflow patch → commit → green CI, Docker (including the new `TZ` step) and
-Security (including govulncheck) runs → tag `v2.2.1`.
+Phase A and P-043 shipped in `v2.2.0`, phases B and C in `v2.2.1` (both 2026-09-27). Plan 3 is complete.
 Release notes for `v2.2.0` must list, besides the plan-2 changes: import rejects files over 50,000
 tasks and data after the export; blank titles import as `(untitled)` (`--strict` rejects them); file
 IDs above 1,000,000,000 get new IDs; bidi override characters are rejected like control characters;

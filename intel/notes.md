@@ -1,6 +1,6 @@
 # Engineering Notes & Open Questions
 
-## Plan 3 phases B–C baseline (2026-09-27, uncommitted change set on top of `ad5c231` / `v2.2.0`)
+## Plan 3 phases B–C baseline (2026-09-27; committed as `df70f29`, released in `v2.2.1`)
 Same toolchain as below (Go 1.26.8 + CGO, modules verified against `go.sum`): `gofmt -s -l .` clean;
 `go vet ./...` clean (also `GOOS=windows`/`darwin`, CGO off); `go mod tidy` leaves `go.mod`/`go.sum`
 unchanged; `go test ./...` passes (coverage `internal` 88.9%, root 25.0%, 88.5% total), also with
@@ -13,7 +13,8 @@ another test). Binary checks against v2.2.0: invalid flag values now print usage
 database; 6 parallel imports 101/150 → 0/150 "database is locked"; mixed concurrent commands
 25/200 → 0/200; 3 parallel first opens 0/90 failures; `1d` keeps the clock time across DST;
 `export -f -` writes standard output. Not run locally: golangci-lint, gosec, CodeQL, the Docker
-build (including the `tzdata` pin), macOS/Windows test runs, the workflows themselves.
+build (including the `tzdata` pin), macOS/Windows test runs, the workflows themselves — all of
+these ran green on GitHub for `v2.2.1` (maintainer-confirmed).
 
 ## Plan 3 phase A baseline (2026-09-27; committed as `c9eeb97`, released in `v2.2.0`)
 Same toolchain as the review below (Go 1.26.8 + CGO, modules verified against `go.sum`):
@@ -132,13 +133,13 @@ unless noted. Security items live in `cybersec.md`.
 - **N-024 List created from the form has no window size — Fixed (P-018).**
 - **N-025 Plan-2 review findings — Fixed** (12 findings from an independent review of the plan-2
   change set; see `plan.md`, "Implementation notes").
-- **N-027 First open races between processes — Fixed (P-037, uncommitted).** GORM `AutoMigrate` and the
+- **N-027 First open races between processes — Fixed in v2.2.1 (P-037).** GORM `AutoMigrate` and the
   check-then-create trigger installation are not atomic. Three `munus add` runs started together on a
   new database failed 10 of 120 times ("table `item_models` already exists", "trigger … already
   exists"); on a v2.1.1-style database without triggers, 5 of 120 parallel `list` runs failed. The
   failing command exits 1 without changing any data. Now a failed first migration attempt is retried
   inside a transaction that holds the write lock, and triggers use `CREATE TRIGGER IF NOT EXISTS`.
-- **N-037 Concurrent writers fail with "database is locked" — Fixed (P-037, uncommitted).** Found while
+- **N-037 Concurrent writers fail with "database is locked" — Fixed in v2.2.1 (P-037).** Found while
   fixing N-027. Transactions started deferred, so a read-then-write transaction (import, and GORM's
   own write transactions) that could not upgrade its lock while another process wrote got
   SQLITE_BUSY at once instead of waiting: 6 parallel `munus import` processes on v2.2.0 failed 101 of
@@ -150,15 +151,15 @@ unless noted. Security items live in `cybersec.md`.
 - **N-029 `import --strict` accepts trailing data — Fixed in v2.2.0 (P-035).** `Decoder.Decode`
   read only the first JSON value, so `{…} {…}` or `{…}garbage` passed strict import. Both modes now
   reject anything but whitespace after the bundle.
-- **N-030 Enter in the TUI form puts the cursor at the start of the next field — Fixed (P-039,
-  uncommitted).** Tab, ↓ and the Vim bindings put it at the end, so when editing a task, Enter then
+- **N-030 Enter in the TUI form puts the cursor at the start of the next field — Fixed in v2.2.1
+  (P-039).** Tab, ↓ and the Vim bindings put it at the end, so when editing a task, Enter then
   typing prepends to the existing description or deadline (reproduced with a model test).
-- **N-031 Relative days and weeks ignore DST — Fixed (P-040, uncommitted; D-6).** `d` and `w` are fixed 24 h / 168 h,
+- **N-031 Relative days and weeks ignore DST — Fixed in v2.2.1 (P-040; D-6).** `d` and `w` are fixed 24 h / 168 h,
   so `1d` entered just before a DST change lands an hour off the same clock time (and can show
   "Due today!" or "2 days left" where "Due tomorrow" is expected). `ParseRelativeTime` reads
   `time.Now()` itself, so this could not be tested deterministically. Now days and weeks are added
   with `AddDate`, the clock is passed in, and the tests use fixed clocks and zones.
-- **N-032 Docker image has no time-zone data — Fixed (P-041, uncommitted; confirm in `docker.yml`).** `alpine:3.24` ships no zoneinfo
+- **N-032 Docker image has no time-zone data — Fixed in v2.2.1 (P-041; `docker.yml` checks it).** `alpine:3.24` ships no zoneinfo
   and the binary does not embed `time/tzdata`, so `-e TZ=…` falls back to UTC for deadline input and
   labels. Now the image installs pinned `tzdata`, the README documents `TZ`, and `docker.yml` checks it.
 
@@ -172,7 +173,7 @@ unless noted. Security items live in `cybersec.md`.
 - Test hygiene — Fixed: masked assertions (`TestParseDeadline`, `TestReplaceAll`,
   `TestTaskDeadlineCalculation`, `TestDeleteTaskCmd_NegativeID`), 23 silent `return`s → `t.Fatalf`,
   tests no longer write backups into the real home directory, DST-robust durations.
-- Fixed in plan 3 phase B (uncommitted):
+- Fixed in v2.2.1 (plan 3 phase B):
   - **N-033** Required and mutually exclusive flag errors (`add -t x` without `-d`, `list --pending
     --completed`) still create the database: cobra validates those flags after `PersistentPreRunE`.
     Now each command opens the database itself after validating its arguments and flag values (P-038).
@@ -210,7 +211,7 @@ unless noted. Security items live in `cybersec.md`.
   blank titles and descriptions; `complete --undo` writes nothing for a task that is not done; an
   empty or truncated import reports "unexpected end of JSON input"; unknown stored statuses are
   repaired when the database is opened; `?` DSN and `file:` URI databases are created `0600`.
-- Plan 3 phases B and C (uncommitted, for `v2.2.1`): every transaction starts with `BEGIN IMMEDIATE`
+- Plan 3 phases B and C (released in `v2.2.1`): every transaction starts with `BEGIN IMMEDIATE`
   (concurrent writers wait instead of failing); argument and flag errors, including invalid flag
   values, print usage and never create the database, while runtime errors print only the error;
   relative `d`/`w` are calendar units; `export -f -` writes standard output; `ApplyImport` honours
@@ -218,6 +219,7 @@ unless noted. Security items live in `cybersec.md`.
   honours `TZ`; CI and releases use the latest Go 1.26 patch release and Security runs govulncheck.
 
 ## Residual risks / open questions
+(Plan 4 in `plan.md` proposes how to address the open ones below; 2026-09-27.)
 - CI, Docker, Security and release (`v2.1.1`) workflows are validated on GitHub (2026-09-24); all
   of them were green again for `v2.2.0` (2026-09-27, maintainer-confirmed).
   darwin/amd64 is built but not smoke-run in `cd.yml` (cross-compiled on the arm64 runner).
@@ -230,8 +232,8 @@ unless noted. Security items live in `cybersec.md`.
 - Ctrl+C exits immediately (no graceful cancellation, see the P-029 deviation in `plan.md`).
 - Plan 3 phases B–C: SQLite does not queue waiting writers fairly, so under heavy, sustained
   contention a writer can still exceed the 5 s busy timeout ("database is locked"); a user can raise
-  it with `MUNUS_DB_PATH=…?_busy_timeout=…`. The `tzdata` pin and the workflow changes are verified
-  only when `docker.yml`, `ci.yml`, `cd.yml` and `security.yml` run.
+  it with `MUNUS_DB_PATH=…?_busy_timeout=…`. The `tzdata` pin must be bumped when Alpine 3.24 drops
+  that package revision (procedure in `maint.md`).
 - Plan 3 phase A: TUI `c`/`s` compute the next status from the list's copy, which may be stale
   (the write itself no longer overwrites other fields); `complete --undo` decides from a read made
   just before the write, so a task changed from done to `doing` in that window becomes `todo`.

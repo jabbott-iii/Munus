@@ -71,3 +71,12 @@ backfilled from `git log` for the changes made after that file's last entry.
   Progress until the workflows run on GitHub; N-027 and N-030…N-037 fixed (FIFO paths in the TUI
   still block the interface).
 
+## 2026-09-27 — v2.2.1 released; plan 4 drafted
+- Plan 3 phases B and C were committed as `df70f29` (workflow patch applied) and released as `v2.2.1`
+  with all checks green (maintainer-confirmed). SEC-018 closed; no security item is open. Plan 3 is
+  complete.
+- Plan 4 (P-046…P-058) drafted from the remaining residual risks and deferrals: license texts in
+  binary distributions, no statically linked glibc, native darwin/amd64 smoke runs, provenance,
+  Dependabot, restoring older over-length exports, status changes on stored data, busy timeout, TUI
+  file I/O off the event loop, a testable entry point and housekeeping; decisions D-9…D-19 open.
+
