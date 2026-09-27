@@ -23,7 +23,8 @@ make test
 - The license header must be maintained on every source file.
 - Format the code: `gofmt -s -w .` (or `make fmt`).
 - Run the local checks: `make check` (formatting check, `go vet`, tests, race-detector tests and
-  golangci-lint when installed).
+  golangci-lint when installed). After changing deadline parsing, text handling or import, also
+  run `make fuzz`.
 - CI runs on Linux, macOS and Windows: a `go mod tidy` drift check, `go vet`, golangci-lint v2.13.2,
   tests with coverage, and a native build that is run as a smoke test. CodeQL and gosec run on every
   push, and the Docker image is built and smoke-tested on `main`.

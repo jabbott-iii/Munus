@@ -18,6 +18,7 @@ package internal
 
 import (
 	"fmt"
+	"io"
 	"sort"
 	"strings"
 	"unicode"
@@ -29,6 +30,16 @@ const (
 	maxTagLength   = 32
 	maxTagsPerTask = 10
 )
+
+// untitledTaskTitle replaces an imported title that is blank once control
+// characters are removed, so exports and backups that contain such a task
+// still restore (default import only; --strict rejects it).
+const untitledTaskTitle = "(untitled)"
+
+// isBlank reports whether s is empty or contains only whitespace.
+func isBlank(s string) bool {
+	return strings.TrimSpace(s) == ""
+}
 
 // validateTaskText enforces the shared title/description limits and rejects
 // terminal control characters (for example ESC sequences) that could alter the
@@ -65,7 +76,16 @@ func isDisallowedControl(r rune, allowLineBreaks bool) bool {
 	if allowLineBreaks && (r == '\n' || r == '\t') {
 		return false
 	}
-	return unicode.IsControl(r)
+	return unicode.IsControl(r) || isBidiControl(r)
+}
+
+// isBidiControl reports whether r is a bidirectional embedding, override or
+// isolate control (U+202A–U+202E, U+2066–U+2069). They can make displayed text
+// read differently from what is stored, so they are treated like control
+// characters. Other format characters, such as the U+200D joiner used in emoji
+// sequences, are allowed.
+func isBidiControl(r rune) bool {
+	return (r >= '\u202a' && r <= '\u202e') || (r >= '\u2066' && r <= '\u2069')
 }
 
 // sanitizeForTerminal replaces control characters with U+FFFD so that stored
@@ -82,6 +102,22 @@ func sanitizeForTerminal(s string, allowLineBreaks bool) string {
 		}
 		return r
 	}, s)
+}
+
+// terminalSafeWriter passes everything written to it through
+// sanitizeForTerminal (line breaks and tabs kept). The root command writes its
+// errors through it, so error text that carries stored or imported data, such
+// as a message raised by a SQLite trigger in a crafted database, cannot emit
+// terminal escape sequences.
+type terminalSafeWriter struct {
+	w io.Writer
+}
+
+func (s terminalSafeWriter) Write(p []byte) (int, error) {
+	if _, err := io.WriteString(s.w, sanitizeForTerminal(string(p), true)); err != nil {
+		return 0, err
+	}
+	return len(p), nil
 }
 
 // stripControlCharacters removes control characters from imported text so that

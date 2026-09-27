@@ -24,6 +24,7 @@ import (
 	"io"
 	"log"
 	"os"
+	"runtime"
 	"sort"
 	"strings"
 	"time"
@@ -398,6 +399,10 @@ type Storage interface {
 	// ReplaceAllTasksFunc reads the current tasks and replaces them with the
 	// result of fn as one atomic operation (a single transaction for Database).
 	ReplaceAllTasksFunc(ctx context.Context, fn func(current []*ItemModel) ([]*ItemModel, error)) error
+	// SetTaskStatus changes only the status of task id (with completed,
+	// completed_at and updated_at), so concurrent edits to its other fields
+	// are kept. It returns ErrTaskNotFound when the task does not exist.
+	SetTaskStatus(ctx context.Context, id int, status TaskStatus, now time.Time) error
 }
 
 // NewDatabase opens (or creates) the sqlite file and runs migrations.
@@ -413,12 +418,13 @@ func openDatabase(path string, logWriter io.Writer) (*Database, error) {
 		path = "munus.db"
 	}
 
-	createPrivateDatabaseFile(path)
+	created := createPrivateDatabaseFile(path)
 
 	conn, err := gorm.Open(sqlite.Open(path), &gorm.Config{
 		Logger: logger.New(log.New(logWriter, "", 0), logger.Config{LogLevel: logger.Silent}),
 	})
 	if err != nil {
+		removeUnusedDatabaseFile(created)
 		return nil, fmt.Errorf("open sqlite database: %w", err)
 	}
 
@@ -459,16 +465,23 @@ BEGIN UPDATE item_models SET status = CASE WHEN NEW.completed = 1 THEN 'done' EL
 BEGIN DELETE FROM task_tags WHERE task_id = OLD.id; END`,
 }
 
-// migrateStatusAndTags repairs rows written before statuses existed or by an
-// older binary, and installs consistencyTriggers. It only writes when
-// something needs changing, so an up-to-date database can be opened read-only.
+// statusNeedsRepair selects rows whose status is unknown (for example written
+// by another tool) or contradicts completed (written by an older binary).
+const statusNeedsRepair = "status IS NULL OR status NOT IN ('todo', 'doing', 'done') OR (completed = 1) <> (status = 'done')"
+
+// migrateStatusAndTags repairs rows written before statuses existed, by an
+// older binary or by another tool, and installs consistencyTriggers. It only
+// writes when something needs changing, so an up-to-date database can be
+// opened read-only.
 func migrateStatusAndTags(conn *gorm.DB) error {
 	var n int64
-	if err := conn.Raw("SELECT COUNT(*) FROM item_models WHERE (completed = 1) <> (status = 'done')").Scan(&n).Error; err != nil {
+	if err := conn.Raw("SELECT COUNT(*) FROM item_models WHERE " + statusNeedsRepair).Scan(&n).Error; err != nil {
 		return err
 	}
 	if n > 0 {
-		if err := conn.Exec("UPDATE item_models SET status = CASE WHEN completed = 1 THEN 'done' ELSE 'todo' END WHERE (completed = 1) <> (status = 'done')").Error; err != nil {
+		// completed decides done versus not done; a "doing" written in another
+		// case or with spaces is kept as doing.
+		if err := conn.Exec("UPDATE item_models SET status = CASE WHEN completed = 1 THEN 'done' WHEN lower(trim(status)) = 'doing' THEN 'doing' ELSE 'todo' END WHERE " + statusNeedsRepair).Error; err != nil {
 			return err
 		}
 	}
@@ -524,22 +537,143 @@ func (d *Database) open() error {
 }
 
 // createPrivateDatabaseFile creates a new database file readable only by the
-// owner. Existing files are left untouched; any failure is ignored so that
-// sqlite reports the underlying problem when it opens the path.
-func createPrivateDatabaseFile(path string) {
-	// URIs and DSNs with parameters are not plain file names; leave them to sqlite.
-	if path == ":memory:" || strings.HasPrefix(path, "file:") || strings.Contains(path, "?") {
-		return
+// owner, for plain paths as well as DSNs with parameters and "file:" URIs, so
+// sqlite never creates it with the process umask. It returns the path of the
+// file it created ("" when it created none). Existing files are left
+// untouched; any failure is ignored so that sqlite reports the underlying
+// problem when it opens the DSN.
+func createPrivateDatabaseFile(dsn string) string {
+	path, ok := databaseFilePath(dsn)
+	if !ok {
+		return ""
 	}
 	// The path is the user's own setting (MUNUS_DB_PATH or ./munus.db), so
 	// there is no privilege boundary for G304 to protect; O_EXCL only ever
 	// creates a new file and never opens an existing one.
 	f, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE|os.O_EXCL, 0o600) // #nosec G304 -- user-configured database path, see above
 	if err != nil {
-		return
+		return ""
 	}
 	// Closing an empty, just-created file cannot lose data; sqlite reopens it.
 	_ = f.Close()
+	return path
+}
+
+// removeUnusedDatabaseFile deletes a file created by createPrivateDatabaseFile
+// when sqlite then failed to open the DSN (for example an invalid driver
+// parameter), so no stray empty file is left behind. A file that has been
+// written to is kept.
+func removeUnusedDatabaseFile(path string) {
+	if path == "" {
+		return
+	}
+	if info, err := os.Stat(path); err == nil && info.Size() == 0 {
+		// Best effort: the open error is what gets reported to the user.
+		_ = os.Remove(path)
+	}
+}
+
+// databaseFilePath returns the file sqlite creates for dsn on this system when
+// it does not exist yet; see databaseFilePathFor.
+func databaseFilePath(dsn string) (string, bool) {
+	return databaseFilePathFor(dsn, runtime.GOOS)
+}
+
+// databaseFilePathFor maps dsn to the file sqlite creates for it on goos,
+// following mattn/go-sqlite3 and sqlite: a plain DSN is cut at its first '?'
+// unless the DSN starts with it; a "file:" URI is read with sqlite's URI rules
+// (an empty or "localhost" authority, a path ending at '?' or '#', %HH escapes
+// decoded, an encoded NUL ending the path or parameter, the last "mode"
+// parameter winning). ok is false for in-memory databases, for URIs that
+// sqlite does not create a file for (a mode other than rwc) and for URIs that
+// cannot be mapped to a file safely (another authority, a vfs that is not one
+// of sqlite's unix or win32 file vfs).
+func databaseFilePathFor(dsn, goos string) (path string, ok bool) {
+	if !strings.HasPrefix(dsn, "file:") {
+		if pos := strings.IndexByte(dsn, '?'); pos >= 1 {
+			dsn = dsn[:pos]
+		}
+		if dsn == "" || dsn == ":memory:" {
+			return "", false
+		}
+		return dsn, true
+	}
+
+	rest := strings.TrimPrefix(dsn, "file:")
+	if i := strings.IndexByte(rest, '#'); i >= 0 {
+		rest = rest[:i]
+	}
+	query := ""
+	if i := strings.IndexByte(rest, '?'); i >= 0 {
+		rest, query = rest[:i], rest[i+1:]
+	}
+	mode, hasMode, vfs := "", false, ""
+	for _, param := range strings.Split(query, "&") {
+		key, value, _ := strings.Cut(param, "=")
+		switch sqliteURIUnescape(key) {
+		case "mode":
+			mode, hasMode = sqliteURIUnescape(value), true
+		case "vfs":
+			vfs = sqliteURIUnescape(value)
+		}
+	}
+	if hasMode && mode != "rwc" {
+		return "", false
+	}
+	if vfs != "" && !strings.HasPrefix(vfs, "unix") && !strings.HasPrefix(vfs, "win32") {
+		return "", false
+	}
+	if strings.HasPrefix(rest, "//") {
+		authority, remainder, _ := strings.Cut(rest[2:], "/")
+		if authority != "" && authority != "localhost" {
+			return "", false
+		}
+		rest = "/" + remainder
+	}
+	path = sqliteURIUnescape(rest)
+	if path == "" || path == ":memory:" {
+		return "", false
+	}
+	// sqlite drops the slash before a Windows drive letter ("/C:/x.db").
+	if goos == "windows" && len(path) >= 3 && path[0] == '/' && path[2] == ':' {
+		path = path[1:]
+	}
+	return path, true
+}
+
+// sqliteURIUnescape decodes %HH escapes the way sqlite does in URI filenames:
+// a '%' not followed by two hex digits is kept as is, and an encoded NUL ends
+// the text.
+func sqliteURIUnescape(s string) string {
+	var b strings.Builder
+	for i := 0; i < len(s); i++ {
+		if s[i] == '%' && i+2 < len(s) && isHexDigit(s[i+1]) && isHexDigit(s[i+2]) {
+			c := hexValue(s[i+1])<<4 | hexValue(s[i+2])
+			if c == 0 {
+				break
+			}
+			b.WriteByte(c)
+			i += 2
+			continue
+		}
+		b.WriteByte(s[i])
+	}
+	return b.String()
+}
+
+func isHexDigit(c byte) bool {
+	return ('0' <= c && c <= '9') || ('a' <= c && c <= 'f') || ('A' <= c && c <= 'F')
+}
+
+func hexValue(c byte) byte {
+	switch {
+	case c >= 'a':
+		return c - 'a' + 10
+	case c >= 'A':
+		return c - 'A' + 10
+	default:
+		return c - '0'
+	}
 }
 
 func (d *Database) ready() error {
@@ -717,6 +851,45 @@ func (d *Database) UpdateTask(ctx context.Context, task *ItemModel) error {
 			return err
 		}
 		return pruneTags(tx)
+	})
+}
+
+// SetTaskStatus changes the status of task id, keeping completed and
+// completed_at consistent (see setStatus), and writes only those columns and
+// updated_at, so edits other processes made to the task are kept. Setting the
+// status the task already has changes nothing.
+func (d *Database) SetTaskStatus(ctx context.Context, id int, status TaskStatus, now time.Time) error {
+	if id == 0 {
+		return errors.New("task id is required")
+	}
+	status, err := parseTaskStatus(string(status))
+	if err != nil {
+		return err
+	}
+	if err := d.ready(); err != nil {
+		return err
+	}
+	return d.conn.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var task ItemModel
+		if err := tx.First(&task, id).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return fmt.Errorf("%w: %d", ErrTaskNotFound, id)
+			}
+			return err
+		}
+		before := task
+		task.setStatus(status, now)
+		if task.Status == before.Status && task.Completed == before.Completed {
+			return nil
+		}
+		// UpdateColumns skips the save hooks, which would otherwise re-derive
+		// and rewrite the untouched fields; the values set here are complete.
+		return tx.Model(&ItemModel{}).Where("id = ?", id).UpdateColumns(map[string]any{
+			"status":       task.Status,
+			"completed":    task.Completed,
+			"completed_at": task.CompletedAt,
+			"updated_at":   task.UpdatedAt,
+		}).Error
 	})
 }
 

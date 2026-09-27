@@ -97,8 +97,9 @@ Munus is organized into focused command groups:
 ### add
 
 Title (`-t`) and description (`-d`) are required; the deadline (`-n`) and tags (`--tag`) are
-optional. Titles are limited to 100 characters and descriptions to 500; control characters
-are rejected. Tags are 1–32 letters, digits, `-` or `_`, stored lowercase, at most 10 per task.
+optional. Titles are limited to 100 characters and descriptions to 500, and neither may be blank;
+control characters (including bidirectional override characters) are rejected. Tags are 1–32
+letters, digits, `-` or `_`, stored lowercase, at most 10 per task.
 
 - munus add --title "Title" --description "Description" — add a task with details
 - munus add --title "Title" --description "Description" --deadline "2h" — create a task with a deadline
@@ -170,9 +171,12 @@ Examples:
 
 ### import
 
-Import reads a JSON export (schema version 1 or 2). Numeric task IDs from the file are kept;
-version 1 files get their status from `completed`, and merging one keeps the tags (and `doing`
-status) of tasks that already exist.
+Import reads a JSON export (schema version 1 or 2) of at most 32 MiB and 50,000 tasks; a file
+with anything but whitespace after the export is rejected. Tasks already in the database keep their IDs, and numeric
+task IDs from the file are kept up to 1,000,000,000 (a larger ID gets a new one). Version 1 files get
+their status from `completed`, and merging one keeps the tags (and `doing` status) of tasks that
+already exist. Control characters are removed from imported text, and a task whose title is then
+blank is imported as `(untitled)`.
 
 - munus import --file tasks-backup.json — merge tasks from a JSON file (default `--mode merge`)
 - munus import --file - — read the export from standard input (`--mode replace` then needs `--yes`)
@@ -182,7 +186,7 @@ status) of tasks that already exist.
 - munus import --file tasks-backup.json --mode replace — replace all local tasks (asks for confirmation unless `--yes`)
 - munus import --file tasks-backup.json --backup — write a backup of current tasks to `~/.munus/backups/` first
 - munus import --file tasks-backup.json --dry-run — show the import plan without changing anything
-- munus import --file tasks-backup.json --strict — reject unknown fields, unknown statuses, control characters and a `completed` flag that contradicts `status`
+- munus import --file tasks-backup.json --strict — reject unknown fields, unknown statuses, control characters, blank titles and a `completed` flag that contradicts `status`
 
 Examples:
 - munus import --file my-tasks.json
@@ -261,6 +265,7 @@ Run from the repository root (cgo must be enabled, see [Build from source](#buil
 ```bash
 make check             # fmt-check, vet, test, race and golangci-lint (if installed)
 make cover             # tests with a coverage summary
+make fuzz              # run each fuzz target for FUZZTIME (default 30s)
 ```
 
 The same checks without `make`:

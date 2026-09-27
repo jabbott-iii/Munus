@@ -8,11 +8,13 @@ SHELL := /bin/bash
 
 GO ?= go
 GOLANGCI_LINT ?= golangci-lint
+FUZZTIME ?= 30s
+FUZZ_TARGETS := FuzzParseDeadline FuzzSanitizeForTerminal FuzzParseImportData
 
 # The SQLite driver (mattn/go-sqlite3) needs cgo and a C compiler.
 export CGO_ENABLED := 1
 
-.PHONY: help build test race cover vet fmt fmt-check lint check check-version tag push-tag release
+.PHONY: help build test race cover vet fmt fmt-check lint fuzz check check-version tag push-tag release
 
 help:
 	@echo "Development targets:"
@@ -25,6 +27,7 @@ help:
 	@echo "  make fmt-check                Fail if any Go file needs formatting"
 	@echo "  make lint                     Run golangci-lint (CI uses v2.13.2); skipped if not installed"
 	@echo "  make check                    fmt-check, vet, test, race and lint"
+	@echo "  make fuzz                     Run each fuzz target for FUZZTIME (default 30s)"
 	@echo ""
 	@echo "Release targets:"
 	@echo "  make tag VERSION=vX.Y.Z       Create annotated git tag"
@@ -64,6 +67,13 @@ lint:
 	fi
 
 check: fmt-check vet test race lint
+
+# go test runs one fuzz target at a time, so run them in turn.
+fuzz:
+	@for target in $(FUZZ_TARGETS); do \
+		echo "== $$target"; \
+		$(GO) test ./internal -run '^$$' -fuzz "^$$target$$" -fuzztime $(FUZZTIME) || exit 1; \
+	done
 
 check-version:
 	@if [[ -z "$(VERSION)" ]]; then \

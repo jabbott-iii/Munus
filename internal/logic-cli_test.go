@@ -21,6 +21,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"slices"
@@ -1400,5 +1401,117 @@ func TestCommandsHonourCancelledContext(t *testing.T) {
 	tasks, err := db.ListTasks(t.Context())
 	if err != nil || len(tasks) != 1 || tasks[0].Title != "A" || tasks[0].Completed {
 		t.Fatalf("expected data untouched by cancelled commands, got %+v (err %v)", tasks, err)
+	}
+}
+
+// ============================== plan 3: CLI ==============================
+
+// P-032 / N-028: add rejects whitespace-only titles and descriptions, like
+// the TUI form and edit.
+func TestAddCmdRejectsBlankTitleOrDescription(t *testing.T) {
+	db := NewMockModel()
+	for _, args := range [][]string{
+		{"-t", "   ", "-d", "x"},
+		{"-t", "A", "-d", " \t "},
+	} {
+		if _, err := runCmd(t, NewAddCmd(db), "", args...); err == nil {
+			t.Errorf("add %q: expected an error", args)
+		}
+	}
+	if tasks, _ := db.ListTasks(t.Context()); len(tasks) != 0 {
+		t.Fatalf("expected no tasks, got %+v", tasks)
+	}
+}
+
+// P-034 / SEC-013: list shows only known statuses, never the stored bytes.
+func TestPrintListShowsOnlyKnownStatuses(t *testing.T) {
+	var buf bytes.Buffer
+	PrintList(&buf, []*ItemModel{
+		{ID: 1, Title: "a", Status: "\x1b]0;PWNED\x07"},
+		{ID: 2, Title: "b", Status: "bogus", Completed: true},
+		{ID: 3, Title: "c", Status: "DOING"},
+	})
+	out := buf.String()
+	if strings.ContainsAny(out, "\x1b\a") {
+		t.Fatalf("control characters reached the output: %q", out)
+	}
+	for _, want := range []string{"-Status: todo", "-Status: done", "-Status: doing"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("expected %q in output:\n%s", want, out)
+		}
+	}
+}
+
+// P-034 / SEC-013: errors printed by the root command cannot carry terminal
+// control sequences, even when they come from a crafted database.
+func TestRootCommandSanitizesErrorOutput(t *testing.T) {
+	db := newFileTestDB(t)
+	seedTask(t, db, &ItemModel{Title: "a", Description: "x"})
+	raise := "CREATE TRIGGER evil BEFORE UPDATE ON item_models BEGIN SELECT RAISE(ABORT, '\x1b]0;PWNED\x07'); END"
+	if err := db.Conn().Exec(raise).Error; err != nil {
+		t.Fatalf("setup failed: %v", err)
+	}
+
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("pipe: %v", err)
+	}
+	stderr := os.Stderr
+	os.Stderr = w
+	t.Cleanup(func() { os.Stderr = stderr })
+
+	root := NewRootCmd(db)
+	root.SetArgs([]string{"complete", "1"})
+	root.SetOut(&bytes.Buffer{})
+	execErr := root.Execute()
+	_ = w.Close()
+	os.Stderr = stderr
+	out, _ := io.ReadAll(r)
+
+	if execErr == nil || !strings.Contains(execErr.Error(), "PWNED") {
+		t.Fatalf("expected the trigger error, got %v", execErr)
+	}
+	if !strings.Contains(string(out), "Error:") || !strings.Contains(string(out), "PWNED") {
+		t.Fatalf("expected the error on stderr, got %q", out)
+	}
+	if strings.ContainsAny(string(out), "\x1b\a") {
+		t.Fatalf("control characters reached stderr: %q", out)
+	}
+}
+
+// P-033 / N-026: complete writes only the status. Triggers make any write of
+// another column (as a full save does) or any change of a doing task by
+// --undo fail, so the test fails if complete writes more than it should.
+func TestCompleteCmdWritesOnlyStatus(t *testing.T) {
+	db := newFileTestDB(t)
+	task := seedTask(t, db, &ItemModel{Title: "a", Description: "x", Status: StatusDoing, Tags: []string{"work"}})
+	exec := func(sql string) {
+		t.Helper()
+		if err := db.Conn().Exec(sql).Error; err != nil {
+			t.Fatalf("setup failed: %v", err)
+		}
+	}
+	exec("CREATE TRIGGER guard_fields BEFORE UPDATE OF title, description, deadline ON item_models BEGIN SELECT RAISE(ABORT, 'only the status may be written'); END")
+	exec("CREATE TRIGGER guard_doing BEFORE UPDATE ON item_models WHEN OLD.status = 'doing' AND NEW.status <> 'done' BEGIN SELECT RAISE(ABORT, '--undo must not change a doing task'); END")
+
+	if _, err := runCmd(t, CompleteTaskCmd(db), "", strconv.Itoa(task.ID), "--undo"); err != nil {
+		t.Fatalf("complete --undo failed: %v", err)
+	}
+	if got, _ := db.GetTaskByID(t.Context(), task.ID); got.Status != StatusDoing {
+		t.Fatalf("--undo must leave a doing task alone, got %q", got.Status)
+	}
+	exec("DROP TRIGGER guard_doing")
+	if _, err := runCmd(t, CompleteTaskCmd(db), "", strconv.Itoa(task.ID)); err != nil {
+		t.Fatalf("complete failed: %v", err)
+	}
+	got, _ := db.GetTaskByID(t.Context(), task.ID)
+	if got.Status != StatusDone || !got.Completed || got.Title != "a" || !slices.Equal(got.Tags, []string{"work"}) {
+		t.Fatalf("unexpected task after complete: %+v", got)
+	}
+	if _, err := runCmd(t, CompleteTaskCmd(db), "", strconv.Itoa(task.ID), "--undo"); err != nil {
+		t.Fatalf("complete --undo failed: %v", err)
+	}
+	if got, _ := db.GetTaskByID(t.Context(), task.ID); got.Status != StatusTodo || got.Completed {
+		t.Fatalf("--undo should reopen a done task as todo, got %+v", got)
 	}
 }

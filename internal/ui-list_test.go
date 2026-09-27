@@ -1588,6 +1588,10 @@ func (f *failingUpdateStorage) UpdateTask(context.Context, *ItemModel) error {
 	return errors.New("disk full")
 }
 
+func (f *failingUpdateStorage) SetTaskStatus(context.Context, int, TaskStatus, time.Time) error {
+	return errors.New("disk full")
+}
+
 func TestListModelFailedToggleKeepsStoredState(t *testing.T) {
 	storage := &failingUpdateStorage{MockStorage{tasks: []*ItemModel{{ID: 1, Title: "A"}}}}
 	list := NewListModel(storage)
@@ -1954,5 +1958,47 @@ func TestListModelImportAppliesThePreviewedFile(t *testing.T) {
 	tasks, err := db.ListTasks(t.Context())
 	if err != nil || len(tasks) != 1 || tasks[0].Title != "previewed" {
 		t.Fatalf("expected exactly the previewed task imported, got %+v (err %v)", tasks, err)
+	}
+}
+
+// ============================== plan 3: TUI ==============================
+
+// P-033 / N-026: c and s store only the status, so an edit made by another
+// process while the list is open is kept.
+func TestListModelStatusKeysKeepConcurrentEdits(t *testing.T) {
+	for _, key := range []rune{'c', 's'} {
+		db := newFileTestDB(t)
+		ctx := t.Context()
+		task := seedTask(t, db, &ItemModel{Title: "old", Description: "d"})
+		list := NewListModel(db)
+		loadList(t, list)
+
+		other, _ := db.GetTaskByID(ctx, task.ID)
+		other.Title, other.Tags = "edited elsewhere", []string{"urgent"}
+		if err := db.UpdateTask(ctx, other); err != nil {
+			t.Fatalf("setup failed: %v", err)
+		}
+
+		_, cmd := list.Update(runeKey(key))
+		if cmd == nil || list.err != nil {
+			t.Fatalf("key %q: expected a reload and no error, got err=%v", key, list.err)
+		}
+		got, _ := db.GetTaskByID(ctx, task.ID)
+		if got.Title != "edited elsewhere" || !slices.Equal(got.Tags, []string{"urgent"}) {
+			t.Errorf("key %q reverted the concurrent edit: %+v", key, got)
+		}
+		wantStatus := map[rune]TaskStatus{'c': StatusDone, 's': StatusDoing}[key]
+		if got.Status != wantStatus || list.GetCurrentTask().Status != wantStatus {
+			t.Errorf("key %q: stored %q, shown %q, want %q", key, got.Status, list.GetCurrentTask().Status, wantStatus)
+		}
+	}
+}
+
+// P-034 / SEC-013: the form's error line is sanitised like the list's.
+func TestFormModelErrorIsSanitized(t *testing.T) {
+	form := NewFormModel(&MockStorage{})
+	form.err = errors.New("boom \x1b]0;PWNED\x07")
+	if view := form.View(); strings.ContainsAny(view, "\a") || strings.Contains(view, "\x1b]0;") {
+		t.Fatalf("control sequence reached the form view: %q", view)
 	}
 }

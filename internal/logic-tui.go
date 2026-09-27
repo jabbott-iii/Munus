@@ -65,11 +65,12 @@ func (t *ItemModel) setStatus(status TaskStatus, now time.Time) {
 	t.UpdatedAt = now
 }
 
-// itemStatus returns t's status, deriving it from Completed when unset (for
-// tasks that have not been saved yet).
+// itemStatus returns t's status. When it is unset (a task not saved yet) or
+// not a known status (a row written by another tool), the status is derived
+// from Completed, so callers only ever see todo, doing or done.
 func itemStatus(t *ItemModel) TaskStatus {
-	if t.Status != "" {
-		return t.Status
+	if status, err := parseTaskStatus(string(t.Status)); err == nil {
+		return status
 	}
 	if t.Completed {
 		return StatusDone

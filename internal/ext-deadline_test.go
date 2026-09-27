@@ -194,3 +194,21 @@ func TestParseRelativeTimeMonthsMatchCalendar(t *testing.T) {
 		}
 	}
 }
+
+// P-043: deadline parsing never panics, and accepted relative deadlines stay
+// within the documented bounds (~100 years of m/h/d/w plus 1200 months).
+func FuzzParseDeadline(f *testing.F) {
+	for _, s := range []string{"1d", "2M 1w 3d 4h 30m", "2026-01-02 03:04", "99999999999M", "1200M", "0d", "1m1m1m", "  5h  ", "1M 1M", "106751d"} {
+		f.Add(s)
+	}
+	limit := maxRelativeDuration + time.Duration(maxDeadlineMonths)*31*24*time.Hour
+	f.Fuzz(func(t *testing.T, s string) {
+		d, err := ParseDeadline(s)
+		if err == nil && d == nil {
+			t.Fatalf("nil deadline without an error for %q", s)
+		}
+		if dur, err := ParseRelativeTime(s); err == nil && (dur <= 0 || dur > limit) {
+			t.Fatalf("relative duration out of bounds for %q: %v", s, dur)
+		}
+	})
+}

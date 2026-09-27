@@ -335,7 +335,7 @@ func (m *FormModel) View() string {
 
 	if m.err != nil {
 		s.WriteString("\n")
-		s.WriteString(errorStyle.Render("Error: " + m.err.Error()))
+		s.WriteString(errorStyle.Render("Error: " + sanitizeForTerminal(m.err.Error(), true)))
 	}
 
 	s.WriteString("\n")

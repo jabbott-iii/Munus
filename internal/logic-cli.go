@@ -21,6 +21,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"slices"
 	"strconv"
 	"strings"
@@ -65,6 +66,11 @@ func NewRootCmd(db *Database) *cobra.Command {
 			return err
 		},
 	}
+
+	// cobra prints command errors ("Error: …") to this writer. Errors can
+	// carry stored or imported data, such as a message raised by a trigger in
+	// a crafted database, so control characters are replaced first.
+	cmd.SetErr(terminalSafeWriter{w: os.Stderr})
 
 	cmd.AddCommand(NewAddCmd(db))
 	cmd.AddCommand(NewEditCmd(db))
@@ -318,7 +324,8 @@ func NewAddCmd(db *Database) *cobra.Command {
 	- Combinations: 2d 3h 30m (2days, 3hours, 30 minutes from now)`,
 
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if title == "" || description == "" {
+			// Same rule as the TUI form and `edit`: whitespace alone is not a title.
+			if isBlank(title) || isBlank(description) {
 				return fmt.Errorf("both title and description are required")
 			}
 			if err := validateTaskText(title, description); err != nil {
@@ -663,18 +670,17 @@ func CompleteTaskCmd(db *Database) *cobra.Command {
 				return fmt.Errorf("failed to load task %d: %w", taskID, err)
 			}
 
-			// --undo only reopens completed tasks; a task that is in progress
-			// keeps its status.
+			// --undo only reopens completed tasks; any other task is left as it
+			// is (nothing is written). Only the status is written, so edits
+			// made elsewhere since the task was read are kept.
+			status := StatusDone
 			if undo {
-				if task.Completed {
-					task.MarkIncomplete()
-				}
-			} else {
-				task.MarkComplete()
+				status = StatusTodo
 			}
-
-			if err := db.UpdateTask(ctx, task); err != nil {
-				return fmt.Errorf("failed to update task %d: %w", taskID, err)
+			if !undo || task.Completed {
+				if err := db.SetTaskStatus(ctx, taskID, status, time.Now()); err != nil {
+					return fmt.Errorf("failed to update task %d: %w", taskID, err)
+				}
 			}
 
 			if undo {

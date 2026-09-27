@@ -170,3 +170,68 @@ func TestNormalizeTags(t *testing.T) {
 		})
 	}
 }
+
+// ============================== plan 3: text rules ==============================
+
+// P-034 / SEC-013 (D-7): bidi embedding, override and isolate controls are
+// treated as control characters; other format characters are allowed.
+func TestBidiControlsAreControlCharacters(t *testing.T) {
+	for _, r := range []rune{'\u202a', '\u202b', '\u202c', '\u202d', '\u202e', '\u2066', '\u2067', '\u2068', '\u2069'} {
+		s := "a" + string(r) + "b"
+		if err := validateTaskText(s, ""); err == nil {
+			t.Errorf("%U: expected validation to reject it", r)
+		}
+		if got := sanitizeForTerminal(s, true); got != "a�b" {
+			t.Errorf("%U: sanitizeForTerminal = %q", r, got)
+		}
+		if got := stripControlCharacters(s, true); got != "ab" {
+			t.Errorf("%U: stripControlCharacters = %q", r, got)
+		}
+	}
+	family := "👨\u200d👩\u200d👧 \u200bzero-width \u200e"
+	if err := validateTaskText(family, family); err != nil {
+		t.Errorf("joiners and marks must stay allowed: %v", err)
+	}
+	if got := sanitizeForTerminal(family, false); got != family {
+		t.Errorf("sanitizeForTerminal changed allowed text: %q", got)
+	}
+}
+
+func TestTerminalSafeWriter(t *testing.T) {
+	var buf bytes.Buffer
+	w := terminalSafeWriter{w: &buf}
+	in := "Error: \x1b]0;PWNED\x07 \u202e\n\tnext\n"
+	n, err := w.Write([]byte(in))
+	if err != nil || n != len(in) {
+		t.Fatalf("Write = %d, %v; want %d, nil", n, err, len(in))
+	}
+	if want := "Error: �]0;PWNED� �\n\tnext\n"; buf.String() != want {
+		t.Fatalf("got %q, want %q", buf.String(), want)
+	}
+}
+
+// P-043: sanitised text never contains a disallowed control character, is
+// valid UTF-8 and is stable when sanitised again.
+func FuzzSanitizeForTerminal(f *testing.F) {
+	for _, s := range []string{"a\x1b]0;x\x07b", "\xff\xfe", "line\nbreak\ttab\r", "\u009b31m", "\u202eevil", "👨\u200d👩"} {
+		f.Add(s, true)
+		f.Add(s, false)
+	}
+	f.Fuzz(func(t *testing.T, s string, lineBreaks bool) {
+		out := sanitizeForTerminal(s, lineBreaks)
+		if !utf8.ValidString(out) {
+			t.Fatalf("invalid UTF-8 output for %q", s)
+		}
+		for _, r := range out {
+			if isDisallowedControl(r, lineBreaks) {
+				t.Fatalf("control %U survived for %q", r, s)
+			}
+		}
+		if again := sanitizeForTerminal(out, lineBreaks); again != out {
+			t.Fatalf("not stable for %q: %q then %q", s, out, again)
+		}
+		if stripped := stripControlCharacters(s, lineBreaks); containsControl(stripped, lineBreaks) {
+			t.Fatalf("stripControlCharacters left a control character in %q", stripped)
+		}
+	})
+}

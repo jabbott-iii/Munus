@@ -1163,3 +1163,224 @@ func TestLoadTagsSortsNames(t *testing.T) {
 		t.Fatalf("ListTasks tags = %+v (err %v), want %v", all, err, want)
 	}
 }
+
+// ============================== plan 3: storage ==============================
+
+// P-033 / N-026: SetTaskStatus writes only the status columns, so edits made
+// through another handle after the task was read are kept.
+func TestSetTaskStatusKeepsOtherFields(t *testing.T) {
+	db := newFileTestDB(t)
+	ctx := t.Context()
+	task := &ItemModel{Title: "old", Description: "d", Tags: []string{"home"}}
+	if err := db.CreateTask(ctx, task); err != nil {
+		t.Fatalf("setup failed: %v", err)
+	}
+	edited, _ := db.GetTaskByID(ctx, task.ID)
+	edited.Title, edited.Tags = "edited elsewhere", []string{"urgent"}
+	if err := db.UpdateTask(ctx, edited); err != nil {
+		t.Fatalf("setup edit failed: %v", err)
+	}
+
+	doneAt := time.Date(2026, 9, 27, 1, 2, 3, 0, time.UTC)
+	if err := db.SetTaskStatus(ctx, task.ID, StatusDone, doneAt); err != nil {
+		t.Fatalf("SetTaskStatus failed: %v", err)
+	}
+	got, _ := db.GetTaskByID(ctx, task.ID)
+	if got.Title != "edited elsewhere" || !slices.Equal(got.Tags, []string{"urgent"}) {
+		t.Fatalf("status change overwrote other fields: %+v", got)
+	}
+	if got.Status != StatusDone || !got.Completed || got.CompletedAt == nil || !got.CompletedAt.Equal(doneAt) {
+		t.Fatalf("expected done with completed_at %v, got %+v", doneAt, got)
+	}
+
+	// Setting the same status again keeps the original completion time.
+	if err := db.SetTaskStatus(ctx, task.ID, StatusDone, doneAt.Add(time.Hour)); err != nil {
+		t.Fatalf("SetTaskStatus failed: %v", err)
+	}
+	if got, _ := db.GetTaskByID(ctx, task.ID); !got.CompletedAt.Equal(doneAt) {
+		t.Fatalf("completing a done task changed completed_at to %v", got.CompletedAt)
+	}
+
+	if err := db.SetTaskStatus(ctx, task.ID, StatusDoing, doneAt); err != nil {
+		t.Fatalf("SetTaskStatus failed: %v", err)
+	}
+	if got, _ := db.GetTaskByID(ctx, task.ID); got.Status != StatusDoing || got.Completed || got.CompletedAt != nil {
+		t.Fatalf("expected doing without completion, got %+v", got)
+	}
+
+	if err := db.SetTaskStatus(ctx, 999, StatusDone, doneAt); !errors.Is(err, ErrTaskNotFound) {
+		t.Fatalf("expected ErrTaskNotFound, got %v", err)
+	}
+	if err := db.SetTaskStatus(ctx, task.ID, "bogus", doneAt); err == nil {
+		t.Fatal("expected an invalid status to be rejected")
+	}
+	if err := db.SetTaskStatus(ctx, 0, StatusDone, doneAt); err == nil {
+		t.Fatal("expected a zero ID to be rejected")
+	}
+}
+
+// P-034 / SEC-013: opening a database repairs statuses that are not todo,
+// doing or done (for example written by another tool).
+func TestNewDatabaseRepairsUnknownStatuses(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "munus.db")
+	db, err := NewDatabase(path)
+	if err != nil {
+		t.Fatalf("NewDatabase failed: %v", err)
+	}
+	for _, task := range []*ItemModel{
+		{Title: "escape", Description: "x"},
+		{Title: "upper", Description: "x", Completed: true},
+		{Title: "doing", Description: "x", Status: StatusDoing},
+		{Title: "loud doing", Description: "x"},
+	} {
+		if err := db.CreateTask(t.Context(), task); err != nil {
+			t.Fatalf("setup failed: %v", err)
+		}
+	}
+	for title, status := range map[string]string{"escape": "\x1b]0;PWNED\x07", "upper": "DONE", "loud doing": " DOING"} {
+		if err := db.Conn().Exec("UPDATE item_models SET status = ? WHERE title = ?", status, title).Error; err != nil {
+			t.Fatalf("setup failed: %v", err)
+		}
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("close failed: %v", err)
+	}
+
+	reopened, err := NewDatabase(path)
+	if err != nil {
+		t.Fatalf("reopen failed: %v", err)
+	}
+	t.Cleanup(func() { _ = reopened.Close() })
+	want := map[string]TaskStatus{"escape": StatusTodo, "upper": StatusDone, "doing": StatusDoing, "loud doing": StatusDoing}
+	tasks, err := reopened.ListTasks(t.Context())
+	if err != nil || len(tasks) != len(want) {
+		t.Fatalf("expected %d tasks, got %d (err %v)", len(want), len(tasks), err)
+	}
+	for _, task := range tasks {
+		if task.Status != want[task.Title] {
+			t.Errorf("%s: status %q, want %q", task.Title, task.Status, want[task.Title])
+		}
+	}
+}
+
+// P-036 / SEC-017: databaseFilePath maps a DSN to the file sqlite creates.
+func TestDatabaseFilePath(t *testing.T) {
+	cases := []struct {
+		dsn  string
+		goos string
+		want string
+		ok   bool
+	}{
+		{dsn: "munus.db", want: "munus.db", ok: true},
+		{dsn: "dir/munus.db?_busy_timeout=5000", want: "dir/munus.db", ok: true},
+		{dsn: ":memory:"},
+		{dsn: ":memory:?cache=shared"},
+		{dsn: ""},
+		{dsn: "?x=1", want: "?x=1", ok: true}, // go-sqlite3 cuts only after the first character
+		{dsn: "file:munus.db", want: "munus.db", ok: true},
+		{dsn: "file:sp%20ace.db?cache=shared", want: "sp ace.db", ok: true},
+		{dsn: "file:/abs/munus.db", want: "/abs/munus.db", ok: true},
+		{dsn: "file:///abs/munus.db", want: "/abs/munus.db", ok: true},
+		{dsn: "file://localhost/abs/munus.db", want: "/abs/munus.db", ok: true},
+		{dsn: "file:munus.db#fragment", want: "munus.db", ok: true},
+		{dsn: "file:munus.db#frag?mode=ro", want: "munus.db", ok: true},
+		{dsn: "file:munus.db?mode=rwc", want: "munus.db", ok: true},
+		{dsn: "file:munus.db?mode=ro&mode=rwc", want: "munus.db", ok: true}, // the last mode wins
+		{dsn: "file:munus.db?mode=rwc&mode=ro"},
+		{dsn: "file:munus.db?mode="},
+		{dsn: "file:munus.db?mode=ro"},
+		{dsn: "file:munus.db?mode=rw"},
+		{dsn: "file:munus.db?m%6Fde=ro"},
+		{dsn: "file:mem?mode=memory"},
+		{dsn: "file::memory:"},
+		{dsn: "file:munus.db?vfs=unix-none", want: "munus.db", ok: true},
+		{dsn: "file:munus.db?vfs=memdb"},
+		{dsn: "file://otherhost/abs/munus.db"},
+		{dsn: "file:bad%zz.db", want: "bad%zz.db", ok: true}, // sqlite keeps invalid escapes
+		{dsn: "file:a%00b.db", want: "a", ok: true},          // an encoded NUL ends the path
+		{dsn: "file:///C:/munus.db", goos: "windows", want: "C:/munus.db", ok: true},
+		{dsn: "file:/C:/munus.db", goos: "windows", want: "C:/munus.db", ok: true},
+		{dsn: "file:///C:/munus.db", goos: "linux", want: "/C:/munus.db", ok: true},
+		{dsn: `C:\data\munus.db?_busy_timeout=5000`, goos: "windows", want: `C:\data\munus.db`, ok: true},
+	}
+	for _, tc := range cases {
+		goos := tc.goos
+		if goos == "" {
+			goos = "linux"
+		}
+		got, ok := databaseFilePathFor(tc.dsn, goos)
+		if got != tc.want || ok != tc.ok {
+			t.Errorf("databaseFilePathFor(%q, %s) = %q, %v; want %q, %v", tc.dsn, goos, got, ok, tc.want, tc.ok)
+		}
+	}
+}
+
+// P-036 / SEC-017: new database files opened through a DSN are owner-only,
+// sqlite opens exactly the pre-created file, and existing files keep their mode.
+func TestNewDatabaseDSNFilesAreOwnerOnly(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX permissions are not enforced on Windows")
+	}
+	dir := t.TempDir()
+	for name, dsn := range map[string]string{
+		"param.db":     filepath.Join(dir, "param.db") + "?_busy_timeout=5000",
+		"uri.db":       "file:" + filepath.Join(dir, "uri.db"),
+		"sp ace.db":    "file:" + filepath.Join(dir, "sp%20ace.db") + "?cache=shared",
+		"localhost.db": "file://localhost" + filepath.Join(dir, "localhost.db"),
+	} {
+		db, err := NewDatabase(dsn)
+		if err != nil {
+			t.Fatalf("%s: NewDatabase failed: %v", name, err)
+		}
+		t.Cleanup(func() { _ = db.Close() })
+		path := filepath.Join(dir, name)
+		info, err := os.Stat(path)
+		if err != nil {
+			t.Fatalf("%s: stat: %v", name, err)
+		}
+		if perm := info.Mode().Perm(); perm != 0o600 {
+			t.Errorf("%s: new database is %v, want 0600", name, perm)
+		}
+		opened, err := os.Stat(db.databaseFile())
+		if err != nil || !os.SameFile(info, opened) {
+			t.Errorf("%s: sqlite opened %q, not the pre-created file (%v)", name, db.databaseFile(), err)
+		}
+	}
+
+	existing := filepath.Join(dir, "existing.db")
+	seed, err := NewDatabase(existing)
+	if err != nil {
+		t.Fatalf("setup failed: %v", err)
+	}
+	_ = seed.Close()
+	if err := os.Chmod(existing, 0o644); err != nil {
+		t.Fatalf("chmod: %v", err)
+	}
+	db, err := NewDatabase("file:" + existing + "?cache=shared")
+	if err != nil {
+		t.Fatalf("NewDatabase failed: %v", err)
+	}
+	_ = db.Close()
+	if info, _ := os.Stat(existing); info.Mode().Perm() != 0o644 {
+		t.Errorf("existing database mode changed to %v", info.Mode().Perm())
+	}
+
+	// A DSN the driver rejects after the file was pre-created leaves no file.
+	bad := filepath.Join(dir, "bad.db")
+	if db, err := NewDatabase(bad + "?_busy_timeout=abc"); err == nil {
+		_ = db.Close()
+		t.Error("expected an invalid driver parameter to fail")
+	}
+	if _, err := os.Stat(bad); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("a failed open must not leave a stray file, stat: %v", err)
+	}
+
+	missing := filepath.Join(dir, "missing.db")
+	if db, err := NewDatabase("file:" + missing + "?mode=ro"); err == nil {
+		_ = db.Close()
+		t.Error("expected a read-only open of a missing file to fail")
+	}
+	if _, err := os.Stat(missing); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("a read-only open must not create the file, stat: %v", err)
+	}
+}

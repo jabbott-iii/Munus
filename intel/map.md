@@ -9,13 +9,13 @@ Munus/
 │   ├── logic-cli.go        # cobra commands (root/TUI, add, edit, list, complete, delete, export, import)
 │   ├── logic-tui.go        # status transitions, deadline labels, filters, overdue/upcoming helpers
 │   ├── ext-deadline.go     # ParseDeadline: absolute + bounded relative (m,h,d,w,M)
-│   ├── ext-text.go         # text limits, control-char/UTF-8 validation, tag rules, terminal sanitising
-│   ├── ext-export-import.go# JSON v2 export, import (v1/v2, file or stdin) plan/apply, merge, backups
+│   ├── ext-text.go         # text limits, control/bidi-char and UTF-8 validation, tag rules, terminal sanitising (incl. stderr writer)
+│   ├── ext-export-import.go# JSON v2 export, import (v1/v2, file or stdin; streaming decode, 50k-task cap) plan/apply, merge, backups
 │   ├── ui-form.go          # Bubble Tea task-entry form (insert/normal vim modes)
 │   ├── ui-list.go          # Bubble Tea list/dashboard, delete confirm, transfer overlay
 │   └── *_test.go           # unit tests per file
 ├── Dockerfile, .dockerignore # 2-stage CGO build (golang:1.26-alpine3.24 → alpine:3.24, pinned apk), non-root
-├── Makefile                # dev targets (build/test/race/cover/vet/fmt/lint/check) + release tagging
+├── Makefile                # dev targets (build/test/race/cover/vet/fmt/lint/check/fuzz) + release tagging
 ├── .github/workflows/      # ci.yml, cd.yml, docker.yml, security.yml (actions SHA-pinned)
 ├── .devcontainer/          # Ubuntu + Go + neovim + docker-outside-of-docker
 ├── intel/                  # agent/maintainer knowledge base (this folder)

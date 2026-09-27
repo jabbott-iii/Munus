@@ -40,14 +40,20 @@ Munus is a single-binary Go CLI/TUI task manager backed by a local SQLite file.
   Tests that write backups must call `setTestHome(t)`; setup errors must `t.Fatalf`, never `return`.
 
 ## Data rules
-- **Task IDs are stable.** Imports never renumber existing tasks. `TaskServiceAdapter.ReplaceAll`
-  keeps numeric IDs in `1..2^31-1`; other IDs (empty, `tsk_…` placeholders, oversized) get a new
-  database ID. `Database.ReplaceAllTasks` inserts explicit-ID rows before auto-ID rows in one
-  transaction (the table uses `AUTOINCREMENT`).
+- **Task IDs are stable.** Imports never renumber existing tasks: `storedTaskID` keeps an ID that is
+  in `1..maxImportedTaskID` (1,000,000,000) or that is the canonical spelling of a task already in the
+  database; other IDs (empty, `tsk_…` placeholders, oversized IDs from a file) get a new database ID.
+  The cap stays well below 2^31-1 so a crafted file cannot push later IDs past it. Numeric IDs from
+  a file are canonicalised (`"01"` → `"1"`) before merging. `Database.ReplaceAllTasks` inserts
+  explicit-ID rows before auto-ID rows in one transaction (the table uses `AUTOINCREMENT`).
 - **Status:** `status` is `todo`, `doing` or `done`; `completed` (kept for compatibility) is true
   exactly when the status is `done`, and `completed_at` is set exactly when it is true.
   `ItemModel.BeforeSave` enforces this on every write (when they disagree, `completed` decides done
-  versus not done); use `setStatus` to change both.
+  versus not done); use `setStatus` to change both. A status-only change (TUI `c`/`s`, `complete`)
+  goes through `Storage.SetTaskStatus`, which writes only `status`, `completed`, `completed_at` and
+  `updated_at`, so it never writes back a stale copy of the other fields. `itemStatus` and
+  `taskStatusOf` only return `todo`, `doing` or `done`; opening a database repairs any other stored
+  status (`completed` decides; a `doing` in another case is kept).
 - **Tags** live in `tags` (unique lowercase names) and `task_tags` (links); names are 1–32 letters,
   digits, `-` or `_`, at most 10 per task (`normalizeTags`). Writes replace a task's links and prune
   unused tags; `loadTags` returns them sorted.
@@ -63,13 +69,22 @@ Munus is a single-binary Go CLI/TUI task manager backed by a local SQLite file.
   status derived from `completed`, and merging a v1 file keeps existing tasks' tags and `doing`
   status. v2.1.1 and older reject v2 files. Exports carry an optional `completed_at`; importers fall
   back to `updated_at` for completed tasks without it.
-- **Text policy:** `add`, the TUI form and `import --strict` reject control characters, invalid
-  UTF-8 and over-length text. Default import strips control characters (CRLF → LF) so older
-  exports/backups always restore. All task text written to the terminal goes through
-  `sanitizeForTerminal`.
-- **Files:** new DB, export and backup files are `0600`, backup dir `0700`; exports use a random
-  temp file + rename and refuse to overwrite the active database (compared via the file sqlite
-  reports in `pragma_database_list`).
+- **Text policy:** `add`, `edit`, the TUI form and `import --strict` reject control characters
+  (C0/C1 and the bidi embedding/override/isolate controls U+202A–U+202E, U+2066–U+2069), invalid
+  UTF-8, over-length text and blank titles (`add` and the form also blank descriptions). Default
+  import strips control characters (CRLF → LF) and stores a title that is blank afterwards as
+  `(untitled)`, so older exports/backups always restore. All task text written to the terminal goes
+  through `sanitizeForTerminal`; the root command writes its errors through `terminalSafeWriter`,
+  and TUI error lines are sanitised too.
+- **Import limits:** at most 32 MiB is read (`maxImportFileSize`); `decodeExportBundle` streams the
+  task list, rejects more than 50,000 tasks (`maxImportTasks`) and any data after the bundle, and
+  otherwise decodes like `json.Unmarshal`. The order is options → size → decode → validation →
+  storage, so a rejected file never reaches storage.
+- **Files:** new DB, export and backup files are `0600`, backup dir `0700`. New database files are
+  pre-created `0600` with `O_EXCL` for plain paths, `?` DSNs and `file:` URIs (`databaseFilePath`
+  mirrors go-sqlite3 and sqlite's URI rules; a pre-created file is removed again if the driver then
+  rejects the DSN). Exports use a random temp file + rename and refuse to overwrite the active
+  database (compared via the file sqlite reports in `pragma_database_list`).
 - GORM's logger is silent (writer injected via `openDatabase`, `io.Discard` in production); errors
   are returned, never printed to stdout.
 
@@ -97,3 +112,5 @@ Munus is a single-binary Go CLI/TUI task manager backed by a local SQLite file.
   transaction (`ReplaceAllTasksFunc`), so concurrent writes are never lost; the preview can still
   differ from the result if another process writes between plan and apply.
 - The Makefile targets (`make check`) mirror CI locally; keep them in step with `ci.yml`.
+  `make fuzz` runs the fuzz targets (deadline parsing, terminal sanitising, import invariants and
+  export round trip); run it after changing those areas.

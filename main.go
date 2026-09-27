@@ -40,7 +40,8 @@ func main() {
 	// a single SQLite transaction; trapping it would leave prompts hanging.
 	err := rootCmd.ExecuteContext(context.Background())
 	if cerr := db.Close(); cerr != nil {
-		_, _ = fmt.Fprintf(os.Stderr, "munus: close database: %v\n", cerr)
+		// The root command's error writer replaces control characters.
+		_, _ = fmt.Fprintf(rootCmd.ErrOrStderr(), "munus: close database: %v\n", cerr)
 		err = cerr
 	}
 	if err != nil {

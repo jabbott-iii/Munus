@@ -21,11 +21,13 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 	"runtime"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -107,6 +109,19 @@ func (m *MockStorage) ReplaceAllTasksFunc(ctx context.Context, fn func([]*ItemMo
 		return err
 	}
 	return m.ReplaceAllTasks(ctx, next)
+}
+
+func (m *MockStorage) SetTaskStatus(_ context.Context, id int, status TaskStatus, now time.Time) error {
+	if m.err != nil {
+		return m.err
+	}
+	for _, t := range m.tasks {
+		if t.ID == id {
+			t.setStatus(status, now)
+			return nil
+		}
+	}
+	return fmt.Errorf("%w: %d", ErrTaskNotFound, id)
 }
 
 // Helper function to create a test adapter
@@ -633,9 +648,14 @@ func TestReadImportFileMissingTitle(t *testing.T) {
 		t.Fatalf("setup failed: %v", err)
 	}
 
-	_, _, err = readImportFile(filePath, false)
-	if err == nil {
-		t.Fatal("expected error for missing title, got nil")
+	// Default import keeps the task under a placeholder title (plan 3, D-3);
+	// strict import rejects it.
+	tasks, _, err := readImportFile(filePath, false)
+	if err != nil || len(tasks) != 1 || tasks[0].Title != untitledTaskTitle {
+		t.Fatalf("expected default import to keep the task as %q, got %+v, %v", untitledTaskTitle, tasks, err)
+	}
+	if _, _, err := readImportFile(filePath, true); err == nil || !strings.Contains(err.Error(), "tasks[0].title is required") {
+		t.Fatalf("expected strict import to reject a missing title, got %v", err)
 	}
 }
 
@@ -1916,4 +1936,367 @@ func TestApplyImportV2MergeReplacesTagsAndStatus(t *testing.T) {
 	if got == nil || got.Status != StatusTodo || len(got.Tags) != 0 {
 		t.Fatalf("expected a version 2 file to set status and tags exactly, got %+v", got)
 	}
+}
+
+// ============================== plan 3: import integrity ==============================
+
+// sortedIDs returns the IDs of the tasks in db in ascending order.
+func sortedIDs(t *testing.T, db *Database) []int {
+	t.Helper()
+	ids := make([]int, 0)
+	for id := range tasksByID(t, db) {
+		ids = append(ids, id)
+	}
+	slices.Sort(ids)
+	return ids
+}
+
+// P-031 / SEC-015: IDs above the cap that already exist are never renumbered.
+func TestImportKeepsExistingIDsAboveCap(t *testing.T) {
+	setTestHome(t)
+	db := newFileTestDB(t)
+	svc := &TaskServiceAdapter{storage: db}
+	ctx := t.Context()
+
+	first := writeTestImportBundle(t, ExportBundle{Version: 2, Tasks: []TaskDTO{{ID: strconv.Itoa(maxImportedTaskID), Title: "imported"}}})
+	if _, err := ApplyImport(ctx, svc, first, ImportConfig{}); err != nil {
+		t.Fatalf("first import failed: %v", err)
+	}
+	seedTask(t, db, &ItemModel{Title: "added", Description: "x"})
+	want := []int{maxImportedTaskID, maxImportedTaskID + 1}
+	if got := sortedIDs(t, db); !slices.Equal(got, want) {
+		t.Fatalf("setup: IDs %v, want %v", got, want)
+	}
+
+	// An import that changes nothing must not renumber anything.
+	empty := writeTestImportBundle(t, ExportBundle{Version: 2})
+	if _, err := ApplyImport(ctx, svc, empty, ImportConfig{}); err != nil {
+		t.Fatalf("empty import failed: %v", err)
+	}
+	if got := sortedIDs(t, db); !slices.Equal(got, want) {
+		t.Fatalf("empty merge import renumbered tasks: %v, want %v", got, want)
+	}
+
+	// Re-importing an export (merge and replace) keeps IDs and adds nothing,
+	// and the plan matches the result.
+	data, err := ExportToBytes(ctx, svc, ExportFilter{IncludeCompleted: true}, false)
+	if err != nil {
+		t.Fatalf("export failed: %v", err)
+	}
+	export := filepath.Join(t.TempDir(), "export.json")
+	if err := os.WriteFile(export, data, 0o600); err != nil {
+		t.Fatalf("write export: %v", err)
+	}
+	for _, mode := range []string{"merge", "replace"} {
+		cfg := ImportConfig{Mode: mode}
+		plan, err := PlanImport(ctx, svc, export, cfg)
+		if err != nil {
+			t.Fatalf("%s: plan failed: %v", mode, err)
+		}
+		res, err := ApplyImport(ctx, svc, export, cfg)
+		if err != nil {
+			t.Fatalf("%s: import failed: %v", mode, err)
+		}
+		if got := sortedIDs(t, db); !slices.Equal(got, want) {
+			t.Fatalf("%s: re-import changed IDs to %v, want %v", mode, got, want)
+		}
+		if plan.ToCreate != res.Created || plan.Unchanged != res.Unchanged {
+			t.Fatalf("%s: plan %+v does not match result %+v", mode, plan, res)
+		}
+		if mode == "merge" && (res.Created != 0 || res.Unchanged != 2) {
+			t.Fatalf("merge re-import should be a no-op, got %+v", res)
+		}
+	}
+
+	// A non-canonical spelling of an existing large ID updates that task.
+	update := writeTestImportBundle(t, ExportBundle{Version: 2, Tasks: []TaskDTO{{ID: "0" + strconv.Itoa(maxImportedTaskID+1), Title: "renamed"}}})
+	if _, err := ApplyImport(ctx, svc, update, ImportConfig{}); err != nil {
+		t.Fatalf("update import failed: %v", err)
+	}
+	if got := tasksByID(t, db)[maxImportedTaskID+1]; got == nil || got.Title != "renamed" || len(tasksByID(t, db)) != 2 {
+		t.Fatalf("expected task %d to be updated in place, got %+v", maxImportedTaskID+1, tasksByID(t, db))
+	}
+}
+
+// P-031: the cap for IDs that are new to the database is maxImportedTaskID.
+func TestImportIDCapBoundary(t *testing.T) {
+	db := newFileTestDB(t)
+	svc := &TaskServiceAdapter{storage: db}
+	file := writeTestImportBundle(t, ExportBundle{Version: 2, Tasks: []TaskDTO{
+		{ID: strconv.Itoa(maxImportedTaskID), Title: "at cap"},
+		{ID: strconv.Itoa(maxImportedTaskID + 5), Title: "above cap"},
+	}})
+	if _, err := ApplyImport(t.Context(), svc, file, ImportConfig{Mode: "replace"}); err != nil {
+		t.Fatalf("import failed: %v", err)
+	}
+	byID := tasksByID(t, db)
+	if byID[maxImportedTaskID] == nil || byID[maxImportedTaskID].Title != "at cap" {
+		t.Fatalf("expected ID %d to be kept, got %v", maxImportedTaskID, sortedIDs(t, db))
+	}
+	// The task above the cap gets the next database ID instead of its own.
+	if byID[maxImportedTaskID+5] != nil || byID[maxImportedTaskID+1] == nil || byID[maxImportedTaskID+1].Title != "above cap" {
+		t.Fatalf("expected the task above the cap to get a new ID, got %v", sortedIDs(t, db))
+	}
+	if maxImportedTaskID >= 1<<31-1 {
+		t.Fatalf("maxImportedTaskID must stay well below 2^31-1, is %d", maxImportedTaskID)
+	}
+}
+
+// P-032 / SEC-014: blank titles are rejected by --strict and imported under a
+// placeholder by default, so exports stay restorable.
+func TestParseImportDataBlankTitles(t *testing.T) {
+	for _, title := range []string{"", "   ", "\b", "\r\n", "\x1b\a", "\u202e", " \t "} {
+		data, err := json.Marshal(ExportBundle{Version: 2, Tasks: []TaskDTO{{Title: title}}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		tasks, _, err := parseImportData(data, false)
+		if err != nil || len(tasks) != 1 || tasks[0].Title != untitledTaskTitle {
+			t.Errorf("default import of title %q: got %+v, %v; want %q", title, tasks, err, untitledTaskTitle)
+		}
+		if _, _, err := parseImportData(data, true); err == nil {
+			t.Errorf("strict import of title %q should fail", title)
+		}
+	}
+}
+
+func TestBlankTitleImportKeepsExportsRestorable(t *testing.T) {
+	setTestHome(t)
+	db := newFileTestDB(t)
+	svc := &TaskServiceAdapter{storage: db}
+	ctx := t.Context()
+	seedTask(t, db, &ItemModel{Title: "real", Description: "x"})
+	if _, err := applyImportData(ctx, svc, []byte(`{"version":2,"tasks":[{"title":"\u0008"}]}`), ImportConfig{}); err != nil {
+		t.Fatalf("import failed: %v", err)
+	}
+	data, err := ExportToBytes(ctx, svc, ExportFilter{IncludeCompleted: true}, true)
+	if err != nil {
+		t.Fatalf("export failed: %v", err)
+	}
+	fresh := newFileTestDB(t)
+	if _, err := applyImportData(ctx, &TaskServiceAdapter{storage: fresh}, data, ImportConfig{Mode: "replace", Strict: true}); err != nil {
+		t.Fatalf("strict restore of the export failed: %v", err)
+	}
+	if n := len(tasksByID(t, fresh)); n != 2 {
+		t.Fatalf("expected 2 restored tasks, got %d", n)
+	}
+}
+
+// P-035 / SEC-016: the task cap is enforced while decoding, before storage.
+func TestParseImportDataTaskCap(t *testing.T) {
+	build := func(n int) []byte {
+		var b strings.Builder
+		b.WriteString(`{"version":2,"tasks":[`)
+		for i := range n {
+			if i > 0 {
+				b.WriteByte(',')
+			}
+			b.WriteString(`{"title":"t"}`)
+		}
+		b.WriteString(`]}`)
+		return []byte(b.String())
+	}
+	for _, strict := range []bool{false, true} {
+		if tasks, _, err := parseImportData(build(maxImportTasks), strict); err != nil || len(tasks) != maxImportTasks {
+			t.Fatalf("strict=%v: a file with exactly %d tasks should import, got %d, %v", strict, maxImportTasks, len(tasks), err)
+		}
+		over := build(maxImportTasks + 1)
+		if _, _, err := parseImportData(over, strict); !errors.Is(err, errTooManyImportTasks) {
+			t.Fatalf("strict=%v: expected the task cap error, got %v", strict, err)
+		}
+		// No storage call happens before the cap is checked.
+		storage := &MockStorage{err: errors.New("storage must not be called")}
+		svc := NewTestAdapter(storage)
+		if _, err := planImportData(t.Context(), svc, over, ImportConfig{Strict: strict}); !errors.Is(err, errTooManyImportTasks) {
+			t.Fatalf("strict=%v: plan should fail on the cap before storage, got %v", strict, err)
+		}
+		if _, err := applyImportData(t.Context(), svc, over, ImportConfig{Strict: strict}); !errors.Is(err, errTooManyImportTasks) {
+			t.Fatalf("strict=%v: apply should fail on the cap before storage, got %v", strict, err)
+		}
+	}
+}
+
+// P-035 / N-029: data after the bundle is rejected in both modes.
+func TestParseImportDataRejectsTrailingData(t *testing.T) {
+	bundle := `{"version":2,"tasks":[{"title":"first"}]}`
+	for _, input := range []string{
+		bundle + ` {"version":2,"tasks":[{"title":"second"}]}`,
+		bundle + `garbage`,
+		bundle + `]`,
+		bundle + ` null`,
+	} {
+		for _, strict := range []bool{false, true} {
+			if _, _, err := parseImportData([]byte(input), strict); !errors.Is(err, errTrailingImportData) {
+				t.Errorf("strict=%v %q: expected errTrailingImportData, got %v", strict, input, err)
+			}
+		}
+	}
+	for _, strict := range []bool{false, true} {
+		if _, _, err := parseImportData([]byte(bundle+"\n \t\r\n"), strict); err != nil {
+			t.Errorf("strict=%v: trailing whitespace must be accepted, got %v", strict, err)
+		}
+	}
+}
+
+// P-035: the streaming decoder behaves like json.Unmarshal for well-formed
+// bundles (case-insensitive keys, ignored unknown fields, null values) and
+// keeps strict mode's unknown-field checks.
+func TestDecodeExportBundleMatchesUnmarshal(t *testing.T) {
+	inputs := []string{
+		`{"version":2,"exported_at":"2026-09-27T01:02:03Z","tasks":[{"id":"1","title":"a","tags":["x"],"status":"doing"}]}`,
+		`{"VERSION":1,"Tasks":[{"Title":"a","COMPLETED":true}]}`,
+		`{"version":2,"extra":{"nested":[1,2,{"x":null}]},"tasks":[]}`,
+		`{"version":2,"tasks":null}`,
+		`{"version":null,"tasks":[{"title":"a"}]}`,
+		`{"tasks":[{"title":"a"}],"tasks":[{"title":"b"},{"title":"c"}],"version":2}`,
+		`{}`,
+	}
+	for _, input := range inputs {
+		var want ExportBundle
+		if err := json.Unmarshal([]byte(input), &want); err != nil {
+			t.Fatalf("setup %q: %v", input, err)
+		}
+		got, err := decodeExportBundle([]byte(input), false)
+		if err != nil {
+			t.Errorf("%q: unexpected error %v", input, err)
+			continue
+		}
+		wantJSON, _ := json.Marshal(want)
+		gotJSON, _ := json.Marshal(got)
+		if !bytes.Equal(wantJSON, gotJSON) {
+			t.Errorf("%q:\n got  %s\n want %s", input, gotJSON, wantJSON)
+		}
+	}
+
+	for _, input := range []string{
+		`{"version":2,"extra":1,"tasks":[]}`,
+		`{"version":2,"tasks":[{"title":"a","bogus":true}]}`,
+	} {
+		if _, err := decodeExportBundle([]byte(input), true); err == nil || !strings.Contains(err.Error(), "unknown field") {
+			t.Errorf("strict %q: expected an unknown field error, got %v", input, err)
+		}
+		if _, err := decodeExportBundle([]byte(input), false); err != nil {
+			t.Errorf("default %q: unknown fields must be ignored, got %v", input, err)
+		}
+	}
+
+	for _, input := range []string{`[]`, `"x"`, `{"version":2,"tasks":{}}`, `{"version":2,"tasks":[null]}`, `{"version":2,"tasks":[1]}`, `{"version":"2"}`, `{`, ``} {
+		if _, err := decodeExportBundle([]byte(input), false); err == nil {
+			t.Errorf("%q: expected an error", input)
+		}
+	}
+	if _, _, err := parseImportData([]byte(`null`), false); err == nil || !strings.Contains(err.Error(), "unsupported import version: 0") {
+		t.Errorf("null bundle: expected unsupported version, got %v", err)
+	}
+
+	// Empty and truncated files report what json.Unmarshal reports, not "EOF".
+	for _, input := range []string{``, `  `, `{"version":2`, `{"version":2,"tasks":[{"title":"a"}`, `{"tasks":[`} {
+		for _, strict := range []bool{false, true} {
+			_, err := decodeExportBundle([]byte(input), strict)
+			if !errors.Is(err, errIncompleteImportData) || errors.Is(err, io.EOF) {
+				t.Errorf("strict=%v %q: expected %v, got %v", strict, input, errIncompleteImportData, err)
+			}
+		}
+	}
+}
+
+// P-031: only the canonical spelling of an existing ID keeps it; the cap
+// applies to IDs that are new to the database.
+func TestStoredTaskID(t *testing.T) {
+	existing := map[int]bool{-5: true, maxImportedTaskID + 1: true, 7: true}
+	cases := []struct {
+		id   string
+		want int
+	}{
+		{"7", 7}, {"8", 8}, {strconv.Itoa(maxImportedTaskID), maxImportedTaskID},
+		{strconv.Itoa(maxImportedTaskID + 1), maxImportedTaskID + 1},
+		{strconv.Itoa(maxImportedTaskID + 2), 0},
+		{"0" + strconv.Itoa(maxImportedTaskID+1), 0},
+		{"-5", -5}, {"-05", 0}, {"0", 0}, {"", 0}, {"tsk_new_1", 0},
+	}
+	for _, tc := range cases {
+		if got := storedTaskID(tc.id, existing); got != tc.want {
+			t.Errorf("storedTaskID(%q) = %d, want %d", tc.id, got, tc.want)
+		}
+	}
+	if got := storedTaskID(strconv.Itoa(maxImportedTaskID+1), nil); got != 0 {
+		t.Errorf("without known IDs an oversized ID must not be kept, got %d", got)
+	}
+}
+
+// P-034: exports never carry an unknown stored status.
+func TestMarshalBundleExportsKnownStatuses(t *testing.T) {
+	data, err := marshalBundle([]Task{
+		{ID: "1", Title: "a", Status: "\x1b]0;x\x07"},
+		{ID: "2", Title: "b", Status: "bogus", Completed: true},
+		{ID: "3", Title: "c", Status: "DOING"},
+	}, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var bundle ExportBundle
+	if err := json.Unmarshal(data, &bundle); err != nil {
+		t.Fatal(err)
+	}
+	want := []TaskStatus{StatusTodo, StatusDone, StatusDoing}
+	for i, task := range bundle.Tasks {
+		if task.Status != want[i] {
+			t.Errorf("task %s exported status %q, want %q", task.ID, task.Status, want[i])
+		}
+	}
+}
+
+// P-043: whatever import accepts satisfies the stored-task invariants and
+// exports to a file that strict import accepts again.
+func FuzzParseImportData(f *testing.F) {
+	f.Add([]byte(`{"version":2,"tasks":[{"id":"1","title":"a","status":"doing","tags":["X","x"]}]}`), false)
+	f.Add([]byte(`{"version":1,"tasks":[{"id":"01","title":"a\u001b","completed":true}]}`), false)
+	f.Add([]byte(`{"version":2,"tasks":[{"title":"t","status":"done","completed":false}]}`), true)
+	f.Add([]byte(`{"version":1,"tAsks":[{"title":"\b"}]}`), false)
+	f.Add([]byte(`{"version":2,"tasks":[{"id":"1000000001","title":"x"},{"id":"01000000001","title":"y"}]}`), false)
+	f.Fuzz(func(t *testing.T, data []byte, strict bool) {
+		tasks, _, err := parseImportData(data, strict)
+		if err != nil {
+			return
+		}
+		if len(tasks) > maxImportTasks {
+			t.Fatalf("accepted %d tasks, more than the cap", len(tasks))
+		}
+		seen := map[string]bool{}
+		for i, task := range tasks {
+			if isBlank(task.Title) {
+				t.Fatalf("task %d has a blank title", i)
+			}
+			if err := validateTaskText(task.Title, task.Description); err != nil {
+				t.Fatalf("task %d passed import but fails validation: %v", i, err)
+			}
+			if task.ID != "" {
+				if seen[task.ID] {
+					t.Fatalf("duplicate id %q accepted", task.ID)
+				}
+				seen[task.ID] = true
+			}
+			if _, err := parseTaskStatus(string(task.Status)); err != nil {
+				t.Fatalf("invalid status %q accepted", task.Status)
+			}
+			if task.Completed != (task.Status == StatusDone) || task.Completed != (task.CompletedAt != nil) {
+				t.Fatalf("status %q, completed %v and completed_at %v disagree", task.Status, task.Completed, task.CompletedAt)
+			}
+			norm, err := normalizeTags(task.Tags)
+			if err != nil || !slices.Equal(norm, task.Tags) {
+				t.Fatalf("tags not normalised: %v", task.Tags)
+			}
+		}
+		exported, err := marshalBundle(tasks, false)
+		if err != nil {
+			t.Fatal(err)
+		}
+		again, _, err := parseImportData(exported, true)
+		if err != nil {
+			t.Fatalf("export of accepted tasks does not re-import with --strict: %v", err)
+		}
+		if len(again) != len(tasks) {
+			t.Fatalf("round trip changed the task count from %d to %d", len(tasks), len(again))
+		}
+	})
 }

@@ -734,24 +734,17 @@ func (m *ListModel) GetCurrentTask() *ItemModel {
 	return nil
 }
 
+// ToggleComplete marks the selected task done, or todo when it is done.
 func (m *ListModel) ToggleComplete() error {
 	task := m.GetCurrentTask()
 	if task == nil {
 		return fmt.Errorf("no task selected")
 	}
-
-	previous := *task
+	next := StatusDone
 	if task.Completed {
-		task.MarkIncomplete()
-	} else {
-		task.MarkComplete()
+		next = StatusTodo
 	}
-
-	if err := m.storage.UpdateTask(context.Background(), task); err != nil {
-		*task = previous // keep the list consistent with what is stored
-		return err
-	}
-	return nil
+	return m.setSelectedStatus(task, next)
 }
 
 // CycleStatus moves the selected task to the next status (todo → doing →
@@ -761,12 +754,18 @@ func (m *ListModel) CycleStatus() error {
 	if task == nil {
 		return fmt.Errorf("no task selected")
 	}
-	previous := *task
-	task.setStatus(nextStatus(itemStatus(task)), time.Now())
-	if err := m.storage.UpdateTask(context.Background(), task); err != nil {
-		*task = previous
+	return m.setSelectedStatus(task, nextStatus(itemStatus(task)))
+}
+
+// setSelectedStatus stores only the new status of task (never the list's
+// possibly stale copy of its other fields), then updates the in-memory row;
+// the caller reloads the list afterwards.
+func (m *ListModel) setSelectedStatus(task *ItemModel, status TaskStatus) error {
+	now := time.Now()
+	if err := m.storage.SetTaskStatus(context.Background(), task.ID, status, now); err != nil {
 		return err
 	}
+	task.setStatus(status, now)
 	return nil
 }
 

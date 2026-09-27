@@ -36,8 +36,16 @@ const maxImportFileSize = 32 << 20 // 32 MiB
 
 // maxImportedTaskID bounds IDs kept from an import file. Larger IDs are treated
 // like non-numeric IDs (a new ID is assigned) so a crafted file cannot push
-// SQLite's AUTOINCREMENT counter to its limit and block future inserts.
-const maxImportedTaskID = 1<<31 - 1
+// SQLite's AUTOINCREMENT counter towards its limit. The bound is well below
+// 2^31-1, so even after the largest allowed ID is imported, more than a
+// billion further tasks get IDs below 2^31. IDs of tasks already in the
+// database are always kept (see storedTaskID).
+const maxImportedTaskID = 1_000_000_000
+
+// maxImportTasks caps how many tasks one import may contain. It is enforced
+// while decoding, so a larger file is rejected before its tasks are held in
+// memory, merged or written.
+const maxImportTasks = 50_000
 
 // stdinImportPath is the --file value that reads an import from standard input.
 const stdinImportPath = "-"
@@ -64,13 +72,12 @@ func taskFromItem(item *ItemModel) Task {
 	}
 }
 
-// itemFromTask converts t for storage. Tasks whose ID is a positive integer
-// keep that ID; any other ID (empty, or a placeholder from rename/regenerate)
-// receives a new database-assigned ID.
-func itemFromTask(t Task) *ItemModel {
-	id, _ := parseTaskID(t.ID)
+// itemFromTask converts t for storage; storedTaskID decides whether its ID is
+// kept. existing holds the IDs of tasks already in the database (nil when
+// unknown).
+func itemFromTask(t Task, existing map[int]bool) *ItemModel {
 	return &ItemModel{
-		ID:          id,
+		ID:          storedTaskID(t.ID, existing),
 		Title:       t.Title,
 		Description: t.Description,
 		Completed:   t.Completed,
@@ -83,10 +90,11 @@ func itemFromTask(t Task) *ItemModel {
 	}
 }
 
-// taskStatusOf returns t's status, deriving it from Completed when unset.
+// taskStatusOf returns t's status, deriving it from Completed when it is unset
+// or not a known status.
 func taskStatusOf(t Task) TaskStatus {
-	if t.Status != "" {
-		return t.Status
+	if status, err := parseTaskStatus(string(t.Status)); err == nil {
+		return status
 	}
 	if t.Completed {
 		return StatusDone
@@ -114,7 +122,7 @@ func (s *TaskServiceAdapter) ReplaceAll(ctx context.Context, tasks []Task) error
 	}
 	items := make([]*ItemModel, 0, len(tasks))
 	for _, t := range tasks {
-		items = append(items, itemFromTask(t))
+		items = append(items, itemFromTask(t, nil))
 	}
 	return s.storage.ReplaceAllTasks(ctx, items)
 }
@@ -127,8 +135,10 @@ func (s *TaskServiceAdapter) replaceAllFunc(ctx context.Context, fn func(current
 	}
 	return s.storage.ReplaceAllTasksFunc(ctx, func(items []*ItemModel) ([]*ItemModel, error) {
 		current := make([]Task, 0, len(items))
+		existing := make(map[int]bool, len(items))
 		for _, item := range items {
 			current = append(current, taskFromItem(item))
+			existing[item.ID] = true
 		}
 		next, err := fn(current)
 		if err != nil {
@@ -136,19 +146,38 @@ func (s *TaskServiceAdapter) replaceAllFunc(ctx context.Context, fn func(current
 		}
 		out := make([]*ItemModel, 0, len(next))
 		for _, t := range next {
-			out = append(out, itemFromTask(t))
+			out = append(out, itemFromTask(t, existing))
 		}
 		return out, nil
 	})
 }
 
-// parseTaskID returns the numeric database ID encoded in an exported task ID.
+// parseTaskID returns the numeric database ID encoded in an exported task ID
+// when it may be kept for a task that is new to the database (1..maxImportedTaskID).
 func parseTaskID(id string) (int, bool) {
 	n, err := strconv.Atoi(id)
 	if err != nil || n <= 0 || n > maxImportedTaskID {
 		return 0, false
 	}
 	return n, true
+}
+
+// storedTaskID returns the database ID to store for a task with the given
+// exported ID: IDs in 1..maxImportedTaskID are kept, and so is any ID of a task
+// already in the database (existing), because such an ID can no longer move
+// the AUTOINCREMENT counter. Any other ID (empty, a rename/regenerate
+// placeholder, or an oversized ID from an import file) returns 0, so the
+// database assigns a new one.
+func storedTaskID(id string, existing map[int]bool) int {
+	if n, ok := parseTaskID(id); ok {
+		return n
+	}
+	// Only the canonical spelling matches, as current task IDs are written
+	// with strconv.Itoa; any other spelling is a different, new task.
+	if n, err := strconv.Atoi(id); err == nil && existing[n] && strconv.Itoa(n) == id {
+		return n
+	}
+	return 0
 }
 
 //-----------------------------------Export-------------------------------//
@@ -447,19 +476,123 @@ func readImportFile(path string, strict bool) ([]Task, int, error) {
 	return parseImportData(data, strict)
 }
 
+// errTrailingImportData reports data after the export bundle, which both
+// import modes reject so that no part of a file is silently ignored.
+var errTrailingImportData = errors.New("unexpected data after the export bundle")
+
+// errTooManyImportTasks reports an import file with more than maxImportTasks tasks.
+var errTooManyImportTasks = fmt.Errorf("import file has more than %d tasks", maxImportTasks)
+
+// errIncompleteImportData reports an empty or truncated import file, with the
+// message json.Unmarshal uses for it.
+var errIncompleteImportData = errors.New("unexpected end of JSON input")
+
+// completeImportError replaces the io.EOF a json.Decoder returns for missing
+// data with errIncompleteImportData, so a truncated file is not reported as a
+// bare "EOF".
+func completeImportError(err error) error {
+	if errors.Is(err, io.EOF) {
+		return errIncompleteImportData
+	}
+	return err
+}
+
+// decodeExportBundle decodes an export bundle like json.Unmarshal (field names
+// match case-insensitively, unknown fields are ignored unless strict), but
+// streams the task list so that more than maxImportTasks tasks are rejected
+// before they are decoded, and rejects anything after the bundle.
+func decodeExportBundle(b []byte, strict bool) (ExportBundle, error) {
+	var bundle ExportBundle
+	dec := json.NewDecoder(bytes.NewReader(b))
+	if strict {
+		dec.DisallowUnknownFields()
+	}
+	tok, err := dec.Token()
+	if err != nil {
+		return bundle, completeImportError(err)
+	}
+	switch tok {
+	case nil:
+		// JSON null decodes to an empty bundle (rejected by the version check).
+	case json.Delim('{'):
+		if err := decodeBundleFields(dec, &bundle, strict); err != nil {
+			return bundle, completeImportError(err)
+		}
+	default:
+		return bundle, errors.New("import data must be a JSON object")
+	}
+	if _, err := dec.Token(); !errors.Is(err, io.EOF) {
+		return bundle, errTrailingImportData
+	}
+	return bundle, nil
+}
+
+// decodeBundleFields decodes the fields of an export bundle object whose
+// opening brace has been read, up to and including its closing brace.
+func decodeBundleFields(dec *json.Decoder, bundle *ExportBundle, strict bool) error {
+	for dec.More() {
+		tok, err := dec.Token()
+		if err != nil {
+			return err
+		}
+		key, _ := tok.(string) // object keys are always strings
+		switch {
+		case strings.EqualFold(key, "version"):
+			err = dec.Decode(&bundle.Version)
+		case strings.EqualFold(key, "exported_at"):
+			err = dec.Decode(&bundle.ExportedAt)
+		case strings.EqualFold(key, "tasks"):
+			bundle.Tasks, err = decodeTaskList(dec)
+		case strict:
+			err = fmt.Errorf("json: unknown field %q", key)
+		default:
+			var ignored json.RawMessage
+			err = dec.Decode(&ignored)
+		}
+		if err != nil {
+			return err
+		}
+	}
+	_, err := dec.Token() // closing brace
+	return err
+}
+
+// decodeTaskList decodes the "tasks" array one task at a time and stops once
+// it holds more than maxImportTasks tasks.
+func decodeTaskList(dec *json.Decoder) ([]TaskDTO, error) {
+	tok, err := dec.Token()
+	if err != nil {
+		return nil, err
+	}
+	if tok == nil {
+		return nil, nil
+	}
+	if tok != json.Delim('[') {
+		return nil, errors.New("tasks must be a JSON array")
+	}
+	tasks := []TaskDTO{}
+	for dec.More() {
+		if len(tasks) == maxImportTasks {
+			return nil, errTooManyImportTasks
+		}
+		var dto *TaskDTO
+		if err := dec.Decode(&dto); err != nil {
+			return nil, err
+		}
+		if dto == nil {
+			return nil, fmt.Errorf("tasks[%d] must be an object", len(tasks))
+		}
+		tasks = append(tasks, *dto)
+	}
+	_, err = dec.Token() // closing bracket
+	return tasks, err
+}
+
 // parseImportData decodes and validates an export bundle (schema version 1 or 2).
 func parseImportData(b []byte, strict bool) ([]Task, int, error) {
-	var bundle ExportBundle
-	if strict {
-		dec := json.NewDecoder(bytes.NewReader(b))
-		dec.DisallowUnknownFields()
-		if err := dec.Decode(&bundle); err != nil {
-			return nil, 0, err
-		}
-	} else {
-		if err := json.Unmarshal(b, &bundle); err != nil {
-			return nil, 0, err
-		}
+	bundle, err := decodeExportBundle(b, strict)
+	if err != nil {
+		return nil, 0, err
 	}
 
 	if bundle.Version != 1 && bundle.Version != exportSchemaVersion {
@@ -470,20 +603,26 @@ func parseImportData(b []byte, strict bool) ([]Task, int, error) {
 	out := make([]Task, 0, len(bundle.Tasks))
 	seen := map[string]struct{}{}
 	for i, dto := range bundle.Tasks {
-		if dto.Title == "" {
-			return nil, 0, fmt.Errorf("tasks[%d].title is required", i)
-		}
 		// Strict mode rejects control characters; otherwise they are removed so
 		// exports/backups of older data always re-import.
 		if !strict {
 			dto.Title = stripControlCharacters(dto.Title, false)
 			dto.Description = stripControlCharacters(dto.Description, true)
 		}
+		// A blank title (possibly blank only once control characters are
+		// removed) is rejected in strict mode; default import keeps the task
+		// under a placeholder title so affected exports and backups restore.
+		if isBlank(dto.Title) {
+			if strict {
+				return nil, 0, fmt.Errorf("tasks[%d].title is required", i)
+			}
+			dto.Title = untitledTaskTitle
+		}
 		if err := validateTaskText(dto.Title, dto.Description); err != nil {
 			return nil, 0, fmt.Errorf("tasks[%d]: %w", i, err)
 		}
 		// Canonicalise numeric IDs so "01" and "1" refer to the same task.
-		if n, ok := parseTaskID(dto.ID); ok {
+		if n, err := strconv.Atoi(dto.ID); err == nil && n > 0 {
 			dto.ID = strconv.Itoa(n)
 		}
 		if dto.ID != "" {
