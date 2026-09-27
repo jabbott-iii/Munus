@@ -43,19 +43,10 @@ func NewRootCmd(db *Database) *cobra.Command {
 
 	cmd := &cobra.Command{
 		Use: "munus",
-		// The database is opened only once a command actually runs, so --help,
-		// --version, help and completion never create a database file.
-		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
-			if skipsDatabase(cmd) {
-				return nil
-			}
-			if err := db.open(); err != nil {
-				cmd.SilenceUsage = true
-				return fmt.Errorf("failed to initialize database: %w", err)
-			}
-			return nil
-		},
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := openForCommand(cmd, db); err != nil {
+				return err
+			}
 			opts := tuiOptions{vimEnabled: vim}
 			initialModel := tea.Model(NewFormModelWithOptions(db, opts))
 			if vim {
@@ -84,16 +75,23 @@ func NewRootCmd(db *Database) *cobra.Command {
 	return cmd
 }
 
-// skipsDatabase reports whether cmd is one of cobra's built-in help or shell
-// completion commands, which never touch task data.
-func skipsDatabase(cmd *cobra.Command) bool {
-	for c := cmd; c != nil; c = c.Parent() {
-		switch name := c.Name(); {
-		case name == "help", name == "completion", strings.HasPrefix(name, "__complete"):
-			return true
-		}
+// argumentsValidated marks the end of a command's argument and flag
+// validation: later errors concern tasks, files or the database, so cobra
+// prints no usage for them (plan 3, D-8).
+func argumentsValidated(cmd *cobra.Command) {
+	cmd.SilenceUsage = true
+}
+
+// openForCommand opens the database once cmd has validated its arguments and
+// flags. Each command calls it itself, after its own checks, so --help,
+// --version, help, completion and every argument or flag error (including
+// invalid flag values, which cobra cannot check) leave the database untouched.
+func openForCommand(cmd *cobra.Command, db *Database) error {
+	argumentsValidated(cmd)
+	if err := db.open(); err != nil {
+		return fmt.Errorf("failed to initialize database: %w", err)
 	}
-	return false
+	return nil
 }
 
 // -------------------------------------- export ------------------------------------------------------------------------------------ //
@@ -112,11 +110,18 @@ func NewExportCmd(db *Database) *cobra.Command {
 	munus export --dry-run`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := cmd.Context()
+			// "-" means standard output, as "import --file -" reads standard input.
+			if opts.File == stdinImportPath {
+				opts.Stdout = true
+			}
 			// Resolve default filename if not stdout
 			if !opts.Stdout && opts.File == "" {
 				opts.File = fmt.Sprintf("munus-export-%s.json", time.Now().Format("20060102"))
 			}
 
+			if err := openForCommand(cmd, db); err != nil {
+				return err
+			}
 			filter := ExportFilter{IncludeCompleted: !opts.PendingOnly}
 			svc := &TaskServiceAdapter{storage: db}
 
@@ -150,7 +155,7 @@ func NewExportCmd(db *Database) *cobra.Command {
 		},
 	}
 
-	cmd.Flags().StringVarP(&opts.File, "file", "f", "", "Output JSON file path")
+	cmd.Flags().StringVarP(&opts.File, "file", "f", "", "Output JSON file path ('-' writes standard output)")
 	cmd.Flags().BoolVar(&opts.Pretty, "pretty", true, "Pretty-print JSON output")
 	cmd.Flags().BoolVar(&opts.Stdout, "stdout", false, "Write JSON to stdout")
 	cmd.Flags().BoolVar(&opts.PendingOnly, "pending-only", false, "Skip completed tasks")
@@ -180,22 +185,17 @@ func NewImportCmd(db *Database) *cobra.Command {
 	munus import -f tasks.json --dry-run --strict
 	munus import -f tasks.json --mode merge --on-conflict rename --id-strategy regenerate
 	munus export --stdout | munus import -f - --dry-run`,
+		// Flag combinations are checked with the arguments, before the
+		// database is opened, so these errors create no database and print
+		// usage like other flag errors.
+		Args: func(cmd *cobra.Command, _ []string) error {
+			return validateImportFlags(cmd, opts)
+		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := cmd.Context()
-			if opts.File == "" {
-				return errors.New("required flag: --file")
-			}
-			if opts.SkipExisting && cmd.Flags().Changed("on-conflict") {
-				return errors.New("--skip-existing cannot be combined with --on-conflict")
-			}
-			// Standard input carries the import data, so it cannot also answer
-			// the replace confirmation prompt.
-			if opts.File == stdinImportPath && opts.Mode == "replace" && !opts.Yes && !opts.DryRun {
-				return errors.New("--mode replace with --file - requires --yes")
-			}
-
 			svc := &TaskServiceAdapter{storage: db}
 
+			// Invalid option values are flag errors (usage, no database).
 			cfg := ImportConfig{
 				Mode:         opts.Mode,
 				OnConflict:   opts.OnConflict,
@@ -210,10 +210,16 @@ func NewImportCmd(db *Database) *cobra.Command {
 				return err
 			}
 			conflictPolicy := effectiveOnConflict(cfg)
+			argumentsValidated(cmd)
 
 			// Read the input once so standard input can be planned and applied.
+			// It is read before the database is opened, so an unreadable file
+			// leaves the database untouched.
 			data, err := readImportSource(opts.File, cmd.InOrStdin())
 			if err != nil {
+				return err
+			}
+			if err := openForCommand(cmd, db); err != nil {
 				return err
 			}
 
@@ -284,6 +290,40 @@ func NewImportCmd(db *Database) *cobra.Command {
 	return cmd
 }
 
+// validateImportFlags rejects missing or conflicting import flags.
+func validateImportFlags(cmd *cobra.Command, opts importOpts) error {
+	if opts.File == "" {
+		return errors.New("required flag: --file")
+	}
+	if opts.SkipExisting && cmd.Flags().Changed("on-conflict") {
+		return errors.New("--skip-existing cannot be combined with --on-conflict")
+	}
+	// Standard input carries the import data, so it cannot also answer the
+	// replace confirmation prompt.
+	if opts.File == stdinImportPath && opts.Mode == "replace" && !opts.Yes && !opts.DryRun {
+		return errors.New("--mode replace with --file - requires --yes")
+	}
+	return nil
+}
+
+// taskIDArgs accepts exactly one argument that is a positive task ID. As a
+// cobra argument validator it runs before the database is opened.
+func taskIDArgs(cmd *cobra.Command, args []string) error {
+	if err := cobra.ExactArgs(1)(cmd, args); err != nil {
+		return err
+	}
+	_, err := parseTaskIDArg(args[0])
+	return err
+}
+
+func parseTaskIDArg(arg string) (int, error) {
+	id, err := strconv.Atoi(arg)
+	if err != nil || id <= 0 {
+		return 0, fmt.Errorf("invalid task ID %q: must be a positive integer", arg)
+	}
+	return id, nil
+}
+
 // Confirm prints prompt and reports whether the whole answer line is "y" or
 // "yes" (any case). End of input counts as "no".
 func Confirm(cmd *cobra.Command, prompt string) (bool, error) {
@@ -345,6 +385,9 @@ func NewAddCmd(db *Database) *cobra.Command {
 				deadlineTime = parsed
 			}
 
+			if err := openForCommand(cmd, db); err != nil {
+				return err
+			}
 			task := &ItemModel{
 				Title:       title,
 				Description: description,
@@ -391,19 +434,41 @@ func NewEditCmd(db *Database) *cobra.Command {
 		Example: `	munus edit 12 --title "New title"
 	munus edit 12 --deadline 2d --status doing
 	munus edit 12 --clear-deadline --tag work --untag home`,
-		Args: cobra.ExactArgs(1),
+		Args: func(cmd *cobra.Command, args []string) error {
+			if err := taskIDArgs(cmd, args); err != nil {
+				return err
+			}
+			for _, name := range []string{"title", "description", "deadline", "clear-deadline", "status", "tag", "untag"} {
+				if cmd.Flags().Changed(name) {
+					return nil
+				}
+			}
+			return errors.New("nothing to change: pass --title, --description, --deadline, --clear-deadline, --status, --tag or --untag")
+		},
 		RunE: func(cmd *cobra.Command, args []string) error {
-			taskID, err := strconv.Atoi(args[0])
-			if err != nil || taskID <= 0 {
-				return fmt.Errorf("invalid task ID %q: must be a positive integer", args[0])
+			taskID, err := parseTaskIDArg(args[0])
+			if err != nil {
+				return err
 			}
 			flags := cmd.Flags()
-			changed := false
-			for _, name := range []string{"title", "description", "deadline", "clear-deadline", "status", "tag", "untag"} {
-				changed = changed || flags.Changed(name)
+			edits := taskEdits{
+				title:         optional(flags.Changed("title"), title),
+				description:   optional(flags.Changed("description"), description),
+				deadline:      optional(flags.Changed("deadline"), deadline),
+				clearDeadline: clearDeadline,
+				status:        optional(flags.Changed("status"), status),
+				addTags:       addTags,
+				removeTags:    removeTags,
 			}
-			if !changed {
-				return errors.New("nothing to change: pass --title, --description, --deadline, --clear-deadline, --status, --tag or --untag")
+			now := time.Now()
+			// Check the new values on their own first, so an invalid flag
+			// value is reported as a flag error before the database is
+			// opened; the checks that need the stored task follow.
+			if err := applyTaskEdits(&ItemModel{}, edits, now); err != nil {
+				return err
+			}
+			if err := openForCommand(cmd, db); err != nil {
+				return err
 			}
 
 			ctx := cmd.Context()
@@ -412,15 +477,7 @@ func NewEditCmd(db *Database) *cobra.Command {
 				return fmt.Errorf("failed to load task %d: %w", taskID, err)
 			}
 
-			if err := applyTaskEdits(task, taskEdits{
-				title:         optional(flags.Changed("title"), title),
-				description:   optional(flags.Changed("description"), description),
-				deadline:      optional(flags.Changed("deadline"), deadline),
-				clearDeadline: clearDeadline,
-				status:        optional(flags.Changed("status"), status),
-				addTags:       addTags,
-				removeTags:    removeTags,
-			}, time.Now()); err != nil {
+			if err := applyTaskEdits(task, edits, now); err != nil {
 				return err
 			}
 
@@ -493,7 +550,7 @@ func applyTaskEdits(task *ItemModel, e taskEdits, now time.Time) error {
 		return err
 	}
 	if e.deadline != nil {
-		parsed, err := ParseDeadline(*e.deadline)
+		parsed, err := parseDeadlineAt(*e.deadline, now)
 		if err != nil {
 			return fmt.Errorf("invalid deadline format %q: %w", *e.deadline, err)
 		}
@@ -589,6 +646,9 @@ func NewListCmd(db *Database) *cobra.Command {
 				}
 				f.tags = normalized
 			}
+			if err := openForCommand(cmd, db); err != nil {
+				return err
+			}
 			tasks, err := db.ListTasks(cmd.Context())
 			if err != nil {
 				return err
@@ -614,14 +674,17 @@ func DeleteTaskCmd(db *Database) *cobra.Command {
 		Use:     "delete [task-id]",
 		Short:   "Delete a task",
 		Example: `	munus delete 12`,
-		Args:    cobra.ExactArgs(1),
+		Args:    taskIDArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := cmd.Context()
-			taskID, err := strconv.Atoi(args[0])
-			if err != nil || taskID <= 0 {
-				return fmt.Errorf("invalid task ID %q: must be a positive integer", args[0])
+			taskID, err := parseTaskIDArg(args[0])
+			if err != nil {
+				return err
 			}
 
+			if err := openForCommand(cmd, db); err != nil {
+				return err
+			}
 			// Fail before prompting when the task does not exist.
 			if _, err := db.GetTaskByID(ctx, taskID); err != nil {
 				return fmt.Errorf("failed to delete task %d: %w", taskID, err)
@@ -657,14 +720,17 @@ func CompleteTaskCmd(db *Database) *cobra.Command {
 		Short: "Complete task",
 		Example: `	munus complete 12
 	munus complete 12 --undo`,
-		Args: cobra.ExactArgs(1),
+		Args: taskIDArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := cmd.Context()
-			taskID, err := strconv.Atoi(args[0])
-			if err != nil || taskID <= 0 {
-				return fmt.Errorf("invalid task ID %q: must be a positive integer", args[0])
+			taskID, err := parseTaskIDArg(args[0])
+			if err != nil {
+				return err
 			}
 
+			if err := openForCommand(cmd, db); err != nil {
+				return err
+			}
 			task, err := db.GetTaskByID(ctx, taskID)
 			if err != nil {
 				return fmt.Errorf("failed to load task %d: %w", taskID, err)

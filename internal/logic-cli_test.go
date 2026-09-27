@@ -19,6 +19,7 @@ package internal
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -1513,5 +1514,134 @@ func TestCompleteCmdWritesOnlyStatus(t *testing.T) {
 	}
 	if got, _ := db.GetTaskByID(t.Context(), task.ID); got.Status != StatusTodo || got.Completed {
 		t.Fatalf("--undo should reopen a done task as todo, got %+v", got)
+	}
+}
+
+// ============================== plan 3: phase B CLI ==============================
+
+// P-038 / N-033, D-8: argument and flag errors are reported with usage and
+// never create (or migrate) the database.
+func TestArgumentAndFlagErrorsCreateNoDatabase(t *testing.T) {
+	for _, args := range [][]string{
+		{"add", "-t", "only a title"},
+		{"list", "--pending", "--completed"},
+		{"list", "--bogus"},
+		{"edit", "1"},
+		{"edit", "abc", "--title", "x"},
+		{"edit", "1", "--deadline", "1d", "--clear-deadline"},
+		{"delete", "0"},
+		{"complete", "x"},
+		{"complete"},
+		{"import"},
+		{"import", "-f", "tasks.json", "--skip-existing", "--on-conflict", "skip"},
+		{"import", "-f", "-", "--mode", "replace"},
+		{"import", "-f", "tasks.json", "--mode", "bogus"},
+		{"import", "-f", "tasks.json", "--on-conflict", "bogus"},
+		{"import", "-f", "tasks.json", "--id-strategy", "bogus"},
+		{"export", "-i", "--pending-only"},
+		{"list", "--status", "bogus"},
+		{"list", "--tag", "a b"},
+		{"add", "-t", "a", "-d", "b", "--deadline", "someday"},
+		{"add", "-t", "a", "-d", "b", "--tag", "a b"},
+		{"add", "-t", "  ", "-d", "b"},
+		{"edit", "1", "--status", "bogus"},
+		{"edit", "1", "--deadline", "someday"},
+		{"edit", "1", "--title", "  "},
+		{"edit", "1", "--tag", "a b"},
+		{"edit", "1", "--tag", "a,b,c,d,e,f,g,h,i,j,k"},
+	} {
+		path := filepath.Join(t.TempDir(), "munus.db")
+		root := NewRootCmd(NewDeferredDatabase(path))
+		var out bytes.Buffer
+		root.SetArgs(args)
+		root.SetIn(strings.NewReader(""))
+		root.SetOut(&out)
+		root.SetErr(&out)
+		if err := root.Execute(); err == nil {
+			t.Errorf("%q: expected an error", args)
+			continue
+		}
+		if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
+			t.Errorf("%q: the database was created (stat: %v)", args, err)
+		}
+		if !strings.Contains(out.String(), "Usage:") {
+			t.Errorf("%q: expected usage for an argument or flag error, got %q", args, out.String())
+		}
+	}
+}
+
+// P-038 / N-034, D-8: errors about tasks or data print the error only.
+func TestRuntimeErrorsPrintNoUsage(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "munus.db")
+	seed, err := NewDatabase(path)
+	if err != nil {
+		t.Fatalf("setup failed: %v", err)
+	}
+	_ = seed.Close()
+	missing := filepath.Join(t.TempDir(), "missing.json")
+	for _, args := range [][]string{
+		{"complete", "999"},
+		{"delete", "999"},
+		{"edit", "999", "--title", "x"},
+		{"import", "-f", missing},
+	} {
+		db := NewDeferredDatabase(path)
+		root := NewRootCmd(db)
+		var out bytes.Buffer
+		root.SetArgs(args)
+		root.SetIn(strings.NewReader(""))
+		root.SetOut(&out)
+		root.SetErr(&out)
+		err := root.Execute()
+		_ = db.Close()
+		if err == nil {
+			t.Errorf("%q: expected an error", args)
+			continue
+		}
+		if strings.Contains(out.String(), "Usage:") {
+			t.Errorf("%q: runtime error printed usage: %q", args, out.String())
+		}
+		if !strings.Contains(out.String(), "Error: ") {
+			t.Errorf("%q: expected the error on stderr, got %q", args, out.String())
+		}
+	}
+}
+
+// P-042 / N-035: `export -f -` writes to standard output, like `import -f -`
+// reads from standard input, and creates no file named "-".
+func TestExportCmdDashWritesStandardOutput(t *testing.T) {
+	t.Chdir(t.TempDir())
+	db := NewMockModel()
+	seedTask(t, db, &ItemModel{Title: "a", Description: "x"})
+	out, err := runCmd(t, NewExportCmd(db), "", "-f", "-")
+	if err != nil {
+		t.Fatalf("export failed: %v", err)
+	}
+	var bundle ExportBundle
+	if err := json.Unmarshal([]byte(out), &bundle); err != nil || len(bundle.Tasks) != 1 {
+		t.Fatalf("expected the export on standard output, got %q (%v)", out, err)
+	}
+	if _, err := os.Stat("-"); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("a file named - was created (stat: %v)", err)
+	}
+}
+
+// P-038: an import file that cannot be read is a runtime error (no usage)
+// and, as it is read before the database is opened, creates no database.
+func TestImportOfMissingFileCreatesNoDatabase(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "munus.db")
+	root := NewRootCmd(NewDeferredDatabase(path))
+	var out bytes.Buffer
+	root.SetArgs([]string{"import", "-f", filepath.Join(t.TempDir(), "missing.json")})
+	root.SetOut(&out)
+	root.SetErr(&out)
+	if err := root.Execute(); err == nil {
+		t.Fatal("expected an error")
+	}
+	if strings.Contains(out.String(), "Usage:") {
+		t.Fatalf("a missing file printed usage: %q", out.String())
+	}
+	if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("the database was created (stat: %v)", err)
 	}
 }

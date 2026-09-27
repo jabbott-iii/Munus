@@ -23,10 +23,12 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -1382,5 +1384,214 @@ func TestNewDatabaseDSNFilesAreOwnerOnly(t *testing.T) {
 	}
 	if _, err := os.Stat(missing); !errors.Is(err, os.ErrNotExist) {
 		t.Errorf("a read-only open must not create the file, stat: %v", err)
+	}
+}
+
+// ============================== plan 3: phase B ==============================
+
+// openConcurrently opens path from n goroutines at once (separate connection
+// pools, as separate processes would have) and returns the errors.
+func openConcurrently(t *testing.T, path string, n int) []error {
+	t.Helper()
+	errs := make([]error, n)
+	var wg sync.WaitGroup
+	for i := range n {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			db, err := NewDatabase(path)
+			if err != nil {
+				errs[i] = err
+				return
+			}
+			errs[i] = db.Close()
+		}()
+	}
+	wg.Wait()
+	return errs
+}
+
+// P-037 / N-027: several first opens of a new database, or of an older one
+// that still needs its triggers, all succeed.
+func TestConcurrentFirstOpenSucceeds(t *testing.T) {
+	for i := range 20 {
+		path := filepath.Join(t.TempDir(), "new.db")
+		for _, err := range openConcurrently(t, path, 4) {
+			if err != nil {
+				t.Fatalf("round %d: concurrent first open failed: %v", i, err)
+			}
+		}
+	}
+	for i := range 20 {
+		path := filepath.Join(t.TempDir(), "old.db")
+		db, err := NewDatabase(path)
+		if err != nil {
+			t.Fatalf("setup failed: %v", err)
+		}
+		for name := range consistencyTriggers {
+			if err := db.Conn().Exec("DROP TRIGGER " + name).Error; err != nil {
+				t.Fatalf("setup failed: %v", err)
+			}
+		}
+		_ = db.Close()
+		for _, err := range openConcurrently(t, path, 4) {
+			if err != nil {
+				t.Fatalf("round %d: concurrent upgrade failed: %v", i, err)
+			}
+		}
+		check, err := NewDatabase(path)
+		if err != nil {
+			t.Fatalf("reopen failed: %v", err)
+		}
+		var n int64
+		if err := check.Conn().Raw("SELECT COUNT(*) FROM sqlite_master WHERE type = 'trigger'").Scan(&n).Error; err != nil || n != int64(len(consistencyTriggers)) {
+			t.Fatalf("expected %d triggers after the upgrade, got %d (%v)", len(consistencyTriggers), n, err)
+		}
+		_ = check.Close()
+	}
+}
+
+// importWorkerEnv makes the test binary act as one import process for
+// TestConcurrentImportProcessesAllApply (the usual helper-process pattern).
+const importWorkerEnv = "MUNUS_TEST_IMPORT_WORKER_DB"
+
+func TestMain(m *testing.M) {
+	if path := os.Getenv(importWorkerEnv); path != "" {
+		os.Exit(runImportWorker(path, os.Getenv("MUNUS_TEST_IMPORT_WORKER_TITLE")))
+	}
+	os.Exit(m.Run())
+}
+
+// importsPerWorker is how many imports each helper process applies in a row,
+// so the processes' transactions overlap.
+const importsPerWorker = 10
+
+func runImportWorker(path, title string) int {
+	// A long busy timeout: SQLite does not queue waiting writers fairly, so on
+	// slow storage one worker can wait through many others' imports.
+	db, err := NewDatabase(path + "?_busy_timeout=60000")
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
+	}
+	defer func() { _ = db.Close() }()
+	svc := &TaskServiceAdapter{storage: db}
+	for i := range importsPerWorker {
+		data := fmt.Sprintf(`{"version":2,"tasks":[{"title":"%s-%d"}]}`, title, i)
+		if _, err := applyImportData(context.Background(), svc, []byte(data), ImportConfig{}); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			return 1
+		}
+	}
+	return 0
+}
+
+// P-037 / N-037: imports run by separate processes at the same time all
+// apply. Every transaction starts with BEGIN IMMEDIATE, so a second writer
+// waits for the lock instead of failing with "database is locked" when its
+// read-then-write transaction cannot upgrade its lock (v2.2.0 failed about
+// two thirds of such imports).
+func TestConcurrentImportProcessesAllApply(t *testing.T) {
+	if testing.Short() {
+		t.Skip("starts helper processes")
+	}
+	setTestHome(t)
+	path := filepath.Join(t.TempDir(), "munus.db")
+	seed, err := NewDatabase(path)
+	if err != nil {
+		t.Fatalf("setup failed: %v", err)
+	}
+	_ = seed.Close()
+
+	const workers, rounds = 6, 2
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Minute)
+	defer cancel()
+	for round := range rounds {
+		cmds := make([]*exec.Cmd, workers)
+		outs := make([]*bytes.Buffer, workers)
+		for i := range cmds {
+			cmd := exec.CommandContext(ctx, os.Args[0], "-test.run=^$")
+			cmd.Env = append(os.Environ(), importWorkerEnv+"="+path, fmt.Sprintf("MUNUS_TEST_IMPORT_WORKER_TITLE=r%d-w%d", round, i))
+			outs[i] = &bytes.Buffer{}
+			cmd.Stdout, cmd.Stderr = outs[i], outs[i]
+			if err := cmd.Start(); err != nil {
+				t.Fatalf("start worker: %v", err)
+			}
+			cmds[i] = cmd
+		}
+		for i, cmd := range cmds {
+			if err := cmd.Wait(); err != nil {
+				t.Errorf("round %d: import process %d failed: %v: %s", round, i, err, outs[i])
+			}
+		}
+	}
+	check, err := NewDatabase(path)
+	if err != nil {
+		t.Fatalf("reopen failed: %v", err)
+	}
+	defer func() { _ = check.Close() }()
+	tasks, err := check.ListTasks(t.Context())
+	if err != nil || len(tasks) != workers*rounds*importsPerWorker {
+		t.Fatalf("expected %d imported tasks, got %d (err %v)", workers*rounds*importsPerWorker, len(tasks), err)
+	}
+}
+
+func TestWithImmediateTransactions(t *testing.T) {
+	for dsn, want := range map[string]string{
+		"munus.db":                    "munus.db?_txlock=immediate",
+		"munus.db?_busy_timeout=5000": "munus.db?_busy_timeout=5000&_txlock=immediate",
+		"file:munus.db":               "file:munus.db?_txlock=immediate",
+		"file:munus.db?mode=ro":       "file:munus.db?mode=ro&_txlock=immediate",
+		":memory:":                    ":memory:?_txlock=immediate",
+		"munus.db?_txlock=exclusive":  "munus.db?_txlock=exclusive",
+		"?odd":                        "?odd",
+	} {
+		if got := withImmediateTransactions(dsn); got != want {
+			t.Errorf("withImmediateTransactions(%q) = %q, want %q", dsn, got, want)
+		}
+	}
+}
+
+// P-042 / N-036: a database that fails to migrate is closed, so repeated
+// failed opens do not leak file descriptors.
+func TestNewDatabaseClosesConnectionWhenSetupFails(t *testing.T) {
+	fds := func() int {
+		entries, err := os.ReadDir("/proc/self/fd")
+		if err != nil {
+			t.Skip("needs /proc/self/fd")
+		}
+		return len(entries)
+	}
+	// A valid database whose "tags" name is taken by a view opens fine but
+	// cannot be migrated.
+	path := filepath.Join(t.TempDir(), "blocked.db")
+	raw, err := sql.Open("sqlite3", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := raw.Exec("CREATE VIEW tags AS SELECT 1 AS id, 'x' AS name"); err != nil {
+		t.Fatalf("setup failed: %v", err)
+	}
+	_ = raw.Close()
+	before := fds()
+	for range 20 {
+		if db, err := NewDatabase(path); err == nil {
+			_ = db.Close()
+			t.Fatal("expected the migration to fail")
+		}
+	}
+	if grown := fds() - before; grown >= 10 {
+		t.Fatalf("20 failed opens left %d more file descriptors open", grown)
+	}
+}
+
+// P-037: installing the consistency triggers again is a no-op, so a migration
+// that races another one cannot fail on an existing trigger.
+func TestConsistencyTriggerDDLIsIdempotent(t *testing.T) {
+	db := newFileTestDB(t)
+	for name, ddl := range consistencyTriggers {
+		if err := db.Conn().Exec(ddl).Error; err != nil {
+			t.Errorf("%s: re-running the trigger DDL failed: %v", name, err)
+		}
 	}
 }

@@ -26,8 +26,9 @@ make test
   golangci-lint when installed). After changing deadline parsing, text handling or import, also
   run `make fuzz`.
 - CI runs on Linux, macOS and Windows: a `go mod tidy` drift check, `go vet`, golangci-lint v2.13.2,
-  tests with coverage, and a native build that is run as a smoke test. CodeQL and gosec run on every
-  push, and the Docker image is built and smoke-tested on `main`.
+  tests with coverage, and a native build that is run as a smoke test, using the latest Go 1.26
+  patch release. CodeQL, gosec and govulncheck run on every push, and the Docker image is built and
+  smoke-tested on `main`.
 
 ## Coding expectations
 - Follow `AGENTS.md`, `intel/golang.md` (Go rules) and `intel/maint.md` (architecture).

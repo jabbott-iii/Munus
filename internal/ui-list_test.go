@@ -2002,3 +2002,64 @@ func TestFormModelErrorIsSanitized(t *testing.T) {
 		t.Fatalf("control sequence reached the form view: %q", view)
 	}
 }
+
+// P-042 / N-036: the import/export path prompt edits by character, so
+// non-ASCII paths can be typed; control and bidi characters are ignored.
+func TestTransferPathPromptEditsByRune(t *testing.T) {
+	list := NewListModel(&MockStorage{})
+	loadList(t, list)
+	list.transfer = &transferState{action: transferActionImport, stage: transferStageInput, importMode: "merge"}
+	for _, r := range []rune{'ü', '日', 'a', '\u202e'} {
+		list.Update(runeKey(r))
+	}
+	list.Update(tea.KeyMsg{Type: tea.KeyLeft})
+	list.Update(tea.KeyMsg{Type: tea.KeyBackspace})
+	list.Update(runeKey('ß'))
+	if list.transfer.path != "üßa" || list.transfer.cursor != 2 {
+		t.Fatalf("path %q, cursor %d; want %q, 2", list.transfer.path, list.transfer.cursor, "üßa")
+	}
+	if got := list.addTransferCursor(list.transfer.path); got != "üß█a" {
+		t.Fatalf("rendered %q, want %q", got, "üß█a")
+	}
+	list.Update(tea.KeyMsg{Type: tea.KeyEnd})
+	list.Update(tea.KeyMsg{Type: tea.KeyRight})
+	if list.transfer.cursor != 3 {
+		t.Fatalf("cursor %d after End and Right, want 3", list.transfer.cursor)
+	}
+}
+
+// P-042 / N-035: the TUI export refuses "-" instead of writing a file named "-".
+func TestTransferExportRejectsDash(t *testing.T) {
+	t.Chdir(t.TempDir())
+	list := NewListModel(&MockStorage{})
+	loadList(t, list)
+	list.transfer = &transferState{action: transferActionExport, stage: transferStageInput, path: "-", cursor: 1}
+	list.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if list.transfer == nil || list.transfer.operationError == nil {
+		t.Fatal("expected an error for the path -")
+	}
+	if _, err := os.Stat("-"); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("a file named - was created (stat: %v)", err)
+	}
+}
+
+// P-042 review: Alt combinations are shortcuts, not text, in the path prompt.
+func TestTransferPathPromptIgnoresAltKeys(t *testing.T) {
+	list := NewListModel(&MockStorage{})
+	loadList(t, list)
+	list.transfer = &transferState{action: transferActionImport, stage: transferStageInput, importMode: "merge"}
+	list.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'x'}, Alt: true})
+	list.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'C'}, Alt: true})
+	if list.transfer.path != "" {
+		t.Fatalf("Alt keys typed %q into the path", list.transfer.path)
+	}
+}
+
+// P-042 review: the path prompt is rendered sanitised.
+func TestTransferPathRenderIsSanitized(t *testing.T) {
+	list := NewListModel(&MockStorage{})
+	list.transfer = &transferState{action: transferActionImport, stage: transferStageInput, path: "a\x1b]0;x\x07\u202eb", cursor: 1}
+	if got := list.addTransferCursor(list.transfer.path); strings.ContainsAny(got, "\x1b\a\u202e") {
+		t.Fatalf("control characters reached the path render: %q", got)
+	}
+}

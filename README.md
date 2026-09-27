@@ -10,7 +10,8 @@ SQLite database.
   - Create tasks with title and description
   - Set deadlines for project timeline tracking, as an absolute time
     (`YYYY-MM-DD HH:MM`) or relative to now (`30m`, `2h`, `1d`, `1w`, `1M`, or
-    combinations such as `2d 3h 30m`)
+    combinations such as `2d 3h 30m`); days, weeks and months are calendar units, so `1d` is
+    the same clock time tomorrow
   - Track status: to do, in progress (`doing`) or done
   - Tag tasks (for example `work`, `home`) and filter by tag
   - Edit a task's title, description, deadline, status or tags
@@ -99,7 +100,12 @@ Munus is organized into focused command groups:
 Title (`-t`) and description (`-d`) are required; the deadline (`-n`) and tags (`--tag`) are
 optional. Titles are limited to 100 characters and descriptions to 500, and neither may be blank;
 control characters (including bidirectional override characters) are rejected. Tags are 1–32
-letters, digits, `-` or `_`, stored lowercase, at most 10 per task.
+letters, digits, `-` or `_`, stored lowercase, at most 10 per task. Relative deadlines count
+from now: `d`, `w` and `M` are calendar days, weeks and months (the same clock time, also across a
+daylight-saving change), `h` and `m` are elapsed hours and minutes.
+
+An invalid argument or flag value is reported with the command's usage and never creates or
+changes the database; other errors (for example an unknown task ID) print only the error.
 
 - munus add --title "Title" --description "Description" — add a task with details
 - munus add --title "Title" --description "Description" --deadline "2h" — create a task with a deadline
@@ -159,7 +165,7 @@ Export refuses to overwrite the active database file.
 
 - munus export --file tasks-backup.json — export to a specific file
 - munus export --pending-only — skip completed tasks
-- munus export --stdout — write JSON to standard output
+- munus export --stdout — write JSON to standard output (`--file -` does the same)
 - munus export --dry-run — show how many tasks would be exported, by status
 
 `-i/--include-completed` is still accepted for older scripts but no longer changes anything.
@@ -249,6 +255,14 @@ docker run --rm -it \
   --user "$(id -u):$(id -g)" \
   -v ~/.munus:/app/data \
   munus:latest
+```
+
+### Time zone
+
+Deadlines are read and shown in the container's local time zone, which is UTC unless you set
+`TZ` (the image includes the time-zone database):
+```bash
+docker run --rm -it -e TZ=America/Phoenix -v munus-data:/app/data munus:latest
 ```
 
 ### CLI usage

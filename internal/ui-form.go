@@ -90,8 +90,10 @@ func (m *FormModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		case "enter":
 			if m.currentField < deadlineField {
+				// Like Tab, put the cursor at the end of the next field so
+				// typing appends to text that is already there (when editing).
 				m.currentField++
-				m.cursor = 0
+				m.cursor = utf8.RuneCountInString(m.fields[m.currentField])
 			} else {
 				if err := m.submitForm(); err != nil {
 					m.err = err
@@ -358,8 +360,12 @@ func (m *FormModel) View() string {
 }
 
 // typedText returns the single character a key press inserts, if any. Pasted
-// text (several runes at once) is ignored, as before.
+// text (several runes at once) is ignored, as before, and so are Alt
+// combinations, which are shortcuts rather than text.
 func typedText(msg tea.KeyMsg) (string, bool) {
+	if msg.Alt {
+		return "", false
+	}
 	if msg.Type == tea.KeyRunes && len(msg.Runes) == 1 && !unicode.IsControl(msg.Runes[0]) {
 		return string(msg.Runes), true
 	}

@@ -9,6 +9,9 @@ intel
 .env
 **/*.db
 **/*.db-journal
+**/*.db-wal
+**/*.db-shm
+**/munus-export-*.json
 /munus
 /munus.exe
 *.out

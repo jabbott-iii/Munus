@@ -27,7 +27,7 @@ Munus/
 flowchart LR
   main[main.go] -->|MUNUS_DB_PATH| deferred[NewDeferredDatabase]
   main --> root[NewRootCmd]
-  root -->|PersistentPreRunE: Open unless help/completion| db[(SQLite munus.db)]
+  root -->|each command: validate args/flags, then openForCommand| db[(SQLite munus.db)]
   root -->|no subcommand| tui[Bubble Tea: FormModel / ListModel --vim]
   root --> cli[add · edit · list · complete · delete · export · import]
   tui --> storage[Storage interface]
@@ -68,7 +68,7 @@ erDiagram
 ## CI/CD
 | Workflow | Trigger | Does |
 |---|---|---|
-| `ci.yml` | push/PR any branch | tidy check, vet, golangci-lint, tests+coverage (Linux/macOS/Windows), native CGO build + smoke run |
-| `cd.yml` | `v*` tag | per-OS native CGO builds (linux amd64/arm64 static, darwin arm64/amd64, windows amd64, windows arm64 via pinned llvm-mingw) + smoke run → package, checksums, GitHub Release (only release job has `contents: write`) |
-| `docker.yml` | push/PR to main | build image, `--help` and DB-on-volume smoke tests |
-| `security.yml` | push/PR + weekly | CodeQL (security-extended), gosec (non-failing) with SARIF upload |
+| `ci.yml` | push/PR any branch | latest Go 1.26.x: tidy check, vet, golangci-lint, tests+coverage (Linux/macOS/Windows), native CGO build + smoke run |
+| `cd.yml` | `v*` tag | latest Go 1.26.x, no build cache: per-OS native CGO builds (linux amd64/arm64 static, darwin arm64/amd64, windows amd64, windows arm64 via pinned llvm-mingw) + smoke run → package, checksums, GitHub Release (only release job has `contents: write`) |
+| `docker.yml` | push/PR to main | build image, `--help`, DB-on-volume and `TZ` smoke tests |
+| `security.yml` | push/PR + weekly | CodeQL (security-extended), gosec (non-failing) with SARIF upload, govulncheck (fails on reachable vulnerabilities) |

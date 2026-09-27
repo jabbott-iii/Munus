@@ -26,6 +26,12 @@ profile.cov
 go.work
 go.work.sum
 *.db
+*.db-journal
+*.db-wal
+*.db-shm
+
+# Task data written by `munus export` (default file name) into the working directory
+munus-export-*.json
 
 # env file
 .env

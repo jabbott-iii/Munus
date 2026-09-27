@@ -270,7 +270,7 @@ func (m *ListModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				path:             fmt.Sprintf("munus-export-%s.json", time.Now().Format("20060102")),
 				includeCompleted: true,
 			}
-			m.transfer.cursor = len(m.transfer.path)
+			m.transfer.cursor = utf8.RuneCountInString(m.transfer.path)
 			return m, nil
 
 		case "i":
@@ -821,9 +821,12 @@ func (m *ListModel) handleTransferKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m.exportFromTransfer()
 		}
 		return m.planImportFromTransfer()
+	// The path is edited by rune (state.cursor counts runes), so non-ASCII
+	// paths can be typed and the cursor never splits a character.
 	case "backspace":
 		if state.cursor > 0 {
-			state.path = state.path[:state.cursor-1] + state.path[state.cursor:]
+			runes := []rune(state.path)
+			state.path = string(runes[:state.cursor-1]) + string(runes[state.cursor:])
 			state.cursor--
 		}
 	case "left":
@@ -831,13 +834,13 @@ func (m *ListModel) handleTransferKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			state.cursor--
 		}
 	case "right":
-		if state.cursor < len(state.path) {
+		if state.cursor < utf8.RuneCountInString(state.path) {
 			state.cursor++
 		}
 	case "home":
 		state.cursor = 0
 	case "end":
-		state.cursor = len(state.path)
+		state.cursor = utf8.RuneCountInString(state.path)
 	case "alt+c":
 		if state.action == transferActionExport {
 			state.includeCompleted = !state.includeCompleted
@@ -863,8 +866,9 @@ func (m *ListModel) handleTransferKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			state.strict = !state.strict
 		}
 	default:
-		if len(msg.String()) == 1 {
-			state.path = state.path[:state.cursor] + msg.String() + state.path[state.cursor:]
+		if text, ok := typedText(msg); ok && !containsControl(text, false) {
+			runes := []rune(state.path)
+			state.path = string(runes[:state.cursor]) + text + string(runes[state.cursor:])
 			state.cursor++
 		}
 	}
@@ -881,6 +885,10 @@ func (m *ListModel) exportFromTransfer() (tea.Model, tea.Cmd) {
 	path := strings.TrimSpace(m.transfer.path)
 	if path == "" {
 		m.transfer.operationError = fmt.Errorf("file path is required")
+		return m, nil
+	}
+	if path == stdinImportPath {
+		m.transfer.operationError = fmt.Errorf("writing an export to standard output is not supported here; enter a file path")
 		return m, nil
 	}
 
@@ -932,7 +940,7 @@ func (m *ListModel) planImportFromTransfer() (tea.Model, tea.Cmd) {
 	}
 
 	m.transfer.path = path
-	m.transfer.cursor = len(path)
+	m.transfer.cursor = utf8.RuneCountInString(path)
 	m.transfer.plan = &plan
 	m.transfer.data = data
 	m.transfer.stage = transferStageConfirm
@@ -1144,14 +1152,17 @@ func (m *ListModel) renderTransferOverlay(baseView string) string {
 	return base + "\x1b[H" + modalLayer
 }
 
+// addTransferCursor renders text with the cursor block at the rune position
+// m.transfer.cursor; the text is sanitised for the terminal.
 func (m *ListModel) addTransferCursor(text string) string {
+	runes := []rune(sanitizeForTerminal(text, false))
 	if m.transfer == nil {
-		return text
+		return string(runes)
 	}
-	if m.transfer.cursor >= len(text) {
-		return text + "█"
+	if m.transfer.cursor >= len(runes) {
+		return string(runes) + "█"
 	}
-	return text[:m.transfer.cursor] + "█" + text[m.transfer.cursor:]
+	return string(runes[:m.transfer.cursor]) + "█" + string(runes[m.transfer.cursor:])
 }
 
 func yesNoLabel(value bool) string {

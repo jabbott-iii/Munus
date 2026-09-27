@@ -50,3 +50,24 @@ backfilled from `git log` for the changes made after that file's last entry.
   review and CI; N-026, N-028 and N-029 fixed.
 - An independent review of the change set found no High issues; its findings were fixed. README,
   `CONTRIBUTING.md`, `maint.md`, `map.md`, `notes.md` and `cybersec.md` updated.
+
+## 2026-09-27 — v2.2.0 released
+- The plan 3 phase A change set was committed as `c9eeb97` (with the `make fuzz` Makefile patch
+  applied) and the new history file as `ad5c231`; CI, Docker and Security workflows passed.
+- Release `v2.2.0` (tag on `ad5c231`) was built, smoke-tested and published by `cd.yml`, including the
+  first windows/arm64 zip (P-027). Plan 2 and plan 3 phase A are released; phases B and C target
+  `v2.2.1`.
+
+## 2026-09-27 — Plan 3 phases B and C implemented (uncommitted)
+- P-037…P-042, P-044 and P-045 implemented with regression tests: `BEGIN IMMEDIATE` for every
+  transaction and a locked migration retry (fixes N-027 and the newly found N-037, concurrent writers
+  failing with "database is locked"); each command opens the database only after validating its
+  arguments and flags (usage only for those errors); Enter keeps the form cursor at the end;
+  calendar `d`/`w` with an injected clock; pinned `tzdata` in the Docker image; `export -f -` to
+  standard output, `ApplyImport` dry runs, connection closed on failed setup, rune-based TUI path
+  input; CI/CD on the latest Go 1.26 patch release, no release build cache, a govulncheck job, and
+  new ignore rules.
+- An independent review found no High or Medium issues; its findings were fixed. SEC-018 is In
+  Progress until the workflows run on GitHub; N-027 and N-030…N-037 fixed (FIFO paths in the TUI
+  still block the interface).
+

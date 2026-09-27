@@ -49,6 +49,9 @@ func TestParseTimeUnit(t *testing.T) {
 	}
 }
 
+// fixedNow is the clock for deterministic deadline tests (UTC has no DST).
+func fixedNow() time.Time { return time.Date(2026, 6, 15, 12, 0, 0, 0, time.UTC) }
+
 func TestParseRelativeTime(t *testing.T) {
 	t.Parallel()
 
@@ -88,7 +91,8 @@ func TestParseRelativeTime(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			got, err := ParseRelativeTime(tt.input)
+			deadline, err := relativeDeadline(tt.input, fixedNow())
+			got := deadline.Sub(fixedNow())
 			if tt.wantErr {
 				if err == nil {
 					t.Fatalf("ParseRelativeTime(%q) expected error, got nil", tt.input)
@@ -134,9 +138,7 @@ func TestParseDeadline(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			before := time.Now()
-			got, err := ParseDeadline(tt.input)
-			after := time.Now()
+			got, err := parseDeadlineAt(tt.input, fixedNow())
 
 			if tt.wantErr {
 				if err == nil {
@@ -153,7 +155,7 @@ func TestParseDeadline(t *testing.T) {
 			}
 
 			if tt.wantExact {
-				want, parseErr := time.ParseInLocation("2006-01-02 15:04", tt.input, time.Local)
+				want, parseErr := time.ParseInLocation("2006-01-02 15:04", tt.input, fixedNow().Location())
 				if parseErr != nil {
 					t.Fatalf("test setup parse failed: %v", parseErr)
 				}
@@ -166,13 +168,9 @@ func TestParseDeadline(t *testing.T) {
 				return
 			}
 
-			// Calculate bounds dynamically using captured time
 			if tt.relativeDuration > 0 {
-				wantAfter := before.Add(tt.relativeDuration)
-				wantBefore := after.Add(tt.relativeDuration + 2*time.Second)
-
-				if got.Before(wantAfter) || got.After(wantBefore) {
-					t.Fatalf("ParseDeadline(%q) = %v, want within [%v, %v]", tt.input, got, wantAfter, wantBefore)
+				if want := fixedNow().Add(tt.relativeDuration); !got.Equal(want) {
+					t.Fatalf("ParseDeadline(%q) = %v, want %v", tt.input, got, want)
 				}
 			}
 		})
@@ -180,18 +178,67 @@ func TestParseDeadline(t *testing.T) {
 }
 
 func TestParseRelativeTimeMonthsMatchCalendar(t *testing.T) {
-	for _, months := range []int{1, 2, 12} {
-		before := time.Now()
-		got, err := ParseRelativeTime(fmt.Sprintf("%dM", months))
-		after := time.Now()
-		if err != nil {
-			t.Fatalf("%dM: unexpected error: %v", months, err)
+	start := time.Date(2026, 1, 31, 9, 0, 0, 0, time.UTC)
+	for months, want := range map[int]time.Time{
+		1:  time.Date(2026, 3, 3, 9, 0, 0, 0, time.UTC), // Go's AddDate normalises Feb 31
+		2:  time.Date(2026, 3, 31, 9, 0, 0, 0, time.UTC),
+		12: time.Date(2027, 1, 31, 9, 0, 0, 0, time.UTC),
+	} {
+		got, err := relativeDeadline(fmt.Sprintf("%dM", months), start)
+		if err != nil || !got.Equal(want) {
+			t.Fatalf("%dM from %v = %v, %v; want %v", months, start, got, err, want)
 		}
-		low := before.AddDate(0, months, 0).Sub(before) - time.Second
-		high := after.AddDate(0, months, 0).Sub(after) + time.Second
-		if got < low || got > high {
-			t.Fatalf("%dM = %v, want between %v and %v", months, got, low, high)
+	}
+}
+
+// P-040 / N-031 (D-6): days and weeks are calendar units, so a deadline keeps
+// its clock time across a DST change; hours and minutes are elapsed time.
+func TestRelativeDeadlineUsesCalendarDays(t *testing.T) {
+	ny, err := time.LoadLocation("America/New_York") // embedded via time/tzdata
+	if err != nil {
+		t.Fatalf("load zone: %v", err)
+	}
+	cases := []struct {
+		now   time.Time
+		input string
+		want  time.Time
+		label string
+	}{
+		// Spring forward (2026-03-08): the day has 23 hours.
+		{time.Date(2026, 3, 7, 23, 30, 0, 0, ny), "1d", time.Date(2026, 3, 8, 23, 30, 0, 0, ny), "Due tomorrow"},
+		{time.Date(2026, 3, 7, 23, 30, 0, 0, ny), "24h", time.Date(2026, 3, 9, 0, 30, 0, 0, ny), "2 days left"},
+		{time.Date(2026, 3, 7, 23, 30, 0, 0, ny), "1d 2h", time.Date(2026, 3, 9, 1, 30, 0, 0, ny), "2 days left"},
+		// Fall back (2026-11-01): the day has 25 hours.
+		{time.Date(2026, 11, 1, 0, 30, 0, 0, ny), "1d", time.Date(2026, 11, 2, 0, 30, 0, 0, ny), "Due tomorrow"},
+		{time.Date(2026, 10, 31, 9, 0, 0, 0, ny), "1w", time.Date(2026, 11, 7, 9, 0, 0, 0, ny), ""},
+	}
+	for _, tc := range cases {
+		got, err := parseDeadlineAt(tc.input, tc.now)
+		if err != nil || !got.Equal(tc.want) {
+			t.Errorf("%q at %v = %v, %v; want %v", tc.input, tc.now, got, err, tc.want)
+			continue
 		}
+		if tc.label != "" {
+			if label, _ := deadlineLabel(*got, tc.now); label != tc.label {
+				t.Errorf("%q at %v: label %q, want %q", tc.input, tc.now, label, tc.label)
+			}
+		}
+	}
+}
+
+// The exported entry points count from the real clock.
+func TestParseDeadlineUsesCurrentTime(t *testing.T) {
+	before := time.Now()
+	got, err := ParseDeadline("1d")
+	after := time.Now()
+	if err != nil {
+		t.Fatalf("ParseDeadline failed: %v", err)
+	}
+	if got.Before(before.AddDate(0, 0, 1)) || got.After(after.AddDate(0, 0, 1)) {
+		t.Fatalf("ParseDeadline(1d) = %v, want the same clock time tomorrow (%v)", got, before.AddDate(0, 0, 1))
+	}
+	if d, err := ParseRelativeTime("90m"); err != nil || d < 90*time.Minute-time.Second || d > 90*time.Minute {
+		t.Fatalf("ParseRelativeTime(90m) = %v, %v", d, err)
 	}
 }
 

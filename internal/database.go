@@ -420,7 +420,7 @@ func openDatabase(path string, logWriter io.Writer) (*Database, error) {
 
 	created := createPrivateDatabaseFile(path)
 
-	conn, err := gorm.Open(sqlite.Open(path), &gorm.Config{
+	conn, err := gorm.Open(sqlite.Open(withImmediateTransactions(path)), &gorm.Config{
 		Logger: logger.New(log.New(logWriter, "", 0), logger.Config{LogLevel: logger.Silent}),
 	})
 	if err != nil {
@@ -428,11 +428,9 @@ func openDatabase(path string, logWriter io.Writer) (*Database, error) {
 		return nil, fmt.Errorf("open sqlite database: %w", err)
 	}
 
-	if err := conn.AutoMigrate(&ItemModel{}, &tagModel{}, &taskTagModel{}); err != nil {
-		return nil, fmt.Errorf("auto-migrate schema: %w", err)
-	}
-	if err := migrateStatusAndTags(conn); err != nil {
-		return nil, fmt.Errorf("migrate task status and tags: %w", err)
+	if err := migrateSchema(conn); err != nil {
+		closeConnection(conn)
+		return nil, err
 	}
 
 	sqlDB, err := conn.DB()
@@ -450,18 +448,79 @@ func openDatabase(path string, logWriter io.Writer) (*Database, error) {
 	return &Database{conn: conn, sqlDB: sqlDB, path: path, file: file}, nil
 }
 
+// withImmediateTransactions makes go-sqlite3 start every transaction with
+// BEGIN IMMEDIATE (the _txlock DSN parameter), so a transaction takes the
+// write lock when it begins and concurrent writers wait (busy timeout) instead
+// of failing when a read-then-write transaction tries to upgrade its lock. A
+// DSN that already sets _txlock is kept; a DSN starting with '?' is left alone
+// because go-sqlite3 reads no parameters from it.
+func withImmediateTransactions(dsn string) string {
+	pos := strings.IndexByte(dsn, '?')
+	switch {
+	case pos == 0:
+		return dsn
+	case pos < 0:
+		return dsn + "?_txlock=immediate"
+	case strings.Contains(dsn[pos+1:], "_txlock="):
+		return dsn
+	default:
+		return dsn + "&_txlock=immediate"
+	}
+}
+
+// migrateSchema brings the schema and data up to date. The first attempt
+// runs without a transaction, so an up-to-date database is only read (and can
+// be opened read-only). When it fails, for example because another process
+// created a table between GORM's existence check and its CREATE, the
+// migration runs again inside a transaction, which (see
+// withImmediateTransactions) holds the write lock from the start: concurrent
+// first opens then run one after another and each re-checks the schema
+// under the lock. Every step is idempotent, so a partly applied first
+// attempt is completed by the second.
+func migrateSchema(conn *gorm.DB) error {
+	first := migrateSchemaOnce(conn)
+	if first == nil {
+		return nil
+	}
+	retry := conn.Transaction(migrateSchemaOnce)
+	if retry == nil || retry.Error() == first.Error() {
+		return retry
+	}
+	// Report both: the retry may fail for a different reason (for example a
+	// lock timeout) that would otherwise hide the original cause.
+	return errors.Join(retry, fmt.Errorf("first attempt: %w", first))
+}
+
+func migrateSchemaOnce(tx *gorm.DB) error {
+	if err := tx.AutoMigrate(&ItemModel{}, &tagModel{}, &taskTagModel{}); err != nil {
+		return fmt.Errorf("auto-migrate schema: %w", err)
+	}
+	if err := migrateStatusAndTags(tx); err != nil {
+		return fmt.Errorf("migrate task status and tags: %w", err)
+	}
+	return nil
+}
+
+// closeConnection closes the connection pool of a database that could not be
+// set up; the setup error is what gets reported.
+func closeConnection(conn *gorm.DB) {
+	if sqlDB, err := conn.DB(); err == nil {
+		_ = sqlDB.Close()
+	}
+}
+
 // consistencyTriggers keep status and tag links correct even when an older
 // Munus binary (v2.1.1 or earlier, which knows nothing about them) writes to
 // the database: its inserts and updates only touch "completed", and its
 // deletes leave task_tags rows behind.
 var consistencyTriggers = map[string]string{
-	"munus_status_after_insert": `CREATE TRIGGER munus_status_after_insert AFTER INSERT ON item_models
+	"munus_status_after_insert": `CREATE TRIGGER IF NOT EXISTS munus_status_after_insert AFTER INSERT ON item_models
 WHEN (NEW.completed = 1) <> (NEW.status = 'done')
 BEGIN UPDATE item_models SET status = CASE WHEN NEW.completed = 1 THEN 'done' ELSE 'todo' END WHERE id = NEW.id; END`,
-	"munus_status_after_update": `CREATE TRIGGER munus_status_after_update AFTER UPDATE OF completed ON item_models
+	"munus_status_after_update": `CREATE TRIGGER IF NOT EXISTS munus_status_after_update AFTER UPDATE OF completed ON item_models
 WHEN (NEW.completed = 1) <> (NEW.status = 'done')
 BEGIN UPDATE item_models SET status = CASE WHEN NEW.completed = 1 THEN 'done' ELSE 'todo' END WHERE id = NEW.id; END`,
-	"munus_tags_after_delete": `CREATE TRIGGER munus_tags_after_delete AFTER DELETE ON item_models
+	"munus_tags_after_delete": `CREATE TRIGGER IF NOT EXISTS munus_tags_after_delete AFTER DELETE ON item_models
 BEGIN DELETE FROM task_tags WHERE task_id = OLD.id; END`,
 }
 

@@ -27,7 +27,10 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
-          go-version-file: go.mod
+          # Latest Go 1.26 patch release (security fixes); go.mod keeps the
+          # minimum version (intel/cybersec.md SEC-018).
+          go-version: "1.26.x"
+          check-latest: true
           cache: true
           cache-dependency-path: go.sum
 

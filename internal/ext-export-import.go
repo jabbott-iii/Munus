@@ -404,6 +404,9 @@ func applyImportData(ctx context.Context, svc *TaskServiceAdapter, data []byte, 
 	if err != nil {
 		return ImportResult{}, err
 	}
+	if cfg.DryRun {
+		return dryRunImport(ctx, svc, incoming, version, cfg)
+	}
 
 	var res ImportResult
 	err = svc.replaceAllFunc(ctx, func(current []Task) ([]Task, error) {
@@ -433,6 +436,20 @@ func applyImportData(ctx context.Context, svc *TaskServiceAdapter, data []byte, 
 		return merged, nil
 	})
 	return res, err
+}
+
+// dryRunImport returns the result applyImportData would report for incoming
+// without writing anything (no backup either).
+func dryRunImport(ctx context.Context, svc *TaskServiceAdapter, incoming []Task, version int, cfg ImportConfig) (ImportResult, error) {
+	current, err := svc.ListTasks(ctx)
+	if err != nil {
+		return ImportResult{}, err
+	}
+	if cfg.Mode == "replace" {
+		return ImportResult{Created: len(incoming)}, nil
+	}
+	_, res := mergeVersion(current, incoming, cfg, version)
+	return res, nil
 }
 
 // readImportSource reads at most maxImportFileSize bytes from the file at path,

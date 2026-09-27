@@ -35,8 +35,11 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
-          go-version-file: go.mod
-          cache: true
+          # Latest Go 1.26 patch release (security fixes). No cache: release
+          # binaries are built from clean module and build caches (SEC-018).
+          go-version: "1.26.x"
+          check-latest: true
+          cache: false
 
       # The windows-11-arm image has no C compiler targeting aarch64-w64-mingw32,
       # which cgo needs; install a pinned, checksum-verified llvm-mingw.

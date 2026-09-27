@@ -19,8 +19,10 @@ RUN CGO_ENABLED=1 go build -o /out/munus .
 FROM alpine:3.24
 
 # go-sqlite3 compiles SQLite into the binary, so no sqlite runtime package is
-# needed. Run as an unprivileged user that owns the data directory.
-RUN apk add --no-cache ca-certificates=20260909-r0 \
+# needed. tzdata lets TZ (e.g. -e TZ=Europe/Berlin) select the local time zone
+# for deadlines; without it Go silently falls back to UTC. Run as an
+# unprivileged user that owns the data directory.
+RUN apk add --no-cache ca-certificates=20260909-r0 tzdata=2026d-r0 \
     && addgroup -S -g 10001 munus \
     && adduser -S -D -H -u 10001 -G munus -h /app/data munus \
     && mkdir -p /app/data \

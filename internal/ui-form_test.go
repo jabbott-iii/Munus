@@ -833,3 +833,26 @@ func TestFormReturnToListRequestsWindowSize(t *testing.T) {
 		t.Fatalf("expected data load and window size requests, got %v", kinds)
 	}
 }
+
+// P-039 / N-030: Enter moves to the end of the next field, as Tab does, so
+// typing appends to the text that is already there.
+func TestFormModelEnterMovesToEndOfNextField(t *testing.T) {
+	form := NewFormModel(&MockStorage{})
+	form.fields[titleField] = "Title"
+	form.fields[descriptionField] = "existing ☕"
+	form.cursor = len([]rune(form.fields[titleField]))
+	_, _ = form.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	_, _ = form.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'X'}})
+	if got := form.fields[descriptionField]; got != "existing ☕X" {
+		t.Fatalf("after Enter and X the description is %q, want %q", got, "existing ☕X")
+	}
+}
+
+// P-042 review: Alt combinations do not type into form fields.
+func TestFormModelIgnoresAltKeys(t *testing.T) {
+	form := NewFormModel(&MockStorage{})
+	_, _ = form.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'x'}, Alt: true})
+	if form.fields[titleField] != "" {
+		t.Fatalf("Alt+x typed %q into the title", form.fields[titleField])
+	}
+}

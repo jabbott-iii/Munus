@@ -15,7 +15,7 @@ Munus is a single-binary Go CLI/TUI task manager backed by a local SQLite file.
 | Layer | Location | Responsibility |
 |---|---|---|
 | Entry point | `main.go`, `database_path.go` | Resolve DB path (`MUNUS_DB_PATH`, default `munus.db` in CWD), create a *deferred* DB, set `main.version`, run root command, close DB |
-| CLI | `internal/logic-cli.go` | Cobra commands: root (TUI), `add`, `edit`, `list` (filters), `complete`, `delete`, `export`, `import`; root `PersistentPreRunE` opens the DB (skipped for help/completion) |
+| CLI | `internal/logic-cli.go` | Cobra commands: root (TUI), `add`, `edit`, `list` (filters), `complete`, `delete`, `export`, `import`; each command validates its arguments and flags, then calls `openForCommand` to open the DB |
 | TUI | `internal/ui-form.go`, `internal/ui-list.go` | Bubble Tea models for the task form (create and edit) and list/dashboard (status cycling, filters, help panel, import/export overlay, optional Vim mode) |
 | Domain helpers | `internal/logic-tui.go`, `internal/ext-deadline.go` | Status transitions, overdue/upcoming logic, calendar-day deadline labels (clock passed in), task filters, deadline parsing (bounded) |
 | Text safety | `internal/ext-text.go` | Shared length limits, control-character/UTF-8 validation, tag rules, terminal sanitising |
@@ -33,6 +33,10 @@ Munus is a single-binary Go CLI/TUI task manager backed by a local SQLite file.
   its event boundary. Contexts are never stored in structs. No package-level mutable state (GORM's
   log writer is injected via `openDatabase`); discarded errors carry a comment saying why.
 - Commands write via `cmd.OutOrStdout()` / read via `cmd.InOrStdin()` so they are testable.
+- Each command checks its arguments and flag values first (cobra `Args` validators, required and
+  grouped flags, then value checks at the top of `RunE`) and only then calls `openForCommand`,
+  which turns off cobra's usage output and opens the database. Argument and flag errors therefore
+  print usage and never create or migrate the database; later errors print only the error line.
   Yes/no prompts go through `Confirm` (whole line, `y`/`yes` any case, EOF = no).
 - Every source file carries the Apache-2.0 license header (see `CONTRIBUTING.md`).
 - Formatting: `gofmt -s -w .` before PRs. CI also runs `go vet` and `golangci-lint` v2.13.2.
@@ -57,12 +61,24 @@ Munus is a single-binary Go CLI/TUI task manager backed by a local SQLite file.
 - **Tags** live in `tags` (unique lowercase names) and `task_tags` (links); names are 1–32 letters,
   digits, `-` or `_`, at most 10 per task (`normalizeTags`). Writes replace a task's links and prune
   unused tags; `loadTags` returns them sorted.
+- **Transactions and migration:** the DSN gets `_txlock=immediate` (unless it sets `_txlock`), so
+  every transaction starts with `BEGIN IMMEDIATE`: a transaction holds the write lock from its
+  start and concurrent writers wait (busy timeout, 5 s by default) instead of failing with
+  "database is locked" when a read-then-write transaction cannot upgrade its lock. Schema migration
+  first runs without a transaction (so an up-to-date database is only read); if that fails, for
+  example because another process created a table in between, it runs again inside a transaction,
+  i.e. under the write lock. Every migration step must stay idempotent; triggers use
+  `CREATE TRIGGER IF NOT EXISTS`.
 - **Older binaries:** v2.1.1 knows nothing about `status` or tags. Migration backfills `status` from
   `completed`, removes orphaned tag links and installs `consistencyTriggers` (status follows
   `completed` on insert/update; deleting a task removes its links), so a migrated database stays
   consistent if v2.1.1 writes to it. Migrations write only when something needs changing, so an
   up-to-date database can be opened read-only. Schema changes must stay additive (new columns need
   defaults) and must not loosen file permissions.
+- **Deadlines:** relative deadlines count from an injected clock (`parseDeadlineAt`,
+  `relativeDeadline`; `ParseDeadline` passes `time.Now()`): `d`, `w` and `M` are calendar units
+  added with `AddDate` (same clock time across DST), `h` and `m` are elapsed time added after them.
+  Absolute deadlines are read in the clock's location.
 - **Missing tasks:** `UpdateTask` and `DeleteTask` return `ErrTaskNotFound` for a task that no
   longer exists (never re-create it); the TUI reloads the list on that error.
 - **Export format v2** adds `status` and `tags`; v1 files (no status/tags) still import, with the
@@ -98,9 +114,10 @@ Munus is a single-binary Go CLI/TUI task manager backed by a local SQLite file.
   pinned GitHub release and verified against its SHA-256 before use; bump both values together.
 - The Dockerfile builds with CGO on Alpine for the image's own platform and runs as UID 10001
   with `HOME=/app/data`. Builder (`golang:1.26-alpine3.24`) and runtime (`alpine:3.24`) use the same
-  Alpine release (same musl), and `apk` packages are pinned (`build-base`, `ca-certificates`).
+  Alpine release (same musl), and `apk` packages are pinned (`build-base`, `ca-certificates`,
+  `tzdata`; the latter lets `TZ` select the container's time zone, checked by `docker.yml`).
   To bump: move both images to the same new Alpine release, look up the current package versions
-  for that release (for example `apk policy build-base ca-certificates` in the new image, or the
+  for that release (for example `apk policy build-base ca-certificates tzdata` in the new image, or the
   aports `x.y-stable` branch), update the pins, and confirm `hadolint Dockerfile` and `docker.yml`
   pass. A pin fails the build once Alpine drops that package revision, so bump when that happens.
 
@@ -111,6 +128,9 @@ Munus is a single-binary Go CLI/TUI task manager backed by a local SQLite file.
 - Import reads the current tasks, writes the backup and replaces the tasks inside one storage
   transaction (`ReplaceAllTasksFunc`), so concurrent writes are never lost; the preview can still
   differ from the result if another process writes between plan and apply.
-- The Makefile targets (`make check`) mirror CI locally; keep them in step with `ci.yml`.
+- The Makefile targets (`make check`) mirror CI locally; keep them in step with `ci.yml`. CI, CD and
+  the govulncheck job use the latest Go 1.26 patch release (`go-version: "1.26.x"`,
+  `check-latest: true`); `go.mod` keeps the minimum version. Release builds do not use the setup-go
+  cache.
   `make fuzz` runs the fuzz targets (deadline parsing, terminal sanitising, import invariants and
   export round trip); run it after changing those areas.

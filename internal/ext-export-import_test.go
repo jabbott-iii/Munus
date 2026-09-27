@@ -25,6 +25,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"slices"
 	"strconv"
@@ -2299,4 +2300,53 @@ func FuzzParseImportData(f *testing.F) {
 			t.Fatalf("round trip changed the task count from %d to %d", len(tasks), len(again))
 		}
 	})
+}
+
+// P-042 / N-036: ApplyImport with DryRun reports exactly what the real import
+// reports and writes nothing, not even a backup.
+func TestApplyImportDryRunWritesNothing(t *testing.T) {
+	home := setTestHome(t)
+	file := writeTestImportBundle(t, ExportBundle{Version: 2, Tasks: []TaskDTO{
+		{ID: "1", Title: "changed"}, {ID: "2", Title: "same", Description: "x"}, {ID: "5", Title: "new"}, {Title: "no id"},
+	}})
+	configs := []ImportConfig{
+		{Mode: "merge"},
+		{Mode: "merge", OnConflict: "skip"},
+		{Mode: "merge", OnConflict: "rename"},
+		{Mode: "merge", SkipExisting: true},
+		{Mode: "merge", IDStrategy: "regenerate"},
+		{Mode: "replace"},
+		{Mode: "replace", IDStrategy: "regenerate"},
+	}
+	for _, cfg := range configs {
+		dry := newFileTestDB(t)
+		real := newFileTestDB(t)
+		for _, db := range []*Database{dry, real} {
+			seedTask(t, db, &ItemModel{Title: "original", Description: "x"})
+			seedTask(t, db, &ItemModel{Title: "same", Description: "x"})
+		}
+		cfg.Backup = true
+		want, err := ApplyImport(t.Context(), &TaskServiceAdapter{storage: real}, file, cfg)
+		if err != nil {
+			t.Fatalf("%+v: import failed: %v", cfg, err)
+		}
+		if err := os.RemoveAll(filepath.Join(home, ".munus")); err != nil {
+			t.Fatal(err)
+		}
+		cfg.DryRun = true
+		got, err := ApplyImport(t.Context(), &TaskServiceAdapter{storage: dry}, file, cfg)
+		if err != nil {
+			t.Fatalf("%+v: dry run failed: %v", cfg, err)
+		}
+		want.BackupPath = ""
+		if !reflect.DeepEqual(got, want) {
+			t.Errorf("%+v: dry run reported %+v, the real import %+v", cfg, got, want)
+		}
+		if tasks := tasksByID(t, dry); len(tasks) != 2 || tasks[1].Title != "original" {
+			t.Errorf("%+v: dry run changed the tasks: %+v", cfg, tasks)
+		}
+		if _, err := os.Stat(filepath.Join(home, ".munus")); !errors.Is(err, os.ErrNotExist) {
+			t.Errorf("%+v: dry run wrote a backup (stat: %v)", cfg, err)
+		}
+	}
 }

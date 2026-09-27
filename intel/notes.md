@@ -1,6 +1,21 @@
 # Engineering Notes & Open Questions
 
-## Plan 3 phase A baseline (2026-09-27, uncommitted change set on top of `48b4da2`)
+## Plan 3 phases B–C baseline (2026-09-27, uncommitted change set on top of `ad5c231` / `v2.2.0`)
+Same toolchain as below (Go 1.26.8 + CGO, modules verified against `go.sum`): `gofmt -s -l .` clean;
+`go vet ./...` clean (also `GOOS=windows`/`darwin`, CGO off); `go mod tidy` leaves `go.mod`/`go.sum`
+unchanged; `go test ./...` passes (coverage `internal` 88.9%, root 25.0%, 88.5% total), also with
+`-short`, with umask 077 and under TZ UTC, America/Phoenix, America/Los_Angeles, Pacific/Chatham,
+Asia/Kathmandu, Europe/London and America/St_Johns; `go test -race -count=3 -shuffle=on ./...`
+passes; the two concurrency stress tests pass 5× in a row; staticcheck 2026.2.1 and govulncheck
+v1.8.0 clean; `make fuzz` (30–45 s per target) clean; actionlint 1.7.12 with shellcheck 0.11.0 and
+hadolint 2.15.1 clean. Mutation check: 22 targeted reversions, 19 caught (2 equivalent, 1 caught by
+another test). Binary checks against v2.2.0: invalid flag values now print usage and create no
+database; 6 parallel imports 101/150 → 0/150 "database is locked"; mixed concurrent commands
+25/200 → 0/200; 3 parallel first opens 0/90 failures; `1d` keeps the clock time across DST;
+`export -f -` writes standard output. Not run locally: golangci-lint, gosec, CodeQL, the Docker
+build (including the `tzdata` pin), macOS/Windows test runs, the workflows themselves.
+
+## Plan 3 phase A baseline (2026-09-27; committed as `c9eeb97`, released in `v2.2.0`)
 Same toolchain as the review below (Go 1.26.8 + CGO, modules verified against `go.sum`):
 `gofmt -s -l .` clean; `go vet ./...` clean (also `GOOS=windows`/`darwin`, CGO off); `go mod tidy`
 leaves `go.mod`/`go.sum` unchanged; `go test ./...` passes (coverage `internal` 88.8%, root 25.0%,
@@ -89,7 +104,7 @@ unless noted. Security items live in `cybersec.md`.
 - **N-009 PgUp/PgDn selected an off-page task — Fixed** (cursor moves to first row of the new page).
 - **N-010 Sticky list error — Fixed** (any key dismisses; successful reload clears; `c` with no
   selection is a no-op; a failed toggle is reverted in memory).
-- **N-026 TUI `c`/`s` overwrite changes made elsewhere — Fixed (P-033, uncommitted).** `ToggleComplete` and
+- **N-026 TUI `c`/`s` overwrite changes made elsewhere — Fixed in v2.2.0 (P-033).** `ToggleComplete` and
   `CycleStatus` send the list's in-memory copy to `UpdateTask`, which saves every column and replaces
   the tags. An edit made by another process while the TUI is open (e.g. `munus edit 3 --title New
   --tag urgent`) is silently reverted by the next `c` or `s` on that task (reproduced with a test on a
@@ -117,28 +132,35 @@ unless noted. Security items live in `cybersec.md`.
 - **N-024 List created from the form has no window size — Fixed (P-018).**
 - **N-025 Plan-2 review findings — Fixed** (12 findings from an independent review of the plan-2
   change set; see `plan.md`, "Implementation notes").
-- **N-027 First open races between processes — Open (2026-09-27).** GORM `AutoMigrate` and the
+- **N-027 First open races between processes — Fixed (P-037, uncommitted).** GORM `AutoMigrate` and the
   check-then-create trigger installation are not atomic. Three `munus add` runs started together on a
   new database failed 10 of 120 times ("table `item_models` already exists", "trigger … already
   exists"); on a v2.1.1-style database without triggers, 5 of 120 parallel `list` runs failed. The
-  failing command exits 1 without changing any data. Fix: `CREATE TRIGGER IF NOT EXISTS`, and run the
-  migration inside a `BEGIN IMMEDIATE` transaction (or retry once).
-- **N-028 `add` accepts a whitespace-only title and description — Fixed (P-032, uncommitted).** The
+  failing command exits 1 without changing any data. Now a failed first migration attempt is retried
+  inside a transaction that holds the write lock, and triggers use `CREATE TRIGGER IF NOT EXISTS`.
+- **N-037 Concurrent writers fail with "database is locked" — Fixed (P-037, uncommitted).** Found while
+  fixing N-027. Transactions started deferred, so a read-then-write transaction (import, and GORM's
+  own write transactions) that could not upgrade its lock while another process wrote got
+  SQLITE_BUSY at once instead of waiting: 6 parallel `munus import` processes on v2.2.0 failed 101 of
+  150 times, mixed concurrent commands 25 of 200 (nothing is written by a failing command). The DSN
+  now sets `_txlock=immediate`, so every transaction takes the write lock when it begins and others
+  wait up to the busy timeout: 0 failures (`TestConcurrentImportProcessesAllApply`).
+- **N-028 `add` accepts a whitespace-only title and description — Fixed in v2.2.0 (P-032).** The
   TUI form and `edit` reject them; P-023 promised the same validation.
-- **N-029 `import --strict` accepts trailing data — Fixed (P-035, uncommitted).** `Decoder.Decode`
+- **N-029 `import --strict` accepts trailing data — Fixed in v2.2.0 (P-035).** `Decoder.Decode`
   read only the first JSON value, so `{…} {…}` or `{…}garbage` passed strict import. Both modes now
   reject anything but whitespace after the bundle.
-- **N-030 Enter in the TUI form puts the cursor at the start of the next field — Open
-  (2026-09-27).** Tab, ↓ and the Vim bindings put it at the end, so when editing a task, Enter then
+- **N-030 Enter in the TUI form puts the cursor at the start of the next field — Fixed (P-039,
+  uncommitted).** Tab, ↓ and the Vim bindings put it at the end, so when editing a task, Enter then
   typing prepends to the existing description or deadline (reproduced with a model test).
-- **N-031 Relative days and weeks ignore DST — Open (2026-09-27).** `d` and `w` are fixed 24 h / 168 h,
+- **N-031 Relative days and weeks ignore DST — Fixed (P-040, uncommitted; D-6).** `d` and `w` are fixed 24 h / 168 h,
   so `1d` entered just before a DST change lands an hour off the same clock time (and can show
   "Due today!" or "2 days left" where "Due tomorrow" is expected). `ParseRelativeTime` reads
-  `time.Now()` itself, so this cannot be tested deterministically. Fix: add days/weeks with
-  `AddDate` and pass the clock in.
-- **N-032 Docker image has no time-zone data — Open (2026-09-27).** `alpine:3.24` ships no zoneinfo
+  `time.Now()` itself, so this could not be tested deterministically. Now days and weeks are added
+  with `AddDate`, the clock is passed in, and the tests use fixed clocks and zones.
+- **N-032 Docker image has no time-zone data — Fixed (P-041, uncommitted; confirm in `docker.yml`).** `alpine:3.24` ships no zoneinfo
   and the binary does not embed `time/tzdata`, so `-e TZ=…` falls back to UTC for deadline input and
-  labels. Fix: install `tzdata` (pinned) or import `time/tzdata` in `main`, and document `TZ`.
+  labels. Now the image installs pinned `tzdata`, the README documents `TZ`, and `docker.yml` checks it.
 
 ### Info
 - Fixed in plan 2: N-007 `ExportPlan.Doing` never populated (P-022); `?`/`h` toggle an unused
@@ -150,17 +172,19 @@ unless noted. Security items live in `cybersec.md`.
 - Test hygiene — Fixed: masked assertions (`TestParseDeadline`, `TestReplaceAll`,
   `TestTaskDeadlineCalculation`, `TestDeleteTaskCmd_NegativeID`), 23 silent `return`s → `t.Fatalf`,
   tests no longer write backups into the real home directory, DST-robust durations.
-- Open (2026-09-27):
+- Fixed in plan 3 phase B (uncommitted):
   - **N-033** Required and mutually exclusive flag errors (`add -t x` without `-d`, `list --pending
     --completed`) still create the database: cobra validates those flags after `PersistentPreRunE`.
-    Fix: open the database in each command's `RunE` (or a `PreRunE` after `ValidateRequiredFlags`).
-  - **N-034** Runtime errors (e.g. `complete 999` → "task not found") print the full usage text;
-    `SilenceUsage` is only set for database-open failures.
-  - **N-035** `export -f -` writes a file named `-`, while `import -f -` reads standard input.
-  - **N-036** `ApplyImport` ignores `ImportConfig.DryRun` (the CLI and TUI handle dry runs
-    themselves); `openDatabase` leaves the connection open when a migration fails; TUI import/export
-    run synchronously in `Update`, so a slow path such as a FIFO hangs the interface; the TUI path
-    prompt accepts only single-byte keys, so non-ASCII paths cannot be typed.
+    Now each command opens the database itself after validating its arguments and flag values (P-038).
+  - **N-034** Runtime errors (e.g. `complete 999` → "task not found") printed the full usage text;
+    now only argument and flag errors do (P-038, D-8).
+  - **N-035** `export -f -` wrote a file named `-`; now it writes standard output and the TUI
+    export refuses `-` (P-042).
+  - **N-036** `ApplyImport` ignored `ImportConfig.DryRun`; `openDatabase` left the connection open
+    when a migration failed; the TUI path prompt accepted only single-byte keys. All fixed (P-042;
+    Alt+letter also no longer types into TUI text fields). Still open (deferred, needs a design):
+    TUI import/export run synchronously in `Update`, so a slow path such as a FIFO hangs the
+    interface.
 
 ## Behaviour changes to be aware of
 - Export JSON v1 gains an optional `completed_at` field. Older Munus versions ignore it, but an
@@ -179,24 +203,35 @@ unless noted. Security items live in `cybersec.md`.
   confirm applies only on `y`; `complete --undo` reopens only completed tasks; `import --file -`
   reads stdin (`--mode replace` then needs `--yes`).
 - Codecov v5 needs a `CODECOV_TOKEN` repository secret; without it uploads fail but CI does not.
-- Plan 3 phase A (uncommitted, ships in `v2.2.0`): import rejects files with more than 50,000 tasks,
+- Plan 3 phase A (released in `v2.2.0`): import rejects files with more than 50,000 tasks,
   data after the export and `null` task entries; a blank title is imported as `(untitled)` (rejected
   by `--strict`); file IDs above 1,000,000,000 (was 2^31-1) get new IDs, while tasks already in the
   database keep theirs; bidi override/isolate characters count as control characters; `add` rejects
   blank titles and descriptions; `complete --undo` writes nothing for a task that is not done; an
   empty or truncated import reports "unexpected end of JSON input"; unknown stored statuses are
   repaired when the database is opened; `?` DSN and `file:` URI databases are created `0600`.
+- Plan 3 phases B and C (uncommitted, for `v2.2.1`): every transaction starts with `BEGIN IMMEDIATE`
+  (concurrent writers wait instead of failing); argument and flag errors, including invalid flag
+  values, print usage and never create the database, while runtime errors print only the error;
+  relative `d`/`w` are calendar units; `export -f -` writes standard output; `ApplyImport` honours
+  `DryRun`; Enter in the TUI form keeps the cursor at the end of the next field; the Docker image
+  honours `TZ`; CI and releases use the latest Go 1.26 patch release and Security runs govulncheck.
 
 ## Residual risks / open questions
-- CI, Docker, Security and release (`v2.1.1`) workflows are validated on GitHub (2026-09-24).
+- CI, Docker, Security and release (`v2.1.1`) workflows are validated on GitHub (2026-09-24); all
+  of them were green again for `v2.2.0` (2026-09-27, maintainer-confirmed).
   darwin/amd64 is built but not smoke-run in `cd.yml` (cross-compiled on the arm64 runner).
 - darwin/amd64 is cross-compiled on the arm64 macOS runner and not smoke-run (no Rosetta assumption).
 - Merge import now reads, backs up and replaces tasks in one transaction (P-021); the plan shown
   before confirmation can still differ from the result if another process writes in between.
-- Plan 2 (committed, marked done 2026-09-27): the first windows/arm64 build is proven only by the
-  `v2.2.0` tag's `cd.yml` run; the Alpine pins must be bumped when Alpine drops those package
-  revisions (procedure in `maint.md`). v2 exports cannot be imported by v2.1.1 or older.
+- Plan 2 (released in `v2.2.0`, including the first windows/arm64 build): the Alpine pins must be
+  bumped when Alpine drops those package revisions (procedure in `maint.md`). v2 exports cannot be
+  imported by v2.1.1 or older.
 - Ctrl+C exits immediately (no graceful cancellation, see the P-029 deviation in `plan.md`).
+- Plan 3 phases B–C: SQLite does not queue waiting writers fairly, so under heavy, sustained
+  contention a writer can still exceed the 5 s busy timeout ("database is locked"); a user can raise
+  it with `MUNUS_DB_PATH=…?_busy_timeout=…`. The `tzdata` pin and the workflow changes are verified
+  only when `docker.yml`, `ci.yml`, `cd.yml` and `security.yml` run.
 - Plan 3 phase A: TUI `c`/`s` compute the next status from the list's copy, which may be stale
   (the write itself no longer overwrites other fields); `complete --undo` decides from a read made
   just before the write, so a task changed from done to `doing` in that window becomes `todo`.

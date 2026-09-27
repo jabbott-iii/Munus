@@ -4,12 +4,13 @@ IDs reference `notes.md` (N-) and `cybersec.md` (SEC-). Per `CONTRIBUTING.md`, e
 an issue before a PR. Plan 1 (P-001…P-014) is complete and released as `v2.1.1`. Plan 2 below is
 complete: phases A, B and C were committed to `main` (`68d60fa`…`44c6452`) and marked done by the
 maintainer on 2026-09-27. Plan 3 below is the active plan: it addresses the findings of the 2026-09-27
-review (`notes.md` N-026…, `cybersec.md` SEC-013…). The maintainer decided (D-1) to hold `v2.2.0`
-until plan 3 phase A lands, so `v2.2.0` = plan 2 + plan 3 phase A; phases B and C target `v2.2.1`.
-Phase A (and P-043) is implemented as an uncommitted change set (2026-09-27) awaiting maintainer
-review and CI.
+review (`notes.md` N-026…, `cybersec.md` SEC-013…). Per decision D-1, `v2.2.0` = plan 2 + plan 3
+phase A (with P-043): committed as `c9eeb97` (+ `ad5c231`, history) and released as `v2.2.0` on
+2026-09-27 with green CI, Docker, Security and release runs (maintainer-confirmed). Phases B and C
+(target `v2.2.1`) are implemented as an uncommitted change set (2026-09-27) awaiting maintainer
+review; the workflow changes are delivered as a patch.
 
-## Plan 3 — drafted and decided 2026-09-27 (phase A → v2.2.0; phases B and C → v2.2.1)
+## Plan 3 — drafted and decided 2026-09-27 (phase A released in v2.2.0; phases B and C → v2.2.1)
 
 Source: the 2026-09-27 review of `48b4da2` (`notes.md` N-026…N-036, `cybersec.md` SEC-013…SEC-018);
 every item was reproduced with the HEAD binary or a test. Checked against `v2.1.1`: SEC-014, SEC-015,
@@ -40,12 +41,12 @@ README/`intel` updates where behaviour changes, a `history.md` entry, and green 
 
 | ID | Priority | Item | Ref | Acceptance | Status |
 |---|---|---|---|---|---|
-| P-031 | High | **Stable IDs above the cap.** An ID is kept when it is in 1..1,000,000,000 (`maxImportedTaskID`, lowered from 2^31-1 per D-4) or is the canonical spelling of a task already in the database; numeric file IDs are canonicalised before merging. `PlanImport` and `ApplyImport` stay on the same merge logic. | SEC-015 | Import the largest allowed ID, `add`, empty merge import, export, re-import (merge and replace): IDs unchanged, no duplicates, plan == apply; `TestImportHugeIDGetsNewDatabaseID` still passes; file IDs above the cap get new IDs | Done (uncommitted) |
-| P-032 | High | **Non-empty titles everywhere.** One shared check (title non-empty after trimming) used by `add`, `edit`, the TUI form and import; import applies it after stripping control characters. `add` also rejects a whitespace-only description, like the TUI form. Existing files per D-3. | SEC-014, N-028 | Control-only and whitespace-only titles: `--strict` rejects with the task index, default import per D-3; `add -t "  "` rejected; property test: every file import accepts exports to a file that re-imports with `--strict`; P-043 fuzz target passes without its empty-title exception | Done (uncommitted) |
-| P-033 | Medium | **Status changes without stale writes.** New `Storage.SetTaskStatus(ctx, id, status, now)` changes only `status`, `completed`, `completed_at` and `updated_at` in one transaction, with `setStatus` transition rules, and returns `ErrTaskNotFound`; TUI `c`/`s` and CLI `complete` use it. | N-026 | Edit title and tags through a second handle, then TUI `c`, TUI `s` and `munus complete`: edits kept; deleted task → reload, no error shown; `complete --undo` still leaves `doing` alone; completing a done task keeps `completed_at` | Done (uncommitted) |
-| P-034 | Medium | **Sanitise status and error output.** `PrintList` prints a sanitised status (derived from `completed` when unknown); the migration repairs unknown statuses, writing only when needed; `main` prints errors itself (`SilenceErrors`) through `sanitizeForTerminal`, keeping the `Error: ` line on stderr; the TUI form error line is sanitised; bidi controls per D-7. | SEC-013 | Tests with ESC/BEL in `status` and a trigger `RAISE` message: no control characters in `list` output, `complete` error output or the form view; migration test for an unknown status; an up-to-date DB still opens read-only; binary check `munus list \| od -c` shows no `033` | Done (uncommitted) |
-| P-035 | Low | **Bounded, exact import decoding.** Decode the `tasks` array with a streaming `json.Decoder` and stop at the task cap (D-2) before merging or any storage call; reject trailing data after the bundle in both modes. Same limits for files, stdin and the TUI. | SEC-016, N-029 | Cap + 1 tasks rejected with a clear error and no storage call; `{…} {…}` and `{…}garbage` rejected with and without `--strict`; `--strict` still rejects unknown fields; peak RSS for a maximal accepted file recorded in `notes.md` | Done (uncommitted) |
-| P-036 | Low | **Owner-only DSN database files.** A database file this process creates through a `file:` URI or a `?` DSN is tightened to `0600`; existing files keep their mode. | SEC-017 | Non-Windows tests for both DSN forms (new file `0600`) and for an existing `0644` file (unchanged) | Done (uncommitted) |
+| P-031 | High | **Stable IDs above the cap.** An ID is kept when it is in 1..1,000,000,000 (`maxImportedTaskID`, lowered from 2^31-1 per D-4) or is the canonical spelling of a task already in the database; numeric file IDs are canonicalised before merging. `PlanImport` and `ApplyImport` stay on the same merge logic. | SEC-015 | Import the largest allowed ID, `add`, empty merge import, export, re-import (merge and replace): IDs unchanged, no duplicates, plan == apply; `TestImportHugeIDGetsNewDatabaseID` still passes; file IDs above the cap get new IDs | Done — released in v2.2.0 |
+| P-032 | High | **Non-empty titles everywhere.** One shared check (title non-empty after trimming) used by `add`, `edit`, the TUI form and import; import applies it after stripping control characters. `add` also rejects a whitespace-only description, like the TUI form. Existing files per D-3. | SEC-014, N-028 | Control-only and whitespace-only titles: `--strict` rejects with the task index, default import per D-3; `add -t "  "` rejected; property test: every file import accepts exports to a file that re-imports with `--strict`; P-043 fuzz target passes without its empty-title exception | Done — released in v2.2.0 |
+| P-033 | Medium | **Status changes without stale writes.** New `Storage.SetTaskStatus(ctx, id, status, now)` changes only `status`, `completed`, `completed_at` and `updated_at` in one transaction, with `setStatus` transition rules, and returns `ErrTaskNotFound`; TUI `c`/`s` and CLI `complete` use it. | N-026 | Edit title and tags through a second handle, then TUI `c`, TUI `s` and `munus complete`: edits kept; deleted task → reload, no error shown; `complete --undo` still leaves `doing` alone; completing a done task keeps `completed_at` | Done — released in v2.2.0 |
+| P-034 | Medium | **Sanitise status and error output.** `PrintList` prints a sanitised status (derived from `completed` when unknown); the migration repairs unknown statuses, writing only when needed; `main` prints errors itself (`SilenceErrors`) through `sanitizeForTerminal`, keeping the `Error: ` line on stderr; the TUI form error line is sanitised; bidi controls per D-7. | SEC-013 | Tests with ESC/BEL in `status` and a trigger `RAISE` message: no control characters in `list` output, `complete` error output or the form view; migration test for an unknown status; an up-to-date DB still opens read-only; binary check `munus list \| od -c` shows no `033` | Done — released in v2.2.0 |
+| P-035 | Low | **Bounded, exact import decoding.** Decode the `tasks` array with a streaming `json.Decoder` and stop at the task cap (D-2) before merging or any storage call; reject trailing data after the bundle in both modes. Same limits for files, stdin and the TUI. | SEC-016, N-029 | Cap + 1 tasks rejected with a clear error and no storage call; `{…} {…}` and `{…}garbage` rejected with and without `--strict`; `--strict` still rejects unknown fields; peak RSS for a maximal accepted file recorded in `notes.md` | Done — released in v2.2.0 |
+| P-036 | Low | **Owner-only DSN database files.** A database file this process creates through a `file:` URI or a `?` DSN is tightened to `0600`; existing files keep their mode. | SEC-017 | Non-Windows tests for both DSN forms (new file `0600`) and for an existing `0644` file (unchanged) | Done — released in v2.2.0 |
 
 ### Implementation notes — phase A (2026-09-27)
 - Implemented in the order P-043 → P-031 → P-032 → P-033 → P-034 → P-035 → P-036. Details beyond the
@@ -71,20 +72,50 @@ README/`intel` updates where behaviour changes, a `history.md` entry, and green 
 
 | ID | Priority | Item | Ref | Acceptance | Status |
 |---|---|---|---|---|---|
-| P-037 | Medium | **Concurrent first open.** Triggers use `CREATE TRIGGER IF NOT EXISTS`; schema creation and migration are safe when several processes open a new or older database at once (take the write lock only when a migration is needed and re-check under it, so an up-to-date DB still opens read-only). | N-027 | The review's reproduction (3 parallel `add` × 40 new DBs; 3 parallel `list` × 40 trigger-less DBs) has 0 failures; read-only open test passes; `go test -race` | Proposed |
-| P-038 | Low | **CLI error handling.** `PersistentPreRunE` runs `ValidateRequiredFlags` and `ValidateFlagGroups` before opening the database; usage is printed only for argument and flag errors (D-8). | N-033, N-034 | `add -t x` and `list --pending --completed` create no DB file; `complete 999` prints one error line; help, version and completion tests still pass | Proposed |
-| P-039 | Low | **Form cursor.** Enter moves to the end of the next field, as Tab and ↓ do. | N-030 | Model test: edit form, Enter, type → text appended | Proposed |
-| P-040 | Low | **Calendar relative deadlines.** `d`/`w` use calendar arithmetic (D-6); the parser takes the current time as an input (`ParseDeadline` wraps it with `time.Now()`). | N-031 | Deterministic tests across both 2026 US DST changes with fixed zones (`time/tzdata`); SEC-008 bounds tests unchanged | Proposed |
-| P-041 | Low | **Docker time zones.** Pinned `tzdata` in the runtime image (same Alpine release as the other pins); README documents `-e TZ=…`. | N-032 | hadolint clean; `docker.yml` smoke test with `TZ` set stores a deadline with the expected offset (workflow patch) | Proposed |
-| P-042 | Info | **Small fixes.** `export -f -` writes to standard output (like `import -f -` reads it); `ApplyImport` honours `DryRun` (plan only, no write); `openDatabase` closes the connection when a migration fails; the TUI path prompt accepts multi-byte characters. Deferred: moving TUI import/export off the `Update` path (needs a design; P-035 bounds the worst case). | N-035, N-036 | Tests for each; `export -f - \| import -f - --dry-run` round-trips | Proposed |
+| P-037 | Medium | **Concurrent first open.** Triggers use `CREATE TRIGGER IF NOT EXISTS`; schema creation and migration are safe when several processes open a new or older database at once (take the write lock only when a migration is needed and re-check under it, so an up-to-date DB still opens read-only). | N-027 | The review's reproduction (3 parallel `add` × 40 new DBs; 3 parallel `list` × 40 trigger-less DBs) has 0 failures; read-only open test passes; `go test -race` | Done (uncommitted) |
+| P-038 | Low | **CLI error handling.** Each command validates its arguments and flag values (cobra `Args` validators for task IDs and import flag combinations, required/grouped flags, then value checks such as `--status`, `--deadline`, `--tag`, `--mode`) and only then calls `openForCommand`, which turns off usage and opens the database; usage is printed only for argument and flag errors (D-8). | N-033, N-034 | `add -t x` and `list --pending --completed` create no DB file; `complete 999` prints one error line; help, version and completion tests still pass | Done (uncommitted) |
+| P-039 | Low | **Form cursor.** Enter moves to the end of the next field, as Tab and ↓ do. | N-030 | Model test: edit form, Enter, type → text appended | Done (uncommitted) |
+| P-040 | Low | **Calendar relative deadlines.** `d`/`w` use calendar arithmetic (D-6); the parser takes the current time as an input (`ParseDeadline` wraps it with `time.Now()`). | N-031 | Deterministic tests across both 2026 US DST changes with fixed zones (`time/tzdata`); SEC-008 bounds tests unchanged | Done (uncommitted) |
+| P-041 | Low | **Docker time zones.** Pinned `tzdata` in the runtime image (same Alpine release as the other pins); README documents `-e TZ=…`. | N-032 | hadolint clean; `docker.yml` smoke test with `TZ` set stores a deadline with the expected offset (workflow patch) | Done (uncommitted) — `tzdata=2026d-r0` taken from aports `3.24-stable`; `docker.yml` confirms it |
+| P-042 | Info | **Small fixes.** `export -f -` writes to standard output (like `import -f -` reads it); `ApplyImport` honours `DryRun` (plan only, no write); `openDatabase` closes the connection when a migration fails; the TUI path prompt accepts multi-byte characters. Deferred: moving TUI import/export off the `Update` path (needs a design; P-035 bounds the worst case). | N-035, N-036 | Tests for each; `export -f - \| import -f - --dry-run` round-trips | Done (uncommitted) |
 
 ### Phase C — tooling, CI/CD and hygiene
 
 | ID | Priority | Item | Ref | Acceptance | Status |
 |---|---|---|---|---|---|
-| P-043 | Low | **Fuzz targets in the repository.** `FuzzParseDeadline`, `FuzzSanitizeForTerminal` and `FuzzParseImportData` (import invariants plus export round trip), with seed corpora that run in `go test`; `make fuzz` runs each for `FUZZTIME` (default 30s). | review | `go test ./...` runs the seeds; each target runs 60 s clean once P-032 lands | Done (uncommitted), with phase A; the `make fuzz` target is delivered as `makefile-fuzz.patch` (apply with `git apply`) |
-| P-044 | Low | **CI/CD hardening (workflow patch).** Go toolchain per D-5; `cache: false` for the `cd.yml` build job; optional govulncheck job in `security.yml` with the action pinned by SHA. | SEC-018 | CI and CD logs show the patched Go version; govulncheck clean; actionlint clean | Proposed |
-| P-045 | Low | **Ignore rules.** `.gitignore` adds `munus-export-*.json`, `*.db-journal`, `*.db-wal`, `*.db-shm`; `.dockerignore` adds `**/*.db-wal`, `**/*.db-shm`. | SEC-018 | `git check-ignore` matches each pattern; Docker build context excludes them | Proposed |
+| P-043 | Low | **Fuzz targets in the repository.** `FuzzParseDeadline`, `FuzzSanitizeForTerminal` and `FuzzParseImportData` (import invariants plus export round trip), with seed corpora that run in `go test`; `make fuzz` runs each for `FUZZTIME` (default 30s). | review | `go test ./...` runs the seeds; each target runs 60 s clean once P-032 lands | Done — released in v2.2.0 (the `make fuzz` Makefile change was applied from a patch) |
+| P-044 | Low | **CI/CD hardening (workflow patch).** Go toolchain per D-5; `cache: false` for the `cd.yml` build job; govulncheck job in `security.yml` (`go run golang.org/x/vuln/cmd/govulncheck@v1.8.0`, version-pinned and verified by the Go checksum database, instead of a new action). | SEC-018 | CI and CD logs show the patched Go version; govulncheck clean; actionlint clean | Done (uncommitted) — actionlint (with shellcheck) clean; CI/CD logs to confirm |
+| P-045 | Low | **Ignore rules.** `.gitignore` adds `munus-export-*.json`, `*.db-journal`, `*.db-wal`, `*.db-shm`; `.dockerignore` adds `**/*.db-wal`, `**/*.db-shm`. | SEC-018 | `git check-ignore` matches each pattern; Docker build context excludes them | Done (uncommitted) |
+
+### Implementation notes — phases B and C (2026-09-27)
+- P-037 found and fixed a further defect (N-037): concurrent writers on v2.2.0 failed with "database
+  is locked" when a read-then-write transaction could not upgrade its lock (6 parallel `import`
+  processes: 101 of 150 failed; mixed `import`/`add`/`complete`/`edit`/`export`: 25 of 200). With
+  `BEGIN IMMEDIATE` for every transaction: 0 failures; 3 parallel first opens of 30 new databases:
+  0 failures (v2.2.0: 10 of 120 in the review).
+- P-038 changed approach during implementation: rather than validating flags in
+  `PersistentPreRunE`, every command opens the database itself (`openForCommand`) after its own
+  checks, so invalid flag values (`import --mode bogus`, `list --status bogus`,
+  `add --deadline someday`, `edit --tag "a b"`, …) also print usage and create no database. `edit`
+  checks its new values against an empty task before opening; `import` reads its file before
+  opening, so an unreadable file creates no database.
+- P-040: `ParseDeadline` and `ParseRelativeTime` keep their signatures; `parseDeadlineAt` and
+  `relativeDeadline` take the clock, and `edit` passes its own. The deadline tests now use fixed
+  clocks and zones (they no longer depend on the machine's time zone or DST dates).
+- P-042 also: Alt+letter no longer types into TUI text fields; the path prompt ignores control and
+  bidi characters and is rendered sanitised; the TUI export refuses `-`.
+- The workflow files `ci.yml`, `cd.yml` and `security.yml` use CRLF line endings, which the patch
+  keeps. `tzdata=2026d-r0` comes from aports `3.24-stable` (the other two pins match that branch);
+  the new `docker.yml` step fails if the pin or the time-zone behaviour is wrong.
+- An independent review found no High or Medium issues and no regression of SEC-001…SEC-017; its
+  Low findings were fixed: the multi-process stress test could time out on slow storage (now a 60 s
+  busy timeout, a process timeout and a checked final count), invalid flag values skipped usage and
+  created the database (the P-038 change above), Alt+letter typed into the path prompt, the first
+  migration error was lost when the retry failed too (now both are reported), and three test gaps.
+- Mutation check: 22 targeted reversions; 19 caught, 2 equivalent (the task-ID `Args` check, which
+  `RunE` repeats before opening, and running the migration retry without a transaction, which only
+  matters when two retries race), 1 masked by design (`IF NOT EXISTS` is caught by
+  `TestConsistencyTriggerDDLIsIdempotent`, not by the stress test).
 
 ### Security requirements for plan 3
 - No closed SEC item may regress (SEC-001…SEC-012), in particular terminal sanitising (SEC-005, SEC-010),
@@ -101,16 +132,19 @@ targets for 60 s each, and `GOOS=windows`/`GOOS=darwin go vet ./...` with CGO of
 be run are listed as not run.
 
 ### Suggested order
-Phase A and P-043 are done (uncommitted): maintainer review → commit → green CI, Docker and Security
-runs → tag `v2.2.0` (plan 2 + plan 3 phase A; its `cd.yml` run is also the first windows/arm64 build,
-P-027). Then P-037 → P-038…P-042 → P-044, P-045 → release `v2.2.1`.
+Phase A and P-043 shipped in `v2.2.0` (2026-09-27). Phases B and C are done (uncommitted): maintainer
+review → apply the workflow patch → commit → green CI, Docker (including the new `TZ` step) and
+Security (including govulncheck) runs → tag `v2.2.1`.
 Release notes for `v2.2.0` must list, besides the plan-2 changes: import rejects files over 50,000
 tasks and data after the export; blank titles import as `(untitled)` (`--strict` rejects them); file
 IDs above 1,000,000,000 get new IDs; bidi override characters are rejected like control characters;
 `add` rejects blank titles and descriptions. Release notes for `v2.2.1`: `d`/`w` are calendar-based
-(D-6) and runtime errors no longer print usage (D-8).
+(D-6); runtime errors no longer print usage, while argument and flag errors (including invalid flag
+values) print usage and no longer create the database (D-8); concurrent commands no longer fail
+with "database is locked"; `export -f -` writes standard output; the Docker image honours `TZ`;
+CI and releases build with the latest Go 1.26 patch release.
 
-## Plan 2 — drafted 2026-09-24, completed 2026-09-27 (target release: v2.2.0)
+## Plan 2 — drafted 2026-09-24, completed 2026-09-27 (released in v2.2.0)
 
 Maintainer decisions (2026-09-24):
 - Features in scope: task editing, list filters, and a status + tags data model.
@@ -183,7 +217,7 @@ Export v2 note: older Munus versions (≤ v2.1.1) reject version-2 files. Releas
 |---|---|---|---|---|---|
 | P-025 | Medium | Draft `CONTRIBUTING.md` from repo facts: issue-first rule, license header, `gofmt -s -w .`, Go 1.26 + C compiler (`CGO_ENABLED=1`), `make` targets, CI checks, PR expectations, `intel/` upkeep. Maintainer reviews before commit. | AGENTS.md | Every command in it verified to run | Done — reviewed and committed in `68d60fa` |
 | P-026 | Low | Makefile dev targets: `build`, `test`, `race`, `cover`, `vet`, `fmt`, `lint` (golangci-lint v2.13.2 when installed), `check` (all of them); keep release targets; update `make help`. | new | Each target runs locally; CI commands unchanged | Done |
-| P-027 | Low | windows/arm64 release: `cd.yml` entry on the `windows-11-arm` runner. Spike first: confirm whether the image has a usable C compiler; otherwise install a pinned, SHA-256-verified llvm-mingw toolchain. Smoke-run the binary; add `munus_windows_arm64.zip` to README. | notes | Tagged release publishes a working windows/arm64 zip | Done — `cd.yml` entry committed; the first windows/arm64 zip is published by the `v2.2.0` tag |
+| P-027 | Low | windows/arm64 release: `cd.yml` entry on the `windows-11-arm` runner. Spike first: confirm whether the image has a usable C compiler; otherwise install a pinned, SHA-256-verified llvm-mingw toolchain. Smoke-run the binary; add `munus_windows_arm64.zip` to README. | notes | Tagged release publishes a working windows/arm64 zip | Done — first windows/arm64 zip built, smoke-tested and published by the `v2.2.0` release run |
 | P-028 | Low | Pin Alpine packages (`build-base`, `ca-certificates`) to the versions current at implementation; document the bump procedure in `maint.md`. | hadolint DL3018 | hadolint clean; Docker workflow green | Done |
 
 ### Security requirements for plan 2
@@ -203,10 +237,8 @@ as not run.
 P-030 → P-029 → Phase A (P-015 → P-021) → P-022 → P-023 → P-024 → Phase C, then release v2.2.0.
 If the export default change (P-015) is treated as breaking for scripted users, release as v3.0.0.
 
-Remaining before release: per plan 3 decision D-1, `v2.2.0` waits for plan 3 phase A; then tag
-`v2.2.0` (its `cd.yml` run is the first windows/arm64 build, P-027) with release notes covering the
-export default change (P-015) and export schema v2 (≤ v2.1.1 rejects it) as well as the plan 3 phase A
-changes.
+Released as `v2.2.0` on 2026-09-27 together with plan 3 phase A (decision D-1); the release run was
+the first windows/arm64 build (P-027).
 
 ## Completed — Plan 1 (released in v2.1.1)
 

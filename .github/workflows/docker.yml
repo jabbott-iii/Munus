@@ -36,3 +36,10 @@ jobs:
           docker volume create munus-smoke
           docker run --rm -v munus-smoke:/app/data "$IMAGE_NAME" add --title smoke --description "docker smoke test"
           docker run --rm -v munus-smoke:/app/data "$IMAGE_NAME" list | grep -q smoke
+
+      # TZ must select the local time zone (the image ships tzdata); without
+      # zone data the deadline would be stored as 09:00 UTC.
+      - name: Smoke test time zone
+        run: |
+          docker run --rm -e TZ=America/Phoenix -v munus-smoke:/app/data "$IMAGE_NAME" add --title tz --description "time zone smoke test" --deadline "2026-10-01 09:00"
+          docker run --rm -v munus-smoke:/app/data "$IMAGE_NAME" export --stdout | grep -q '"deadline": "2026-10-01T09:00:00-07:00"'
