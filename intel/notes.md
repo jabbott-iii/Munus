@@ -1,5 +1,28 @@
 # Engineering Notes & Open Questions
 
+## Plan 4 phase A baseline (2026-09-27; uncommitted change set on top of `97cf04b`, target `v2.2.2`)
+Same toolchain as below (Go 1.26.8 + CGO, modules verified against `go.sum`): `gofmt -s -l .` clean;
+`go vet ./...` clean (also `GOOS=windows`/`darwin`, CGO off); `go mod tidy` leaves `go.mod`/`go.sum`
+unchanged; `go test ./...` passes (coverage `internal` 88.9%, root 25.0%, `tools/licenses` 90.1%,
+88.7% total), also with `-short` and with umask 077; `go test -race -count=3 -shuffle=on ./...`
+passes; `go run ./tools/licenses -check` passes; staticcheck, govulncheck v1.8.0 and gosec v2.29.0
+(built from the SHA pinned in `security.yml`; 0 issues, the three new `#nosec` lines are G204, G304
+and G306 with reasons) clean; hadolint 2.15.1 and actionlint 1.7.12 with shellcheck 0.11.0 clean;
+`dependabot.yml` and the workflows validate against the SchemaStore schemas (check-jsonschema
+0.38.2). Mutation check of `tools/licenses`: 16 targeted mutants, all caught. A dependency change
+now invalidates a cached pass of the license test (reproduced before and after the fix). Static
+build check with zig 0.16 (`zig cc -target x86_64-linux-musl`, musl 1.2.5) and the Dockerfile's
+flags: "statically linked", no `INTERP`, `GNU_STACK` 8 MiB, add/list/complete/export/import/backup,
+`TZ` and 20 concurrent `add`s work; a C and a cgo probe confirmed musl's 128 KiB default thread
+stack and that `-z stack-size` raises the stacks Go's cgo threads get. The packaging loop was run
+locally (archives contain the binary plus `LICENSE`, `NOTICE`, `THIRD_PARTY_LICENSES`; a missing
+file fails the step). An independent review found no High or Medium issues; its Low findings were
+fixed (test-cache invalidation, `GOWORK=off`/`GOFLAGS` and release tags for `go list`, OS-independent
+ordering, image binary stack size, `go version` in the Linux build log with `docker build --pull`,
+OIDC token kept out of the publishing job, N-038). Not run locally: the Docker build itself (no
+daemon or registry access), Alpine's musl 1.2.6 build, the old-distro containers, macOS/Windows
+test runs, golangci-lint, CodeQL, attestation and Dependabot — they need the GitHub runs.
+
 ## Plan 3 phases B–C baseline (2026-09-27; committed as `df70f29`, released in `v2.2.1`)
 Same toolchain as below (Go 1.26.8 + CGO, modules verified against `go.sum`): `gofmt -s -l .` clean;
 `go vet ./...` clean (also `GOOS=windows`/`darwin`, CGO off); `go mod tidy` leaves `go.mod`/`go.sum`
@@ -163,6 +186,16 @@ unless noted. Security items live in `cybersec.md`.
   and the binary does not embed `time/tzdata`, so `-e TZ=…` falls back to UTC for deadline input and
   labels. Now the image installs pinned `tzdata`, the README documents `TZ`, and `docker.yml` checks it.
 
+- **N-038 Smoke tests can fail with SIGPIPE — Fixed (plan 4 phase A, workflow patch).** `munus list
+  | grep -q smoke` in steps with `shell: bash` (which adds `pipefail`) failed in 10 of 200 local runs:
+  `grep -q` exits at the first match and munus, still writing, gets SIGPIPE. `cd.yml` and `ci.yml`
+  now use `grep … > /dev/null`.
+- **N-039 musl gives cgo threads a 128 KiB stack — Fixed (plan 4 phase A, P-047).** Go's cgo
+  threads take `pthread_attr` defaults, which on musl are 128 KiB (glibc: 8 MiB from `RLIMIT_STACK`),
+  so SQLite ran on small stacks in the Docker image since plan 2 and would have in the new static
+  binaries. Both Dockerfile builds link with `-Wl,-z,stack-size=8388608`, which musl reads from
+  `PT_GNU_STACK`; `cd.yml` and `docker.yml` check it.
+
 ### Info
 - Fixed in plan 2: N-007 `ExportPlan.Doing` never populated (P-022); `?`/`h` toggle an unused
   `showHelp` (P-019); `import -f -` advertises stdin but fails (P-020); `ctrl+c`/`q` ignored at TUI
@@ -217,19 +250,30 @@ unless noted. Security items live in `cybersec.md`.
   relative `d`/`w` are calendar units; `export -f -` writes standard output; `ApplyImport` honours
   `DryRun`; Enter in the TUI form keeps the cursor at the end of the next field; the Docker image
   honours `TZ`; CI and releases use the latest Go 1.26 patch release and Security runs govulncheck.
+- Plan 4 phase A (target `v2.2.2`, packaging only): release archives also contain `LICENSE`,
+  `NOTICE` and `THIRD_PARTY_LICENSES` (extract them into a directory); Linux binaries are static musl
+  builds from the Dockerfile (no glibc; no VCS stamp in `go version -m`); darwin/amd64 is built and
+  smoke-tested on Intel macOS; archives carry build provenance attestations; the image has the
+  license files in `/usr/share/licenses/munus/`; image and Linux binaries request 8 MiB thread
+  stacks. `NOTICE` no longer lists module versions.
 
 ## Residual risks / open questions
-(Plan 4 in `plan.md` proposes how to address the open ones below; 2026-09-27.)
+(Plan 4 in `plan.md`, decided 2026-09-27, addresses the open ones below.)
 - CI, Docker, Security and release (`v2.1.1`) workflows are validated on GitHub (2026-09-24); all
   of them were green again for `v2.2.0` (2026-09-27, maintainer-confirmed).
-  darwin/amd64 is built but not smoke-run in `cd.yml` (cross-compiled on the arm64 runner).
-- darwin/amd64 is cross-compiled on the arm64 macOS runner and not smoke-run (no Rosetta assumption).
+- Plan 4 phase A (uncommitted): darwin/amd64 now builds and smoke-runs on `macos-15-intel` (P-048);
+  that runner image is supported until Fall 2027, so revisit the matrix before then. The new jobs
+  (static Linux build via Docker on amd64/arm64, Debian 11/Alpine smoke runs, packaging with license
+  files, provenance attestation, split release job) have not run on GitHub yet; attestations need the
+  repository to stay public (or GitHub Enterprise Cloud).
 - Merge import now reads, backs up and replaces tasks in one transaction (P-021); the plan shown
   before confirmation can still differ from the result if another process writes in between.
 - Plan 2 (released in `v2.2.0`, including the first windows/arm64 build): the Alpine pins must be
   bumped when Alpine drops those package revisions (procedure in `maint.md`). v2 exports cannot be
   imported by v2.1.1 or older.
-- Ctrl+C exits immediately (no graceful cancellation, see the P-029 deviation in `plan.md`).
+- Ctrl+C in CLI commands exits immediately (no graceful cancellation, see the P-029 deviation in
+  `plan.md`). Final per D-17 (a), 2026-09-27: the process exits and SQLite rolls back an unfinished
+  transaction, so a write is either complete or absent; no cancellation handling is planned.
 - Plan 3 phases B–C: SQLite does not queue waiting writers fairly, so under heavy, sustained
   contention a writer can still exceed the 5 s busy timeout ("database is locked"); a user can raise
   it with `MUNUS_DB_PATH=…?_busy_timeout=…`. The `tzdata` pin must be bumped when Alpine 3.24 drops
@@ -244,22 +288,33 @@ unless noted. Security items live in `cybersec.md`.
   other external tool editing the database directly can still store tags that bypass validation
   (output is sanitised, SEC-010).
 - The root package (`main.go`, `database_path.go`) has 25% statement coverage.
-- Release archives (`cd.yml`) and the Docker image contain only the binary, not `LICENSE` or
-  `NOTICE`; the MIT, BSD and Apache-2.0 licenses of the bundled modules ask for their notices to
-  accompany binary distributions. Linux release binaries also link glibc statically; its LGPL
-  terms for static linking have not been reviewed.
+- Licensing (engineering notes, not legal advice; plan 4 phase A, P-046/P-047): archives and the
+  image now carry the full texts of every compiled module, Go, SQLite and musl, and Linux binaries
+  no longer contain glibc. Still not covered: Windows binaries statically link parts of the
+  MinGW-w64 runtime and libgcc (runner gcc) or compiler-rt (llvm-mingw); most of that needs no
+  notice (public domain, GCC runtime or LLVM exceptions), but some mingw-w64 CRT files (ZPL-2.1,
+  BSD, gdtoa) do if they are linked in — check with a linker map (`-extldflags=-Wl,-Map=…`) and add
+  what is needed. musl's `COPYRIGHT` points to per-file notices for some parts (TRE regex, parts of
+  libm, crypt, Arm string functions); which of them end up in the binary was not reviewed. libgcc
+  (GCC runtime exception) and fortify-headers (0BSD) in the Linux binaries need no notice. The
+  image's Alpine base packages carry their own licenses and are not covered by
+  `THIRD_PARTY_LICENSES`.
+- The Linux release toolchain now comes from the floating `golang:1.26-alpine3.24` tag (pulled
+  fresh; `go version` is logged) and images are pinned by tag, not digest; Dependabot does not track
+  the `debian:11`/`alpine:3.24` smoke-test images.
 - Existing DB files keep their permissions; only newly created ones are `0600`.
 - Over-length text stored by pre-validation versions (via unchecked import) cannot be re-imported.
 - `CONTRIBUTING.md` was empty in `e32fd8a`; plan 2 (P-025) drafts it from repository facts for
   maintainer review. `NOTICE` lists every third-party module compiled into the release binaries
-  (all 29 in `go.mod`, three of them Windows-only), plus embedded SQLite and the Go standard library;
-  holders and licenses were read from each module's own license file (2026-09-24). Update it when
-  `go.mod` changes.
+  (all 29 in `go.mod`, three of them Windows-only), plus embedded SQLite, the Go standard library and
+  (plan 4) musl; holders and licenses were read from each module's own license file (2026-09-24).
+  Since plan 4 it names no versions, and `go test ./tools/licenses` fails when its module list or
+  `THIRD_PARTY_LICENSES` no longer matches the compiled modules.
 
 ## Documentation drift (README) — resolved 2026-09-23
 List flags, add examples, artifact names, Docker volume path/user, undocumented flags and
-`MUNUS_DB_PATH`, CGO prerequisite, testing and structure sections. `AGENTS.md` still refers to
-`CONTRIBUTING.md ` with a trailing space.
+`MUNUS_DB_PATH`, CGO prerequisite, testing and structure sections. `AGENTS.md` referred to
+`CONTRIBUTING.md ` with a trailing space; the maintainer fixed it in `97cf04b` (2026-09-27, P-058).
 **Resolved (2026-09-27):** `intel/history.md` was removed in `48b4da2` while `AGENTS.md` still
 requires it; at the maintainer's request a new `intel/history.md` was created (the previous record is in
 git at `48b4da2^`).
@@ -271,3 +326,7 @@ git at `48b4da2^`).
 - Plan 2: staticcheck, errcheck and ineffassign were built from GitHub sources and run on a copy of
   the tree (staticcheck does not accept `-modfile`); actionlint 1.7.12 is needed for the
   `windows-11-arm` runner label (1.7.7 rejects it).
+- Plan 4: gosec was built from the commit `security.yml` pins (`deb54465…`, v2.29.0) without its AI
+  autofix package (which alone pulls in the cloud SDKs); zig from PyPI (`ziglang`) stands in for a
+  musl C compiler when no Docker daemon is available; `check-jsonschema` validates `dependabot.yml`
+  and the workflows against the SchemaStore schemas.

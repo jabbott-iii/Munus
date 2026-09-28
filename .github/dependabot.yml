@@ -1,0 +1,36 @@
+# Weekly, grouped dependency updates (intel/plan.md, P-050). Workflow actions
+# stay pinned by commit SHA: Dependabot updates the SHA and its version comment.
+# When a Go module update adds or removes a module or changes a license text,
+# run `go run ./tools/licenses` and update NOTICE; CI fails until then.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      github-actions:
+        patterns: ["*"]
+
+  - package-ecosystem: gomod
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      go-modules:
+        patterns: ["*"]
+
+  # The Dockerfile's builder and runtime images must stay on the same Alpine
+  # release (see intel/maint.md); the licenses check in CI fails otherwise.
+  - package-ecosystem: docker
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      docker-images:
+        patterns: ["*"]
+    ignore:
+      # Moving to a new Go minor release also changes go.mod and CI; do it
+      # deliberately rather than through a weekly update.
+      - dependency-name: golang
+        update-types: ["version-update:semver-minor"]

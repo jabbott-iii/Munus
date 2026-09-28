@@ -14,9 +14,12 @@ Munus/
 │   ├── ui-form.go          # Bubble Tea task-entry form (insert/normal vim modes)
 │   ├── ui-list.go          # Bubble Tea list/dashboard, delete confirm, transfer overlay
 │   └── *_test.go           # unit tests per file
-├── Dockerfile, .dockerignore # 2-stage CGO build (golang:1.26-alpine3.24 → alpine:3.24, pinned apk), non-root
-├── Makefile                # dev targets (build/test/race/cover/vet/fmt/lint/check/fuzz) + release tagging
+├── tools/licenses/         # stdlib-only generator/check for THIRD_PARTY_LICENSES and the NOTICE module list (+ embedded musl COPYRIGHT)
+├── THIRD_PARTY_LICENSES    # generated full license texts (Go, SQLite, musl, every compiled module); shipped in archives and image
+├── Dockerfile, .dockerignore # CGO build on golang:1.26-alpine3.24 (pinned apk): image (→ alpine:3.24, non-root, license files) and `static` target (musl static Linux release binary)
+├── Makefile                # dev targets (build/test/race/cover/vet/fmt/lint/check/fuzz/licenses) + release tagging
 ├── .github/workflows/      # ci.yml, cd.yml, docker.yml, security.yml (actions SHA-pinned)
+├── .github/dependabot.yml  # weekly grouped updates: actions, Go modules, Docker images
 ├── .devcontainer/          # Ubuntu + Go + neovim + docker-outside-of-docker
 ├── intel/                  # agent/maintainer knowledge base (this folder)
 └── AGENTS.md, README.md, CONTRIBUTING.md, LICENSE, NOTICE, CODEOWNERS
@@ -68,7 +71,7 @@ erDiagram
 ## CI/CD
 | Workflow | Trigger | Does |
 |---|---|---|
-| `ci.yml` | push/PR any branch | latest Go 1.26.x: tidy check, vet, golangci-lint, tests+coverage (Linux/macOS/Windows), native CGO build + smoke run |
-| `cd.yml` | `v*` tag | latest Go 1.26.x, no build cache: per-OS native CGO builds (linux amd64/arm64 static, darwin arm64/amd64, windows amd64, windows arm64 via pinned llvm-mingw) + smoke run → package, checksums, GitHub Release (only release job has `contents: write`) |
-| `docker.yml` | push/PR to main | build image, `--help`, DB-on-volume and `TZ` smoke tests |
+| `ci.yml` | push/PR any branch | latest Go 1.26.x: tidy check, vet, golangci-lint, tests+coverage incl. the `THIRD_PARTY_LICENSES`/`NOTICE` check (Linux/macOS/Windows), native CGO build + smoke run |
+| `cd.yml` | `v*` tag | per-OS/arch native CGO builds: linux amd64/arm64 static musl via the Dockerfile `static` target (smoke-run also on Debian 11 and Alpine), darwin arm64 and amd64 (`macos-15-intel`), windows amd64 and arm64 (pinned llvm-mingw), others with latest Go 1.26.x and no build cache → archives with `LICENSE`/`NOTICE`/`THIRD_PARTY_LICENSES`, checksums, build provenance attestation, GitHub Release (the package/attest job has `contents: read` plus OIDC; only the tag-only publishing job has `contents: write`) |
+| `docker.yml` | push/PR to main | build image, `--help`, DB-on-volume, `TZ`, license-file and thread-stack checks; static Linux binary (amd64, arm64) built and run on the runner, Debian 11 and Alpine |
 | `security.yml` | push/PR + weekly | CodeQL (security-extended), gosec (non-failing) with SARIF upload, govulncheck (fails on reachable vulnerabilities) |

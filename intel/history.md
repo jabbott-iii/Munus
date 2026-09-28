@@ -80,3 +80,20 @@ backfilled from `git log` for the changes made after that file's last entry.
   Dependabot, restoring older over-length exports, status changes on stored data, busy timeout, TUI
   file I/O off the event loop, a testable entry point and housekeeping; decisions D-9…D-19 open.
 
+
+## 2026-09-27 — Plan 4 decided and phase A implemented (uncommitted)
+- The plan 4 draft and the maintainer's `AGENTS.md` fix (P-058) were committed as `97cf04b`.
+  Decisions D-9…D-19 recorded in `plan.md`: committed, generated license texts; static musl Linux
+  builds; provenance attestation; Dependabot; shortening over-length imports; 15 s busy timeout;
+  TUI file I/O off the event loop; TUI types stay in `database.go` (P-056 deferred); Ctrl+C default
+  kept as final (P-057 done); `AGENTS.md` left to the maintainer; phase A ships as `v2.2.2`, phases
+  B and C as `v2.3.0`.
+- Phase A (P-046…P-050) implemented: `tools/licenses` and the generated `THIRD_PARTY_LICENSES`
+  (checked by `go test`), `NOTICE` without module versions; Linux release binaries built static with
+  musl from a new Dockerfile `static` target, with 8 MiB thread stacks (also for the image binary);
+  darwin/amd64 built and smoke-run on `macos-15-intel`; license files in every archive and in the
+  image; build provenance attestation in a separate least-privilege job; Dependabot configuration;
+  the `grep -q` SIGPIPE flake in the smoke tests fixed (N-038).
+- An independent review found no High or Medium issues; its findings were fixed. README,
+  `CONTRIBUTING.md`, `maint.md`, `map.md`, `notes.md`, `plan.md` and `cybersec.md` updated. The
+  workflow, `dependabot.yml` and `Makefile` changes are delivered as a patch.

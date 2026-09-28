@@ -69,4 +69,6 @@ jobs:
           go build -o "munus-ci${EXT}" .
           "./munus-ci${EXT}" --version
           "./munus-ci${EXT}" add --title "smoke" --description "CI smoke test"
-          "./munus-ci${EXT}" list | grep -q "smoke"
+          # Not grep -q: with pipefail, munus could fail with SIGPIPE if grep
+          # exits before munus has written all of its output.
+          "./munus-ci${EXT}" list | grep "smoke" > /dev/null

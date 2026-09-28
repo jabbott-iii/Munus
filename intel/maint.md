@@ -21,6 +21,7 @@ Munus is a single-binary Go CLI/TUI task manager backed by a local SQLite file.
 | Text safety | `internal/ext-text.go` | Shared length limits, control-character/UTF-8 validation, tag rules, terminal sanitising |
 | Transfer | `internal/ext-export-import.go` | Versioned JSON export (v2; imports v1 and v2), plan/apply import (merge/replace), stdin input, backups |
 | Storage | `internal/database.go` | `Storage` interface, `Database` (gorm) implementation incl. tags, migration and consistency triggers, all shared types |
+| Release tooling | `tools/licenses/` | Generates and checks `THIRD_PARTY_LICENSES` and the `NOTICE` module list (not part of the binary) |
 
 ## Conventions
 - All shared types (models, DTOs, options) live in `internal/database.go`.
@@ -38,6 +39,10 @@ Munus is a single-binary Go CLI/TUI task manager backed by a local SQLite file.
   which turns off cobra's usage output and opens the database. Argument and flag errors therefore
   print usage and never create or migrate the database; later errors print only the error line.
   Yes/no prompts go through `Confirm` (whole line, `y`/`yes` any case, EOF = no).
+- Ctrl+C in CLI commands keeps Go's default behaviour (decided as final, D-17 a): the process exits
+  at once and SQLite rolls back an unfinished transaction. Do not add signal handling unless that
+  decision is revisited; keep every multi-step write inside one storage transaction so an interrupt
+  never leaves partial data. (In the TUI, `ctrl+c` is a key that quits or cancels.)
 - Every source file carries the Apache-2.0 license header (see `CONTRIBUTING.md`).
 - Formatting: `gofmt -s -w .` before PRs. CI also runs `go vet` and `golangci-lint` v2.13.2.
 - Tests live next to code (`*_test.go`); CI runs `go test -v -coverprofile=coverage.out ./...`.
@@ -107,19 +112,57 @@ Munus is a single-binary Go CLI/TUI task manager backed by a local SQLite file.
 ## Build constraints
 - Builds that include the SQLite driver must use `CGO_ENABLED=1`; a `CGO_ENABLED=0`
   build compiles but cannot open a database.
-- Releases (`cd.yml`) build natively per OS with CGO; Linux binaries are linked statically
-  (`-tags sqlite_omit_load_extension,osusergo,netgo`, `-extldflags -static`). darwin/amd64 is
-  cross-compiled by clang on the Apple Silicon runner. windows/arm64 is built natively on the
-  `windows-11-arm` runner with llvm-mingw (`CC=aarch64-w64-mingw32-clang`), downloaded from the
-  pinned GitHub release and verified against its SHA-256 before use; bump both values together.
-- The Dockerfile builds with CGO on Alpine for the image's own platform and runs as UID 10001
-  with `HOME=/app/data`. Builder (`golang:1.26-alpine3.24`) and runtime (`alpine:3.24`) use the same
-  Alpine release (same musl), and `apk` packages are pinned (`build-base`, `ca-certificates`,
-  `tzdata`; the latter lets `TZ` select the container's time zone, checked by `docker.yml`).
-  To bump: move both images to the same new Alpine release, look up the current package versions
-  for that release (for example `apk policy build-base ca-certificates tzdata` in the new image, or the
-  aports `x.y-stable` branch), update the pins, and confirm `hadolint Dockerfile` and `docker.yml`
-  pass. A pin fails the build once Alpine drops that package revision, so bump when that happens.
+- Releases (`cd.yml`) build natively per OS and architecture with CGO. Linux binaries come from
+  the Dockerfile's `static` stage (`docker build --target static --output …` on the amd64 and
+  arm64 runners): fully static with musl (no glibc, so no LGPL static-linking terms), `-tags
+  sqlite_omit_load_extension,osusergo,netgo` (keep in step with `linuxReleaseTags` in
+  `tools/licenses`), and `-Wl,-z,stack-size=8388608` because musl otherwise gives threads,
+  including the ones cgo calls into SQLite on, a 128 KiB stack. The Docker build context excludes
+  `.git`, so these binaries carry no VCS build information (`go version -m` still lists the
+  modules). darwin/amd64 is built and smoke-run natively on `macos-15-intel` (supported until the
+  macOS 15 image is retired in Fall 2027; revisit before then). windows/arm64 is built natively on
+  the `windows-11-arm` runner with llvm-mingw (`CC=aarch64-w64-mingw32-clang`), downloaded from
+  the pinned GitHub release and verified against its SHA-256 before use; bump both values
+  together.
+- The Dockerfile builds with CGO on Alpine for the image's own platform and runs as UID 10001 with
+  `HOME=/app/data`. Stages: `source` (toolchain, modules, sources) → `builder` (image binary,
+  dynamic musl) and `static-builder` → `static` (release binary, only built when targeted) → the
+  runtime image, which also carries `LICENSE`, `NOTICE` and `THIRD_PARTY_LICENSES` in
+  `/usr/share/licenses/munus/`. Both builds link with `-Wl,-z,stack-size=8388608` (musl's default
+  thread stack is 128 KiB; `docker.yml` checks the image binary). Builder
+  (`golang:1.26-alpine3.24`) and runtime (`alpine:3.24`) use the same Alpine release (same musl),
+  and `apk` packages are pinned (`build-base`, `ca-certificates`, `tzdata`; the latter lets `TZ`
+  select the container's time zone, checked by `docker.yml`). To bump: move both images to the
+  same new Alpine release, look up the current package versions for that release (for example `apk
+  policy build-base ca-certificates tzdata` in the new image, or the aports `x.y-stable` branch),
+  update the pins, replace `tools/licenses/musl-COPYRIGHT` with the `COPYRIGHT` file of that
+  release's musl version and update `muslVersion`/`muslAlpineRelease` in `tools/licenses/main.go`
+  (its test fails until the Dockerfile and these agree), run `make licenses`, and confirm
+  `hadolint Dockerfile` and `docker.yml` pass. A pin fails the build once Alpine drops that
+  package revision, so bump when that happens.
+- Third-party licenses: `THIRD_PARTY_LICENSES` is generated by `tools/licenses` (stdlib only) from
+  the modules `go list -deps` reports for the six release platforms with cgo, plus the Go
+  distribution's `LICENSE`/`PATENTS`, SQLite's public-domain dedication (from go-sqlite3's header)
+  and musl's `COPYRIGHT`. It holds no module versions, so it changes only when a module is added or
+  removed or a license text changes; `go test ./tools/licenses` fails when it, or the module list in
+  `NOTICE`, is out of date. A module without a license file needs a reviewed entry in
+  `readmeLicenses` (currently `mattn/go-localereader`). Release archives (`cd.yml`) and the image
+  ship `LICENSE`, `NOTICE` and `THIRD_PARTY_LICENSES`.
+- Supply chain (`cd.yml`): the `package` job (permissions `contents: read`, `id-token: write`,
+  `attestations: write`) checks out the repository without persisting credentials, packages the
+  archives with the license files, writes `checksums.txt` and attests the archives and checksums
+  with SHA-pinned `actions/attest-build-provenance` (attestations need a public repository or
+  GitHub Enterprise Cloud); the `release` job (tags only, `contents: write`, no OIDC) downloads
+  those files and publishes them. The version string passed to the builds must match
+  `^[0-9A-Za-z._+-]+$`. Linux builds use the Dockerfile's images with `docker build --pull` (latest
+  Go 1.26 patch in `golang:1.26-alpine3.24`; `go version` is printed in the build log). Dependabot
+  (`.github/dependabot.yml`) proposes weekly, grouped updates for GitHub Actions (SHA pins), Go
+  modules and Docker images; Go minor releases of the `golang` image are ignored because they also
+  change `go.mod` and CI. The smoke-test images `debian:11` and `alpine:3.24` in `cd.yml` and
+  `docker.yml` are not tracked by Dependabot; move them together with the Alpine release.
+- Smoke tests in steps with `shell: bash` (which adds `pipefail`) use `munus … | grep pattern >
+  /dev/null`, not `grep -q`: `grep -q` exits at the first match and munus can then fail with
+  SIGPIPE (about 5% of runs, N-038).
 
 ## Maintainability guidance
 - Keep changes scoped; follow the nearest existing pattern (see `AGENTS.md`).

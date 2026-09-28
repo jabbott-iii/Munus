@@ -14,7 +14,7 @@ FUZZ_TARGETS := FuzzParseDeadline FuzzSanitizeForTerminal FuzzParseImportData
 # The SQLite driver (mattn/go-sqlite3) needs cgo and a C compiler.
 export CGO_ENABLED := 1
 
-.PHONY: help build test race cover vet fmt fmt-check lint fuzz check check-version tag push-tag release
+.PHONY: help build test race cover vet fmt fmt-check lint fuzz licenses check check-version tag push-tag release
 
 help:
 	@echo "Development targets:"
@@ -28,6 +28,7 @@ help:
 	@echo "  make lint                     Run golangci-lint (CI uses v2.13.2); skipped if not installed"
 	@echo "  make check                    fmt-check, vet, test, race and lint"
 	@echo "  make fuzz                     Run each fuzz target for FUZZTIME (default 30s)"
+	@echo "  make licenses                 Regenerate THIRD_PARTY_LICENSES (tests check it)"
 	@echo ""
 	@echo "Release targets:"
 	@echo "  make tag VERSION=vX.Y.Z       Create annotated git tag"
@@ -74,6 +75,11 @@ fuzz:
 		echo "== $$target"; \
 		$(GO) test ./internal -run '^$$' -fuzz "^$$target$$" -fuzztime $(FUZZTIME) || exit 1; \
 	done
+
+# Full license texts of the third-party software in the release binaries;
+# rerun after dependency changes (go test ./tools/licenses fails until then).
+licenses:
+	$(GO) run ./tools/licenses
 
 check-version:
 	@if [[ -z "$(VERSION)" ]]; then \

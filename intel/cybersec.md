@@ -15,6 +15,14 @@
   `--strict`; IDs from a file are kept only up to 1,000,000,000, IDs of existing tasks always.
 - Tools downloaded by workflows are pinned by version and verified by SHA-256 before use
   (llvm-mingw in `cd.yml`); actions stay pinned to commit SHAs.
+- Release integrity (plan 4 phase A): archives and `checksums.txt` get a build provenance
+  attestation from a job that cannot write to the repository (`contents: read`, `id-token: write`,
+  `attestations: write`); only the tag-only publishing job has `contents: write`, and it has no OIDC
+  token. Checkouts in release jobs do not persist credentials. The version string passed to the
+  builds must match `^[0-9A-Za-z._+-]+$`. Linux release builds pull the Dockerfile's builder image
+  fresh (latest Go 1.26 patch) and log `go version`, so the SEC-018 check still applies to them.
+- Dependency updates (Dependabot) go through the same review and checks as any pull request; they
+  are never merged automatically.
 
 ## Issues
 

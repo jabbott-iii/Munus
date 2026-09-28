@@ -8,32 +8,35 @@ review (`notes.md` N-026…, `cybersec.md` SEC-013…). Per decision D-1, `v2.2.
 phase A (with P-043): committed as `c9eeb97` (+ `ad5c231`, history) and released as `v2.2.0` on
 2026-09-27 with green CI, Docker, Security and release runs (maintainer-confirmed). Phases B and C
 were committed as `df70f29` (with the workflow patch applied) and released as `v2.2.1` on 2026-09-27,
-again with all checks green (maintainer-confirmed). Plan 3 is complete. Plan 4 below is a draft built
-from the items still open in `notes.md` (residual risks) and earlier deferrals; it awaits maintainer
-decisions D-9…D-19.
+again with all checks green (maintainer-confirmed). Plan 3 is complete. Plan 4 below is the active
+plan, built from the items still open in `notes.md` (residual risks) and earlier deferrals; the draft
+was committed as `97cf04b` and the maintainer decided D-9…D-19 on 2026-09-27 (phase A → `v2.2.2`,
+phases B and C → `v2.3.0`). Phase A is implemented and validated locally (uncommitted; the workflow,
+`dependabot.yml` and `Makefile` changes are delivered as a patch); its new workflow jobs still need
+their first GitHub runs.
 
-## Plan 4 — drafted 2026-09-27 (proposed: phase A → v2.2.2, phases B and C → v2.3.0) — awaiting maintainer decisions
+## Plan 4 — drafted and decided 2026-09-27 (phase A → v2.2.2, phases B and C → v2.3.0)
 
 Sources: `notes.md` "Residual risks / open questions" and N-036 (TUI file I/O on the event loop), the
 P-029 deviation, and the plan-2 deferral (TUI types in `database.go`). No security item is open
 (SEC-001…SEC-018 are Closed); phase A is about licensing and release integrity. The licensing items
 are engineering notes, not legal advice; the maintainer should confirm the obligations.
 
-### Decisions needed (maintainer)
+### Maintainer decisions (2026-09-27)
 
-| ID | Decision | Options | Recommendation |
+| ID | Decision | Options | Chosen |
 |---|---|---|---|
-| D-9 | Third-party license texts in binary distributions (P-046) | (a) generate the full license texts at release time (a pinned license tool in `cd.yml` and the Docker build); (b) commit a generated `THIRD_PARTY_LICENSES` file, ship it in every archive and the image, and let CI fail when it no longer matches `go.mod` | (b): reviewable, works in the Docker build without extra tooling, CI keeps it current |
-| D-10 | Linux release binaries currently link glibc statically (LGPL-2.1) (P-047) | (a) build fully static with musl in an Alpine container, as the Docker image already does; (b) link glibc dynamically (needs glibc ≥ the runner's, 2.39 on `ubuntu-24.04`); (c) keep static glibc and publish what LGPL-2.1 §6 asks for (relinkable object files) | (a): no LGPL obligations and still one portable static binary |
-| D-11 | Build provenance for release archives (P-049) | (a) add SHA-pinned `actions/attest-build-provenance` to the release job; (b) not now | (a) |
-| D-12 | Dependency update automation (P-050) | (a) Dependabot for GitHub Actions, Go modules and Docker (weekly, grouped), keeping SHA pins and tags current; (b) not now | (a) |
-| D-13 | Over-length text in older exports (P-051) | default import (a) shortens titles over 100 bytes and descriptions over 500 bytes at a character boundary and reports how many tasks were shortened (`--strict` rejects); (b) keep rejecting the whole file | (a): same reasoning as D-3, backups always restore |
-| D-14 | SQLite busy timeout (P-053) | (a) default 15 s instead of go-sqlite3's 5 s (a DSN that sets `_busy_timeout` wins); (b) keep 5 s | (a) |
-| D-15 | TUI file I/O on the event loop (P-054) | (a) read/write import and export files in Bubble Tea commands with a "working…" state (esc/ctrl+c stay responsive); (b) keep synchronous and document it | (a) |
-| D-16 | TUI model types in `database.go` (P-056, deferred since plan 2) | (a) move them to the UI files and update the `maint.md` convention; (b) keep deferred | (b): no user value, large diff |
-| D-17 | Ctrl+C behaviour (P-057, P-029 deviation) | (a) keep the default (the process exits; SQLite rolls back an unfinished transaction) and record it as final; (b) graceful cancellation (`signal.NotifyContext` plus a cancellable `Confirm`) | (a) |
-| D-18 | `AGENTS.md` housekeeping (P-058) | (a) remove the trailing space in `` `CONTRIBUTING.md ` `` (two places); (b) leave `AGENTS.md` untouched | (a) |
-| D-19 | Release numbering | (a) phase A as `v2.2.2` (packaging only), phases B and C as `v2.3.0` (behaviour changes); (b) everything in `v2.3.0` | (a) |
+| D-9 | Third-party license texts in binary distributions (P-046) | (a) generate the full license texts at release time (a pinned license tool in `cd.yml` and the Docker build); (b) commit a generated `THIRD_PARTY_LICENSES` file, ship it in every archive and the image, and let CI fail when it no longer matches `go.mod` | **(b)**: a committed, generated `THIRD_PARTY_LICENSES`, shipped in every archive and the image; CI fails when it is out of date |
+| D-10 | Linux release binaries currently link glibc statically (LGPL-2.1) (P-047) | (a) build fully static with musl in an Alpine container, as the Docker image already does; (b) link glibc dynamically (needs glibc ≥ the runner's, 2.39 on `ubuntu-24.04`); (c) keep static glibc and publish what LGPL-2.1 §6 asks for (relinkable object files) | **(a)**: fully static musl build in an Alpine container |
+| D-11 | Build provenance for release archives (P-049) | (a) add SHA-pinned `actions/attest-build-provenance` to the release job; (b) not now | **(a)** |
+| D-12 | Dependency update automation (P-050) | (a) Dependabot for GitHub Actions, Go modules and Docker (weekly, grouped), keeping SHA pins and tags current; (b) not now | **(a)** |
+| D-13 | Over-length text in older exports (P-051) | default import (a) shortens titles over 100 bytes and descriptions over 500 bytes at a character boundary and reports how many tasks were shortened (`--strict` rejects); (b) keep rejecting the whole file | **(a)** |
+| D-14 | SQLite busy timeout (P-053) | (a) default 15 s instead of go-sqlite3's 5 s (a DSN that sets `_busy_timeout` wins); (b) keep 5 s | **(a)** |
+| D-15 | TUI file I/O on the event loop (P-054) | (a) read/write import and export files in Bubble Tea commands with a "working…" state (esc/ctrl+c stay responsive); (b) keep synchronous and document it | **(a)** |
+| D-16 | TUI model types in `database.go` (P-056, deferred since plan 2) | (a) move them to the UI files and update the `maint.md` convention; (b) keep deferred | **(b)**: stays deferred |
+| D-17 | Ctrl+C behaviour (P-057, P-029 deviation) | (a) keep the default (the process exits; SQLite rolls back an unfinished transaction) and record it as final; (b) graceful cancellation (`signal.NotifyContext` plus a cancellable `Confirm`) | **(a)**: recorded as final in `notes.md` and `maint.md` |
+| D-18 | `AGENTS.md` housekeeping (P-058) | (a) remove the trailing space in `` `CONTRIBUTING.md ` `` (two places); (b) leave `AGENTS.md` untouched | **(b)**: this change set leaves `AGENTS.md` untouched; the maintainer removed the two trailing spaces in `97cf04b` |
+| D-19 | Release numbering | (a) phase A as `v2.2.2` (packaging only), phases B and C as `v2.3.0` (behaviour changes); (b) everything in `v2.3.0` | **(a)** |
 
 The plan-2/plan-3 Go rules, validation and "workflow and `Makefile` changes as a patch" apply unchanged.
 
@@ -41,11 +44,11 @@ The plan-2/plan-3 Go rules, validation and "workflow and `Makefile` changes as a
 
 | ID | Priority | Item | Ref | Acceptance | Status |
 |---|---|---|---|---|---|
-| P-046 | High | **License texts with every binary.** Release archives and the Docker image carry `LICENSE`, `NOTICE` and the full license texts of every module compiled into the binary (plus the SQLite public-domain notice and the Go BSD license), per D-9. `NOTICE` today only names the licenses. | notes residual risk | Each archive and `/usr/share/licenses/munus` in the image contain the three files; CI fails when a module in `go.mod` has no entry | Proposed |
-| P-047 | High | **No statically linked glibc.** Linux release binaries per D-10. | notes residual risk | `file` reports a static binary without glibc (a) or the documented alternative; the binary runs in an old-distro container (for example `debian:11`) and in Alpine; README install notes still hold | Proposed |
-| P-048 | Low | **darwin/amd64 built and smoke-run natively** on `macos-15-intel` (a standard runner until the macOS 15 image retires in Fall 2027) instead of being cross-compiled untested. | notes residual risk | `cd.yml` smoke step runs on Intel macOS; revisit before Fall 2027 | Proposed |
-| P-049 | Low | **Build provenance** attestation for the archives and `checksums.txt`, per D-11 (release job gets `id-token: write` and `attestations: write` only). | new | `gh attestation verify` succeeds for a downloaded archive | Proposed |
-| P-050 | Low | **Dependabot** configuration per D-12. | new | Config validates; the first update PRs keep SHA pins | Proposed |
+| P-046 | High | **License texts with every binary.** Release archives and the Docker image carry `LICENSE`, `NOTICE` and the full license texts of every module compiled into the binary (plus the SQLite public-domain notice and the Go BSD license), per D-9. `NOTICE` today only names the licenses. | notes residual risk | Each archive and `/usr/share/licenses/munus` in the image contain the three files; CI fails when a module in `go.mod` has no entry | Done (uncommitted): `tools/licenses` writes `THIRD_PARTY_LICENSES`; `go test ./tools/licenses` is the CI check (no separate workflow step) and also checks the `NOTICE` module list, which no longer names versions; archives and image carry the three files |
+| P-047 | High | **No statically linked glibc.** Linux release binaries per D-10. | notes residual risk | `file` reports a static binary without glibc (a) or the documented alternative; the binary runs in an old-distro container (for example `debian:11`) and in Alpine; README install notes still hold | Done (uncommitted): Dockerfile `static` target (musl, 8 MiB thread stacks, also for the image binary, N-039) used by `cd.yml`; `docker.yml` builds and smoke-runs it for amd64/arm64 on the runner, Debian 11 and Alpine; zig/musl build verified locally, Alpine build pending GitHub |
+| P-048 | Low | **darwin/amd64 built and smoke-run natively** on `macos-15-intel` (a standard runner until the macOS 15 image retires in Fall 2027) instead of being cross-compiled untested. | notes residual risk | `cd.yml` smoke step runs on Intel macOS; revisit before Fall 2027 | Done (uncommitted; first run pending) |
+| P-049 | Low | **Build provenance** attestation for the archives and `checksums.txt`, per D-11 (release job gets `id-token: write` and `attestations: write` only). | new | `gh attestation verify` succeeds for a downloaded archive | Done (uncommitted; first run pending): attestation runs in a separate `package` job (`contents: read`, `id-token`, `attestations`); only the tag-only `release` job has `contents: write` (deviation from “release job”, for least privilege). Upstream now suggests `actions/attest` for new setups; the wrapper was kept per D-11 |
+| P-050 | Low | **Dependabot** configuration per D-12. | new | Config validates; the first update PRs keep SHA pins | Done (uncommitted): weekly grouped updates; `golang` minor updates ignored; schema-validated |
 
 ### Phase B — data and robustness
 
@@ -61,13 +64,14 @@ The plan-2/plan-3 Go rules, validation and "workflow and `Makefile` changes as a
 | ID | Priority | Item | Ref | Acceptance | Status |
 |---|---|---|---|---|---|
 | P-055 | Low | **Testable entry point:** `main` delegates to `run(ctx, args, env, stdout, stderr) int` so version stamping, `MUNUS_DB_PATH`, error output and exit codes are tested. | notes (root coverage 25%) | Root package coverage ≥ 80% | Proposed |
-| P-056 | Low | **TUI types out of `database.go`**, per D-16. | plan 2 deferral | `maint.md` convention updated; no behaviour change | Proposed |
-| P-057 | Info | **Ctrl+C**, per D-17. | P-029 deviation | (a) `notes.md`/`maint.md` record it as final; (b) cancellation tests | Proposed |
-| P-058 | Info | **`AGENTS.md` typo**, per D-18. | notes (documentation drift) | — | Proposed |
+| P-056 | Low | **TUI types out of `database.go`**, per D-16. | plan 2 deferral | `maint.md` convention updated; no behaviour change | Deferred (D-16 b) |
+| P-057 | Info | **Ctrl+C**, per D-17. | P-029 deviation | (a) `notes.md`/`maint.md` record it as final; (b) cancellation tests | Done (D-17 a: recorded as final) |
+| P-058 | Info | **`AGENTS.md` typo**, per D-18. | notes (documentation drift) | — | Done by the maintainer (`97cf04b`); not part of this change set (D-18 b) |
 
 ### Suggested order
-D-9…D-19 → P-046, P-047, P-048 (one `cd.yml`/Dockerfile patch) → P-049, P-050 → release `v2.2.2` →
-P-052, P-053 → P-051 → P-054 → P-055 → P-056…P-058 → release `v2.3.0`.
+D-9…D-19 (done) → P-046, P-047, P-048 (one `cd.yml`/Dockerfile patch) → P-049, P-050 (done,
+uncommitted) → release `v2.2.2` → P-052, P-053 → P-051 → P-054 → P-055 → release `v2.3.0` (P-056 deferred, P-057 and P-058
+done).
 
 ## Plan 3 — drafted and decided 2026-09-27 (phase A released in v2.2.0; phases B and C in v2.2.1)
 

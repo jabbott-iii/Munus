@@ -43,3 +43,58 @@ jobs:
         run: |
           docker run --rm -e TZ=America/Phoenix -v munus-smoke:/app/data "$IMAGE_NAME" add --title tz --description "time zone smoke test" --deadline "2026-10-01 09:00"
           docker run --rm -v munus-smoke:/app/data "$IMAGE_NAME" export --stdout | grep -q '"deadline": "2026-10-01T09:00:00-07:00"'
+
+      # The image carries the license texts, readable by the image's user.
+      - name: Smoke test license files
+        run: |
+          for file in LICENSE NOTICE THIRD_PARTY_LICENSES; do
+            docker run --rm --entrypoint cat "$IMAGE_NAME" "/usr/share/licenses/munus/$file" | cmp - "$file"
+          done
+
+      # musl's default thread stack is 128 KiB; the binary asks for 8 MiB.
+      - name: Check thread stack request
+        run: |
+          id="$(docker create "$IMAGE_NAME")"
+          docker cp "$id:/usr/local/bin/munus" munus-image
+          docker rm "$id"
+          readelf -lW munus-image | grep GNU_STACK | grep 0x800000 > /dev/null
+
+  # The Linux release binaries (cd.yml) come from the Dockerfile's "static"
+  # stage; build them here too so a pull request cannot break the release.
+  static-linux-binary:
+    name: Static Linux binary (${{ matrix.arch }})
+    strategy:
+      matrix:
+        include:
+          - { arch: amd64, runner: ubuntu-latest }
+          - { arch: arm64, runner: ubuntu-24.04-arm }
+    runs-on: ${{ matrix.runner }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - name: Build static binary
+        run: docker build --target static --build-arg VERSION=ci --output type=local,dest=out .
+
+      # Fully static musl binary (no program interpreter) with an 8 MiB thread
+      # stack request; it must run on the runner, on an older glibc
+      # distribution and on musl-based Alpine.
+      - name: Smoke test static binary
+        env:
+          MUNUS_DB_PATH: ${{ runner.temp }}/static-smoke.db
+        run: |
+          file out/munus | grep "statically linked" > /dev/null
+          headers="$(readelf -lW out/munus)"
+          if grep -q INTERP <<< "$headers"; then
+            echo "binary has a program interpreter" >&2
+            exit 1
+          fi
+          grep GNU_STACK <<< "$headers" | grep 0x800000 > /dev/null
+          test "$(out/munus --version)" = "munus version ci"
+          out/munus add --title smoke --description "static binary smoke test"
+          out/munus list | grep smoke > /dev/null
+          for image in debian:11 alpine:3.24; do
+            docker run --rm -v "$PWD/out:/out:ro" -e MUNUS_DB_PATH=/tmp/smoke.db "$image" \
+              sh -c "/out/munus add --title smoke --description 'static binary smoke test' && /out/munus list | grep -q smoke"
+          done

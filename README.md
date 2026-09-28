@@ -51,22 +51,34 @@ your `PATH`. Release archives are named `munus_<os>_<arch>`:
 | Windows x86-64 | `munus_windows_amd64.zip` |
 | Windows ARM64 | `munus_windows_arm64.zip` |
 
+Each archive contains the binary (`munus_<os>_<arch>`, `.exe` on Windows) together with
+`LICENSE`, `NOTICE` and `THIRD_PARTY_LICENSES` (the license texts of the third-party
+software compiled into it). The Linux binaries are statically linked against musl, so they
+do not depend on the system's C library.
+
 Linux / macOS (example for Linux x86-64):
 ```
 sha256sum --ignore-missing -c checksums.txt
 ```
 ```
-tar -xzf munus_linux_amd64.tar.gz
+mkdir munus && tar -xzf munus_linux_amd64.tar.gz -C munus
 ```
 ```
-chmod +x munus_linux_amd64
+chmod +x munus/munus_linux_amd64
 ```
 ```
-sudo mv munus_linux_amd64 /usr/local/bin/munus
+sudo mv munus/munus_linux_amd64 /usr/local/bin/munus
 ```
 Windows:
 ```
 Extract munus_windows_amd64.zip (or munus_windows_arm64.zip) and add the .exe to your PATH as munus.exe.
+```
+
+Optional: archives and `checksums.txt` of releases built by the current release workflow
+(`v2.2.2` and later) carry a GitHub build provenance attestation, which the
+[GitHub CLI](https://cli.github.com/) can verify:
+```
+gh attestation verify munus_linux_amd64.tar.gz --repo jabbott-iii/Munus
 ```
 
 ### Build from source
@@ -80,6 +92,14 @@ Prerequisites:
 
 ```bash
 CGO_ENABLED=1 go build -o munus .
+```
+
+The Linux release binaries come from the Dockerfile's `static` stage (fully static, built
+with musl in Alpine); with Docker (BuildKit) you can build the same binary for your
+machine's architecture:
+
+```bash
+docker build --target static --output type=local,dest=dist .
 ```
 
 ## Core CLI capabilities
@@ -229,7 +249,8 @@ Import backups are written to `.munus/backups/` under your home directory.
 ## Docker
 
 The image stores its database at `/app/data/munus.db` (`MUNUS_DB_PATH`) and runs as
-an unprivileged user (UID 10001). Mount `/app/data` to keep your tasks.
+an unprivileged user (UID 10001). Mount `/app/data` to keep your tasks. `LICENSE`,
+`NOTICE` and `THIRD_PARTY_LICENSES` are in `/usr/share/licenses/munus/`.
 
 ### Build
 ```bash
@@ -280,7 +301,12 @@ Run from the repository root (cgo must be enabled, see [Build from source](#buil
 make check             # fmt-check, vet, test, race and golangci-lint (if installed)
 make cover             # tests with a coverage summary
 make fuzz              # run each fuzz target for FUZZTIME (default 30s)
+make licenses          # regenerate THIRD_PARTY_LICENSES after dependency changes
 ```
+
+`go test ./...` includes a check (`tools/licenses`) that fails when `THIRD_PARTY_LICENSES`
+or the module list in `NOTICE` no longer matches the modules compiled into the binaries;
+run `make licenses` (or `go run ./tools/licenses`) and update `NOTICE` to fix it.
 
 The same checks without `make`:
 
@@ -292,14 +318,19 @@ go test -race ./...
 ```
 
 CI (`.github/workflows/ci.yml`) additionally runs `go mod tidy` drift checks,
-golangci-lint v2.13.2 and a native build smoke test on Linux, macOS and Windows.
+golangci-lint v2.13.2 and a native build smoke test on Linux, macOS and Windows. The Docker
+workflow also builds the static Linux binary for amd64 and arm64 and runs it on the runner,
+on Debian 11 and on Alpine.
 
 ## Project structure
 
 ```
 main.go, database_path.go   entry point and MUNUS_DB_PATH handling
 internal/                   CLI commands, TUI models, storage (tasks, status, tags), deadlines, import/export
+tools/licenses/             generates and checks THIRD_PARTY_LICENSES
+THIRD_PARTY_LICENSES        license texts of the third-party software in the binaries (generated)
 .github/workflows/          CI, release (CD), Docker and security workflows
-Dockerfile                  container image
+.github/dependabot.yml      weekly, grouped dependency updates
+Dockerfile                  container image and static Linux release binary
 intel/                      maintainer notes: architecture, security tracker, plans
 ```

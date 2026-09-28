@@ -25,10 +25,16 @@ make test
 - Run the local checks: `make check` (formatting check, `go vet`, tests, race-detector tests and
   golangci-lint when installed). After changing deadline parsing, text handling or import, also
   run `make fuzz`.
+- After adding, removing or updating a Go module, run `make licenses` (regenerates
+  `THIRD_PARTY_LICENSES`; never edit it by hand) and keep the module list in `NOTICE` in step;
+  `go test ./...` fails until both match the modules compiled into the release binaries.
 - CI runs on Linux, macOS and Windows: a `go mod tidy` drift check, `go vet`, golangci-lint v2.13.2,
   tests with coverage, and a native build that is run as a smoke test, using the latest Go 1.26
-  patch release. CodeQL, gosec and govulncheck run on every push, and the Docker image is built and
-  smoke-tested on `main`.
+  patch release. CodeQL, gosec and govulncheck run on every push, and the Docker image and the static
+  Linux release binary (amd64 and arm64) are built and smoke-tested on `main` and for pull requests
+  to `main`.
+- Dependabot opens weekly, grouped update pull requests for GitHub Actions, Go modules and Docker
+  images; they follow the same review and checks (Go module updates may need `make licenses`).
 
 ## Coding expectations
 - Follow `AGENTS.md`, `intel/golang.md` (Go rules) and `intel/maint.md` (architecture).
@@ -48,4 +54,5 @@ make test
 
 ## Releases
 Maintainers release by tagging: `make release VERSION=vX.Y.Z`. The CD workflow builds, smoke-tests
-and publishes the binaries.
+and publishes the binaries (each archive with `LICENSE`, `NOTICE` and `THIRD_PARTY_LICENSES`) and
+attests their build provenance.

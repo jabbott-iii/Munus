@@ -11,8 +11,10 @@ permissions:
 
 jobs:
   # go-sqlite3 needs CGO, so each target is built with a native C toolchain on
-  # a runner of the matching OS (darwin/amd64 is cross-compiled by clang on the
-  # Apple Silicon runner; windows/arm64 uses a pinned llvm-mingw toolchain).
+  # a runner of the matching OS and architecture. Linux binaries are built fully
+  # static with musl in the Dockerfile's Alpine builder (no glibc; images pinned
+  # by Alpine release and Go minor version, packages by version); windows/arm64
+  # uses a pinned llvm-mingw toolchain.
   # Third-party actions and downloads are pinned by commit SHA or SHA-256.
   build:
     name: Build ${{ matrix.goos }}/${{ matrix.goarch }}
@@ -24,7 +26,8 @@ jobs:
           - { goos: linux, goarch: amd64, runner: ubuntu-latest, smoke: true }
           - { goos: linux, goarch: arm64, runner: ubuntu-24.04-arm, smoke: true }
           - { goos: darwin, goarch: arm64, runner: macos-latest, smoke: true }
-          - { goos: darwin, goarch: amd64, runner: macos-latest, smoke: false }
+          # Intel runner, supported until the macOS 15 image is retired (Fall 2027).
+          - { goos: darwin, goarch: amd64, runner: macos-15-intel, smoke: true }
           - { goos: windows, goarch: amd64, runner: windows-latest, smoke: true }
           - { goos: windows, goarch: arm64, runner: windows-11-arm, smoke: true }
 
@@ -32,7 +35,9 @@ jobs:
       - name: Checkout
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
+      # Linux builds use Go from the Dockerfile's builder image instead.
       - name: Set up Go
+        if: matrix.goos != 'linux'
         uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
           # Latest Go 1.26 patch release (security fixes). No cache: release
@@ -81,20 +86,24 @@ jobs:
           CGO_ENABLED: "1"
           VERSION: ${{ steps.meta.outputs.tag }}
         run: |
+          if [[ ! "$VERSION" =~ ^[0-9A-Za-z._+-]+$ ]]; then
+            echo "unexpected version string: $VERSION" >&2
+            exit 1
+          fi
           ext=""
           if [ "$GOOS" = "windows" ]; then ext=".exe"; fi
           out="dist/munus_${GOOS}_${GOARCH}${ext}"
-          tags=""
-          ldflags="-s -w -X main.version=${VERSION}"
-          if [ "$GOOS" = "linux" ]; then
-            # Link statically so the binary does not depend on the runner's glibc
-            # version; netgo/osusergo avoid glibc NSS, and extension loading
-            # (dlopen) is not used by munus.
-            tags="sqlite_omit_load_extension,osusergo,netgo"
-            ldflags="$ldflags -linkmode external -extldflags -static"
-          fi
           mkdir -p dist
-          go build -tags "$tags" -ldflags="$ldflags" -o "$out" .
+          if [ "$GOOS" = "linux" ]; then
+            # Fully static musl binary from the Dockerfile's "static" stage,
+            # built natively for the runner's architecture (P-047).
+            docker build --pull --target static --build-arg "VERSION=${VERSION}" \
+              --output "type=local,dest=dist/static" .
+            mv dist/static/munus "$out"
+            rmdir dist/static
+          else
+            go build -ldflags="-s -w -X main.version=${VERSION}" -o "$out" .
+          fi
           echo "binary=$out" >> "$GITHUB_OUTPUT"
 
       - name: Smoke test binary
@@ -105,11 +114,27 @@ jobs:
         run: |
           bin="./${{ steps.build.outputs.binary }}"
           "$bin" --version
-          if [ "${{ matrix.goos }}" = "linux" ]; then
-            file "$bin" | grep -q "statically linked"
-          fi
           "$bin" add --title "smoke" --description "release smoke test"
-          "$bin" list | grep -q "smoke"
+          # Not grep -q: with pipefail, munus could fail with SIGPIPE if grep
+          # exits before munus has written all of its output.
+          "$bin" list | grep "smoke" > /dev/null
+          if [ "${{ matrix.goos }}" = "linux" ]; then
+            # Static (no program interpreter) with an 8 MiB thread stack
+            # request; it must also run on an older glibc distribution and on
+            # musl-based Alpine.
+            file "$bin" | grep "statically linked" > /dev/null
+            headers="$(readelf -lW "$bin")"
+            if grep -q INTERP <<< "$headers"; then
+              echo "binary has a program interpreter" >&2
+              exit 1
+            fi
+            grep GNU_STACK <<< "$headers" | grep 0x800000 > /dev/null
+            name="$(basename "$bin")"
+            for image in debian:11 alpine:3.24; do
+              docker run --rm -v "$PWD/dist:/dist:ro" -e MUNUS_DB_PATH=/tmp/smoke.db "$image" \
+                sh -c "/dist/$name add --title smoke --description 'release smoke test' && /dist/$name list | grep -q smoke"
+            done
+          fi
 
       - name: Upload binary
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
@@ -118,14 +143,25 @@ jobs:
           path: ${{ steps.build.outputs.binary }}
           if-no-files-found: error
 
-  release:
-    name: Package and Release
+  # Packaging and attestation run without write access to the repository; only
+  # the publishing job below can write, and it cannot mint OIDC tokens.
+  package:
+    name: Package and attest
     needs: build
     runs-on: ubuntu-latest
     permissions:
-      contents: write
+      contents: read
+      # Build provenance attestations (Sigstore certificate via OIDC).
+      id-token: write
+      attestations: write
 
     steps:
+      # LICENSE, NOTICE and THIRD_PARTY_LICENSES go into every archive.
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+
       - name: Download binaries
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
@@ -137,14 +173,20 @@ jobs:
         shell: bash
         run: |
           cd dist
+          licenses=(LICENSE NOTICE THIRD_PARTY_LICENSES)
           for bin in munus_*; do
             name="${bin%.exe}"
             chmod +x "$bin"
             if [ "$bin" != "$name" ]; then
-              zip -q "${name}.zip" "$bin"
+              zip -q -j "${name}.zip" "$bin" "${licenses[@]/#/../}"
+              listing="$(unzip -Z1 "${name}.zip")"
             else
-              tar -czf "${name}.tar.gz" "$bin"
+              tar -czf "${name}.tar.gz" "$bin" -C .. "${licenses[@]}"
+              listing="$(tar -tzf "${name}.tar.gz")"
             fi
+            for file in "$bin" "${licenses[@]}"; do
+              grep -qx "$file" <<< "$listing" || { echo "$file missing from $name" >&2; exit 1; }
+            done
             rm "$bin"
           done
           ls -l
@@ -155,8 +197,42 @@ jobs:
           cd dist
           sha256sum -- * > checksums.txt
 
-      - name: Create GitHub Release
+      # Verify with: gh attestation verify <archive> --repo jabbott-iii/Munus
+      - name: Attest build provenance
         if: github.ref_type == 'tag'
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: |
+            dist/*.tar.gz
+            dist/*.zip
+            dist/checksums.txt
+
+      - name: Upload release files
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: release-files
+          path: |
+            dist/*.tar.gz
+            dist/*.zip
+            dist/checksums.txt
+          if-no-files-found: error
+
+  release:
+    name: Release
+    needs: package
+    if: github.ref_type == 'tag'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download release files
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: release-files
+          path: dist
+
+      - name: Create GitHub Release
         uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
         with:
           tag_name: ${{ github.ref_name }}
