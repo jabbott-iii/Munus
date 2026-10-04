@@ -31,7 +31,8 @@ Munus is a single-binary Go CLI/TUI task manager backed by a local SQLite file.
 - Follow `intel/golang.md`. Storage methods and import/export/backup functions take
   `ctx context.Context` first and use GORM `WithContext`; CLI commands pass `cmd.Context()` (`main`
   runs `ExecuteContext(context.Background())`); the TUI passes `context.Background()` per operation at
-  its event boundary. Contexts are never stored in structs. No package-level mutable state (GORM's
+  its event boundary, except that each import/export step gets its own cancellable context (only its
+  `CancelFunc` is kept, so esc can cancel it). Contexts are never stored in structs. No package-level mutable state (GORM's
   log writer is injected via `openDatabase`); discarded errors carry a comment saying why.
 - Commands write via `cmd.OutOrStdout()` / read via `cmd.InOrStdin()` so they are testable.
 - Each command checks its arguments and flag values first (cobra `Args` validators, required and
@@ -64,8 +65,13 @@ Munus is a single-binary Go CLI/TUI task manager backed by a local SQLite file.
   exactly when the status is `done`, and `completed_at` is set exactly when it is true.
   `ItemModel.BeforeSave` enforces this on every write (when they disagree, `completed` decides done
   versus not done); use `setStatus` to change both. A status-only change (TUI `c`/`s`, `complete`)
-  goes through `Storage.SetTaskStatus`, which writes only `status`, `completed`, `completed_at` and
-  `updated_at`, so it never writes back a stale copy of the other fields. `itemStatus` and
+  goes through `Storage.UpdateTaskStatus(ctx, id, next, now)` (`Database.SetTaskStatus` wraps it for
+  a fixed status): it reads the stored status and writes `next(stored)` in one transaction (plan 4,
+  P-052), so the decision never rests on a stale copy (`nextStatus` for `s`; `completedStatus` for
+  `complete` and for `c` on a task shown as open; `reopenedStatus` for `complete --undo` and for `c`
+  on a task shown as done), and it writes only `status`, `completed`, `completed_at`
+  and `updated_at`, so it never writes back a stale copy of the other fields. The callback runs
+  inside the transaction and must not block. `itemStatus` and
   `taskStatusOf` only return `todo`, `doing` or `done`; opening a database repairs any other stored
   status (`completed` decides; a `doing` in another case is kept).
 - **Tags** live in `tags` (unique lowercase names) and `task_tags` (links); names are 1–32 letters,
@@ -73,7 +79,8 @@ Munus is a single-binary Go CLI/TUI task manager backed by a local SQLite file.
   unused tags; `loadTags` returns them sorted.
 - **Transactions and migration:** the DSN gets `_txlock=immediate` (unless it sets `_txlock`), so
   every transaction starts with `BEGIN IMMEDIATE`: a transaction holds the write lock from its
-  start and concurrent writers wait (busy timeout, 5 s by default) instead of failing with
+  start and concurrent writers wait (busy timeout: 15 s, added by `withBusyTimeout` unless the DSN
+  sets `_busy_timeout` or `_timeout`; plan 4, D-14) instead of failing with
   "database is locked" when a read-then-write transaction cannot upgrade its lock. Schema migration
   first runs without a transaction (so an up-to-date database is only read); if that fails, for
   example because another process created a table in between, it runs again inside a transaction,
@@ -101,8 +108,9 @@ Munus is a single-binary Go CLI/TUI task manager backed by a local SQLite file.
 - **Text policy:** `add`, `edit`, the TUI form and `import --strict` reject control characters
   (C0/C1 and the bidi embedding/override/isolate controls U+202A–U+202E, U+2066–U+2069), invalid
   UTF-8, over-length text and blank titles (`add` and the form also blank descriptions). Default
-  import strips control characters (CRLF → LF) and stores a title that is blank afterwards as
-  `(untitled)`, so older exports/backups always restore. All task text written to the terminal goes
+  import strips control characters (CRLF → LF), shortens text over the byte limits at a rune
+  boundary (`shortenToLimit`; plan 4, D-13; counted as `Shortened` in the plan and result) and then
+  stores a title that is blank as `(untitled)`, so older exports/backups always restore. All task text written to the terminal goes
   through `sanitizeForTerminal`; the root command writes its errors through `terminalSafeWriter`,
   and TUI error lines are sanitised too.
 - **Import limits:** at most 32 MiB is read (`maxImportFileSize`); `decodeExportBundle` streams the
@@ -130,6 +138,20 @@ Munus is a single-binary Go CLI/TUI task manager backed by a local SQLite file.
   mirrors go-sqlite3 and sqlite's URI rules; a pre-created file is removed again if the driver then
   rejects the DSN). Exports use a random temp file + rename and refuse to overwrite the active
   database (compared via the file sqlite reports in `pragma_database_list`).
+- **TUI transfers (plan 4, P-054):** export, import preview and import never run in `Update`. Each
+  step starts as a Bubble Tea command (`startTransfer` gives it a `*transferOp`, which holds the
+  cancel function of the step's context and identifies the step by pointer, so a late result never
+  matches a newer step, even in another list model) that touches only values captured when it
+  started, never the model, and reports a `transferResultMsg`; the import file is read through
+  `ListModel.readImport`. While a step runs the dialog shows it and ignores keys except esc (cancel,
+  close the dialog) and ctrl+c (cancel, quit). A result the dialog no longer waits for is dropped
+  for a preview; for an export or import its outcome is still put in the status line (by the form
+  too, which hands it to the list it returns to), and an import reloads the list. The import itself
+  stays one storage transaction, which a cancelled context rolls back unless it has already
+  committed; `ExportToFile` checks the context once more before writing. Two waits cannot be
+  interrupted: a read blocked in the operating system (for example opening a FIFO without a writer)
+  and SQLite's busy wait for another process's lock, which ends when the lock is released or the
+  busy timeout passes; the interface stops waiting at once and reports the outcome when it comes.
 - GORM's logger is silent (writer injected via `openDatabase`, `io.Discard` in production); errors
   are returned, never printed to stdout.
 

@@ -32,6 +32,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 )
 
 // MockStorage is a mock implementation of Storage for testing
@@ -112,17 +113,21 @@ func (m *MockStorage) ReplaceAllTasksFunc(ctx context.Context, fn func([]*ItemMo
 	return m.ReplaceAllTasks(ctx, next)
 }
 
-func (m *MockStorage) SetTaskStatus(_ context.Context, id int, status TaskStatus, now time.Time) error {
+func (m *MockStorage) UpdateTaskStatus(_ context.Context, id int, next func(TaskStatus) TaskStatus, now time.Time) (TaskStatus, error) {
 	if m.err != nil {
-		return m.err
+		return "", m.err
 	}
 	for _, t := range m.tasks {
 		if t.ID == id {
+			status, err := parseTaskStatus(string(next(itemStatus(t))))
+			if err != nil {
+				return "", err
+			}
 			t.setStatus(status, now)
-			return nil
+			return status, nil
 		}
 	}
-	return fmt.Errorf("%w: %d", ErrTaskNotFound, id)
+	return "", fmt.Errorf("%w: %d", ErrTaskNotFound, id)
 }
 
 // Helper function to create a test adapter
@@ -587,7 +592,7 @@ func TestReadImportFileValid(t *testing.T) {
 		t.Fatalf("setup failed: %v", err)
 	}
 
-	tasks, version, err := readImportFile(filePath, false)
+	tasks, version, err := readAndParseImportFile(filePath, false)
 	if err != nil {
 		t.Fatalf("readImportFile failed: %v", err)
 	}
@@ -619,7 +624,7 @@ func TestReadImportFileInvalidVersion(t *testing.T) {
 		t.Fatalf("setup failed: %v", err)
 	}
 
-	_, _, err = readImportFile(filePath, false)
+	_, _, err = readAndParseImportFile(filePath, false)
 	if err == nil {
 		t.Fatal("expected error for invalid version, got nil")
 	}
@@ -651,11 +656,11 @@ func TestReadImportFileMissingTitle(t *testing.T) {
 
 	// Default import keeps the task under a placeholder title (plan 3, D-3);
 	// strict import rejects it.
-	tasks, _, err := readImportFile(filePath, false)
+	tasks, _, err := readAndParseImportFile(filePath, false)
 	if err != nil || len(tasks) != 1 || tasks[0].Title != untitledTaskTitle {
 		t.Fatalf("expected default import to keep the task as %q, got %+v, %v", untitledTaskTitle, tasks, err)
 	}
-	if _, _, err := readImportFile(filePath, true); err == nil || !strings.Contains(err.Error(), "tasks[0].title is required") {
+	if _, _, err := readAndParseImportFile(filePath, true); err == nil || !strings.Contains(err.Error(), "tasks[0].title is required") {
 		t.Fatalf("expected strict import to reject a missing title, got %v", err)
 	}
 }
@@ -691,7 +696,7 @@ func TestReadImportFileDuplicateID(t *testing.T) {
 		t.Fatalf("setup failed: %v", err)
 	}
 
-	_, _, err = readImportFile(filePath, false)
+	_, _, err = readAndParseImportFile(filePath, false)
 	if err == nil {
 		t.Fatal("expected error for duplicate ID, got nil")
 	}
@@ -723,13 +728,13 @@ func TestReadImportFileStrict(t *testing.T) {
 	}
 
 	// Non-strict should succeed
-	_, _, err = readImportFile(filePath, false)
+	_, _, err = readAndParseImportFile(filePath, false)
 	if err != nil {
 		t.Fatalf("non-strict mode failed: %v", err)
 	}
 
 	// Strict mode should fail
-	_, _, err = readImportFile(filePath, true)
+	_, _, err = readAndParseImportFile(filePath, true)
 	if err == nil {
 		t.Fatal("expected error in strict mode for unknown fields, got nil")
 	}
@@ -1248,7 +1253,7 @@ func TestReadImportFileFillsCompletedAtForLegacyFiles(t *testing.T) {
 		{ID: "1", Title: "Done", Completed: true, UpdatedAt: updated},
 		{ID: "2", Title: "Open", Completed: false, CompletedAt: &stray},
 	}})
-	tasks, _, err := readImportFile(file, false)
+	tasks, _, err := readAndParseImportFile(file, false)
 	if err != nil {
 		t.Fatalf("readImportFile failed: %v", err)
 	}
@@ -1359,7 +1364,7 @@ func TestReadImportFileCanonicalizesNumericIDs(t *testing.T) {
 	file := writeTestImportBundle(t, ExportBundle{Version: 1, Tasks: []TaskDTO{
 		{ID: "01", Title: "A"}, {ID: "1", Title: "B"},
 	}})
-	if _, _, err := readImportFile(file, false); err == nil || !strings.Contains(err.Error(), "duplicate id") {
+	if _, _, err := readAndParseImportFile(file, false); err == nil || !strings.Contains(err.Error(), "duplicate id") {
 		t.Fatalf("expected duplicate id error, got %v", err)
 	}
 }
@@ -1373,13 +1378,13 @@ func TestReadImportFileHandlesUnsafeText(t *testing.T) {
 	for name, dto := range controlCases {
 		t.Run("strict rejects "+name, func(t *testing.T) {
 			file := writeTestImportBundle(t, ExportBundle{Version: 1, Tasks: []TaskDTO{dto}})
-			if _, _, err := readImportFile(file, true); err == nil {
+			if _, _, err := readAndParseImportFile(file, true); err == nil {
 				t.Fatalf("expected strict import to reject %s", name)
 			}
 		})
 		t.Run("default strips "+name, func(t *testing.T) {
 			file := writeTestImportBundle(t, ExportBundle{Version: 1, Tasks: []TaskDTO{dto}})
-			tasks, _, err := readImportFile(file, false)
+			tasks, _, err := readAndParseImportFile(file, false)
 			if err != nil {
 				t.Fatalf("expected %s to be sanitised, got %v", name, err)
 			}
@@ -1390,24 +1395,122 @@ func TestReadImportFileHandlesUnsafeText(t *testing.T) {
 	}
 
 	crlf := writeTestImportBundle(t, ExportBundle{Version: 1, Tasks: []TaskDTO{{ID: "1", Title: "ok", Description: "line1\r\nline2"}}})
-	tasks, _, err := readImportFile(crlf, false)
+	tasks, _, err := readAndParseImportFile(crlf, false)
 	if err != nil || tasks[0].Description != "line1\nline2" {
 		t.Fatalf("expected CRLF normalised to LF, got %q (err %v)", tasks[0].Description, err)
 	}
 
+	// Over-length text: strict import rejects it with the task index; default
+	// import shortens it to the limit (plan 4, D-13; see
+	// TestImportShortensOverLengthText).
 	for name, dto := range map[string]TaskDTO{
 		"title too long":       {ID: "1", Title: strings.Repeat("a", MaxTitleLength+1)},
 		"description too long": {ID: "1", Title: "ok", Description: strings.Repeat("a", MaxDescriptionLength+1)},
 	} {
 		file := writeTestImportBundle(t, ExportBundle{Version: 1, Tasks: []TaskDTO{dto}})
-		if _, _, err := readImportFile(file, false); err == nil {
-			t.Errorf("expected %s to be rejected", name)
+		if _, _, err := readAndParseImportFile(file, true); err == nil || !strings.Contains(err.Error(), "tasks[0]") {
+			t.Errorf("expected strict import to reject %s with the task index, got %v", name, err)
+		}
+		tasks, _, err := readAndParseImportFile(file, false)
+		if err != nil || len(tasks[0].Title) > MaxTitleLength || len(tasks[0].Description) > MaxDescriptionLength {
+			t.Errorf("expected default import to shorten %s, got %+v (err %v)", name, tasks, err)
 		}
 	}
 
 	ok := writeTestImportBundle(t, ExportBundle{Version: 1, Tasks: []TaskDTO{{ID: "1", Title: "ok", Description: "line1\n\tline2"}}})
-	if _, _, err := readImportFile(ok, true); err != nil {
+	if _, _, err := readAndParseImportFile(ok, true); err != nil {
 		t.Fatalf("expected newline/tab in description to be accepted, got %v", err)
+	}
+}
+
+// P-051 / D-13: an export of a database holding text longer than today's
+// limits (written before they existed, or by another tool) restores with the
+// default import, which shortens the text and reports how many tasks it
+// shortened; --strict rejects the file with the task index.
+func TestImportShortensOverLengthText(t *testing.T) {
+	old := newFileTestDB(t)
+	long := strings.Repeat("t", 5000)
+	seedTask(t, old, &ItemModel{Title: long, Description: strings.Repeat("d", 5000)})
+	seedTask(t, old, &ItemModel{Title: strings.Repeat(" ", 150) + "x", Description: "blank once shortened"})
+	seedTask(t, old, &ItemModel{Title: strings.Repeat("€", 40), Description: "fits"})
+	seedTask(t, old, &ItemModel{Title: "short", Description: "unchanged"})
+	export, err := runCmd(t, NewExportCmd(old), "", "--stdout")
+	if err != nil {
+		t.Fatalf("export failed: %v", err)
+	}
+	file := filepath.Join(t.TempDir(), "old.json")
+	if err := os.WriteFile(file, []byte(export), 0o600); err != nil {
+		t.Fatalf("setup failed: %v", err)
+	}
+
+	strictDB := newFileTestDB(t)
+	if _, err := runCmd(t, NewImportCmd(strictDB), "", "--file", file, "--strict"); err == nil || !strings.Contains(err.Error(), "tasks[") || !strings.Contains(err.Error(), "exceeds maximum length") {
+		t.Fatalf("expected --strict to reject the file with the task index, got %v", err)
+	}
+	if tasks, _ := strictDB.ListTasks(t.Context()); len(tasks) != 0 {
+		t.Fatalf("strict import wrote %d tasks", len(tasks))
+	}
+
+	db := newFileTestDB(t)
+	out, err := runCmd(t, NewImportCmd(db), "", "--file", file)
+	if err != nil {
+		t.Fatalf("default import failed: %v", err)
+	}
+	if !strings.Contains(out, "Shortened: 3 tasks") || !strings.Contains(out, "shortened=3") {
+		t.Fatalf("expected the shortened count in the plan and the result, got:\n%s", out)
+	}
+	byTitle := map[string]*ItemModel{}
+	tasks, _ := db.ListTasks(t.Context())
+	for _, task := range tasks {
+		byTitle[task.Title] = task
+		if len(task.Title) > MaxTitleLength || len(task.Description) > MaxDescriptionLength || !utf8.ValidString(task.Title) {
+			t.Errorf("task %d still over the limits: %d/%d bytes", task.ID, len(task.Title), len(task.Description))
+		}
+	}
+	if task := byTitle[long[:MaxTitleLength]]; task == nil || task.Description != strings.Repeat("d", MaxDescriptionLength) {
+		t.Errorf("expected the long title and description cut to the limits, got %v", task)
+	}
+	if byTitle[untitledTaskTitle] == nil {
+		t.Errorf("expected a title that is blank once shortened to become %q", untitledTaskTitle)
+	}
+	if byTitle[strings.Repeat("€", 33)] == nil {
+		t.Errorf("expected the multi-byte title cut at a character boundary")
+	}
+	if byTitle["short"] == nil || len(tasks) != 4 {
+		t.Errorf("expected all four tasks imported, got %d", len(tasks))
+	}
+
+	// Re-importing the shortened data with --strict now works.
+	again, err := runCmd(t, NewExportCmd(db), "", "--stdout")
+	if err != nil {
+		t.Fatalf("export failed: %v", err)
+	}
+	if _, _, err := parseImportData([]byte(again), true); err != nil {
+		t.Fatalf("export of the imported tasks does not re-import with --strict: %v", err)
+	}
+}
+
+// P-051: dry runs and the TUI preview report the count too.
+func TestImportPlanReportsShortenedTasks(t *testing.T) {
+	data, err := marshalBundle([]Task{
+		{ID: "1", Title: strings.Repeat("a", MaxTitleLength+1)},
+		{ID: "2", Title: "ok", Description: strings.Repeat("b", MaxDescriptionLength+1)},
+		{ID: "3", Title: "ok"},
+	}, false)
+	if err != nil {
+		t.Fatalf("setup failed: %v", err)
+	}
+	svc := &TaskServiceAdapter{storage: newFileTestDB(t)}
+	plan, err := planImportData(t.Context(), svc, data, ImportConfig{Mode: "merge"})
+	if err != nil || plan.Shortened != 2 {
+		t.Fatalf("plan.Shortened = %d (err %v), want 2", plan.Shortened, err)
+	}
+	res, err := applyImportData(t.Context(), svc, data, ImportConfig{Mode: "replace", DryRun: true})
+	if err != nil || res.Shortened != 2 {
+		t.Fatalf("dry-run Shortened = %d (err %v), want 2", res.Shortened, err)
+	}
+	if _, err := planImportData(t.Context(), svc, data, ImportConfig{Mode: "merge", Strict: true}); err == nil || !strings.Contains(err.Error(), "tasks[0]") {
+		t.Fatalf("expected strict planning to fail with the task index, got %v", err)
 	}
 }
 
@@ -1438,7 +1541,7 @@ func TestImportDuplicateIDErrorIsQuoted(t *testing.T) {
 	file := writeTestImportBundle(t, ExportBundle{Version: 1, Tasks: []TaskDTO{
 		{ID: "x\x1b[2J", Title: "A"}, {ID: "x\x1b[2J", Title: "B"},
 	}})
-	_, _, err := readImportFile(file, false)
+	_, _, err := readAndParseImportFile(file, false)
 	if err == nil || strings.Contains(err.Error(), "\x1b") {
 		t.Fatalf("expected quoted duplicate id error without raw escapes, got %q", err)
 	}
@@ -1559,7 +1662,7 @@ func TestReadImportFileRejectsOversizedFile(t *testing.T) {
 	}
 	_ = f.Close()
 
-	if _, _, err := readImportFile(file, false); err == nil || !strings.Contains(err.Error(), "maximum size") {
+	if _, _, err := readAndParseImportFile(file, false); err == nil || !strings.Contains(err.Error(), "maximum size") {
 		t.Fatalf("expected maximum size error, got %v", err)
 	}
 }
@@ -1736,7 +1839,7 @@ func TestImportStatusRules(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			file := writeTestImportBundle(t, ExportBundle{Version: tc.version, Tasks: []TaskDTO{tc.dto}})
-			tasks, _, err := readImportFile(file, tc.strict)
+			tasks, _, err := readAndParseImportFile(file, tc.strict)
 			if tc.wantErr != "" {
 				if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
 					t.Fatalf("expected error containing %q, got %v", tc.wantErr, err)
@@ -2255,13 +2358,26 @@ func FuzzParseImportData(f *testing.F) {
 	f.Add([]byte(`{"version":2,"tasks":[{"title":"t","status":"done","completed":false}]}`), true)
 	f.Add([]byte(`{"version":1,"tAsks":[{"title":"\b"}]}`), false)
 	f.Add([]byte(`{"version":2,"tasks":[{"id":"1000000001","title":"x"},{"id":"01000000001","title":"y"}]}`), false)
+	// P-051: over-length text (multi-byte, and a title that is blank once cut).
+	f.Add([]byte(`{"version":2,"tasks":[{"title":"`+strings.Repeat("\u20ac", 40)+`","description":"`+strings.Repeat("\u00e9", 300)+`"},{"title":"`+strings.Repeat(" ", 120)+`x"}]}`), false)
 	f.Fuzz(func(t *testing.T, data []byte, strict bool) {
-		tasks, _, err := parseImportData(data, strict)
+		parsed, err := decodeImportData(data, strict)
 		if err != nil {
 			return
 		}
+		tasks := parsed.tasks
 		if len(tasks) > maxImportTasks {
 			t.Fatalf("accepted %d tasks, more than the cap", len(tasks))
+		}
+		if parsed.shortened < 0 || parsed.shortened > len(tasks) || (strict && parsed.shortened != 0) {
+			t.Fatalf("shortened count %d for %d tasks (strict %v)", parsed.shortened, len(tasks), strict)
+		}
+		if strict {
+			// Whatever strict import accepts, default import accepts unchanged.
+			lenient, err := decodeImportData(data, false)
+			if err != nil || lenient.shortened != 0 || len(lenient.tasks) != len(tasks) {
+				t.Fatalf("strict import accepted data that default import changes: %v, shortened %d", err, lenient.shortened)
+			}
 		}
 		seen := map[string]bool{}
 		for i, task := range tasks {
@@ -2348,5 +2464,20 @@ func TestApplyImportDryRunWritesNothing(t *testing.T) {
 		if _, err := os.Stat(filepath.Join(home, ".munus")); !errors.Is(err, os.ErrNotExist) {
 			t.Errorf("%+v: dry run wrote a backup (stat: %v)", cfg, err)
 		}
+	}
+}
+
+// P-054: a cancelled export writes nothing, even when the storage does not
+// check the context itself.
+func TestExportToFileCancelledWritesNothing(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	out := filepath.Join(t.TempDir(), "tasks.json")
+	svc := &TaskServiceAdapter{storage: &MockStorage{tasks: []*ItemModel{{ID: 1, Title: "a"}}}}
+	if err := ExportToFile(ctx, svc, ExportFilter{IncludeCompleted: true}, out, true); !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected context.Canceled, got %v", err)
+	}
+	if _, err := os.Stat(out); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("a cancelled export wrote the file (stat: %v)", err)
 	}
 }

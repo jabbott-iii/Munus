@@ -1625,6 +1625,29 @@ func TestCompleteCmdWritesOnlyStatus(t *testing.T) {
 	}
 }
 
+// P-052: complete --undo decides on the status stored when it writes, so a
+// task another process moved from done to doing in the meantime stays doing.
+func TestCompleteUndoDecidesOnStoredStatus(t *testing.T) {
+	ctx := t.Context()
+	db, other := openTwoHandles(t)
+	task := &ItemModel{Title: "a", Description: "x", Status: StatusDone, Completed: true}
+	if err := db.CreateTask(ctx, task); err != nil {
+		t.Fatalf("setup failed: %v", err)
+	}
+	if err := other.SetTaskStatus(ctx, task.ID, StatusDoing, time.Now()); err != nil {
+		t.Fatalf("setup failed: %v", err)
+	}
+	if _, err := runCmd(t, CompleteTaskCmd(db), "", strconv.Itoa(task.ID), "--undo"); err != nil {
+		t.Fatalf("complete --undo failed: %v", err)
+	}
+	if got, _ := other.GetTaskByID(ctx, task.ID); got.Status != StatusDoing {
+		t.Fatalf("--undo must leave a task that is doing alone, got %q", got.Status)
+	}
+	if _, err := runCmd(t, CompleteTaskCmd(db), "", "999", "--undo"); !errors.Is(err, ErrTaskNotFound) {
+		t.Fatalf("expected ErrTaskNotFound for an unknown task, got %v", err)
+	}
+}
+
 // ============================== plan 3: phase B CLI ==============================
 
 // P-038 / N-033, D-8: argument and flag errors are reported with usage and

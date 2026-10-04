@@ -36,6 +36,19 @@ const (
 // still restore (default import only; --strict rejects it).
 const untitledTaskTitle = "(untitled)"
 
+// shortenToLimit returns s cut to at most limit bytes at a character (rune)
+// boundary, and whether it was cut. s must be valid UTF-8.
+func shortenToLimit(s string, limit int) (string, bool) {
+	if len(s) <= limit {
+		return s, false
+	}
+	cut := limit
+	for cut > 0 && !utf8.RuneStart(s[cut]) {
+		cut--
+	}
+	return s[:cut], true
+}
+
 // isBlank reports whether s is empty or contains only whitespace.
 func isBlank(s string) bool {
 	return strings.TrimSpace(s) == ""

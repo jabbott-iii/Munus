@@ -13,7 +13,7 @@ plan, built from the items still open in `notes.md` (residual risks) and earlier
 was committed as `97cf04b` and the maintainer decided D-9…D-19 on 2026-09-27 (phase A → `v2.2.2`,
 phases B and C → `v2.3.0`). Phase A is implemented and validated locally (uncommitted; the workflow,
 `dependabot.yml` and `Makefile` changes are delivered as a patch); its new workflow jobs still need
-their first GitHub runs. Plan 5 below (2026-10-03) moves the default database out of the working
+their first GitHub runs. Phase B (P-051…P-054) was implemented on 2026-10-03 (uncommitted). Plan 5 below (2026-10-03) moves the default database out of the working
 directory and makes `munus list` deadlines readable; it is implemented and validated locally
 (uncommitted) and changes behaviour, so it targets the next major release (D-22).
 
@@ -90,10 +90,10 @@ The plan-2/plan-3 Go rules, validation and "workflow and `Makefile` changes as a
 
 | ID | Priority | Item | Ref | Acceptance | Status |
 |---|---|---|---|---|---|
-| P-051 | Medium | **Older exports with over-length text restore**, per D-13 (text stored before the limits existed, or by other tools). | notes residual risk | An export of a database with a 5,000-character title imports by default with a "shortened" count and is rejected by `--strict` with the task index; the fuzz round-trip property covers it | Proposed |
-| P-052 | Low | **Status changes decided on stored data.** TUI `c`/`s` and `complete --undo` compute the new status from the status stored at write time, inside the same transaction (e.g. `Storage.UpdateTaskStatus(ctx, id, func(current TaskStatus) TaskStatus, now)`), closing the remaining stale-read windows. | notes residual risk | Tests change the status through a second handle between load and key press / command | Proposed |
-| P-053 | Low | **Busy timeout** per D-14. | N-037 | DSN helper tests (default added, user value kept); README configuration note | Proposed |
-| P-054 | Medium | **TUI import/export off the event loop**, per D-15; storage work stays one transaction. | N-036 | A model test with a blocking reader: the UI keeps handling keys; esc cancels waiting; `go test -race` | Proposed |
+| P-051 | Medium | **Older exports with over-length text restore**, per D-13 (text stored before the limits existed, or by other tools). | notes residual risk | An export of a database with a 5,000-character title imports by default with a "shortened" count and is rejected by `--strict` with the task index; the fuzz round-trip property covers it | Done (uncommitted, 2026-10-03): `shortenToLimit` cuts at a rune boundary before the blank-title check; `ImportPlan`/`ImportResult.Shortened`, reported by the CLI (`Shortened: …`, `shortened=…`) and the TUI; `TestImportShortensOverLengthText`, `TestImportPlanReportsShortenedTasks`, `TestShortenToLimit`; the fuzz target checks the count and that whatever `--strict` accepts, default import accepts unchanged |
+| P-052 | Low | **Status changes decided on stored data.** TUI `c`/`s` and `complete --undo` compute the new status from the status stored at write time, inside the same transaction (e.g. `Storage.UpdateTaskStatus(ctx, id, func(current TaskStatus) TaskStatus, now)`), closing the remaining stale-read windows. | notes residual risk | Tests change the status through a second handle between load and key press / command | Done (uncommitted, 2026-10-03): `UpdateTaskStatus(ctx, id, next, now) (TaskStatus, error)` replaces `SetTaskStatus` in `Storage` (`Database.SetTaskStatus` wraps it); `complete` no longer reads the task first; after the independent review, `c` follows the user's intent like `complete`/`complete --undo` (complete a task shown as open, reopen one shown as done only while it is still done), decided on the stored status; `TestUpdateTaskStatusDecidesOnStoredStatus`, `TestListModelStatusKeysDecideOnStoredStatus`, `TestCompleteUndoDecidesOnStoredStatus` |
+| P-053 | Low | **Busy timeout** per D-14. | N-037 | DSN helper tests (default added, user value kept); README configuration note | Done (uncommitted, 2026-10-03): `withBusyTimeout` (`_busy_timeout` or `_timeout` in the DSN wins); `TestWithBusyTimeout`, `TestNewDatabaseBusyTimeout` (reads `PRAGMA busy_timeout`); binary: a writer waits out an 8 s lock |
+| P-054 | Medium | **TUI import/export off the event loop**, per D-15; storage work stays one transaction. | N-036 | A model test with a blocking reader: the UI keeps handling keys; esc cancels waiting; `go test -race` | Done (uncommitted, 2026-10-03): steps run as Bubble Tea commands with a cancellable context and a working state; `TestTransferPreviewDoesNotBlockTheInterface`, `TestTransferIgnoresResultsOfEarlierSteps`, `TestTransferImportCancelImportsNothing` (another handle holds the write lock), `TestTransferImportCancelledMidTransactionRollsBack`, `TestTransferResultFromEarlierListIsIgnored`, `TestFormKeepsLateTransferOutcome`, `TestTransferExportCancelWritesNothing`, `TestTransferCtrlCQuitsWhileWorking`; race detector clean (20 repeated runs); checked in a pseudo-terminal with a FIFO |
 
 ### Phase C — maintainability and housekeeping
 
@@ -107,7 +107,9 @@ The plan-2/plan-3 Go rules, validation and "workflow and `Makefile` changes as a
 ### Suggested order
 D-9…D-19 (done) → P-046, P-047, P-048 (one `cd.yml`/Dockerfile patch) → P-049, P-050 (done,
 uncommitted) → release `v2.2.2` → P-052, P-053 → P-051 → P-054 → P-055 → release `v2.3.0` (P-056 deferred, P-057 and P-058
-done).
+done). Update 2026-10-03: phase A shipped as `v3.0.0`, plan 5 as `dc6b120`; phase B (P-051…P-054) is
+implemented and validated locally (uncommitted). P-055 remains; the release number for phase B is
+the maintainer's decision (see D-22).
 
 ## Plan 3 — drafted and decided 2026-09-27 (phase A released in v2.2.0; phases B and C in v2.2.1)
 

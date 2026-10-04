@@ -235,3 +235,27 @@ func FuzzSanitizeForTerminal(f *testing.F) {
 		}
 	})
 }
+
+// P-051: text is cut at a character boundary, never inside a UTF-8 sequence.
+func TestShortenToLimit(t *testing.T) {
+	cases := []struct {
+		in    string
+		limit int
+		want  string
+		cut   bool
+	}{
+		{"abc", 3, "abc", false},
+		{"abcd", 3, "abc", true},
+		{strings.Repeat("é", 60), 100, strings.Repeat("é", 50), true}, // 2-byte runes, cut on a boundary
+		{strings.Repeat("€", 40), 100, strings.Repeat("€", 33), true}, // 3-byte runes: 99 bytes
+		{strings.Repeat("😀", 30), 100, strings.Repeat("😀", 25), true}, // 4-byte runes
+		{"a😀", 3, "a", true},
+		{"😀", 0, "", true},
+	}
+	for _, tc := range cases {
+		got, cut := shortenToLimit(tc.in, tc.limit)
+		if got != tc.want || cut != tc.cut || !utf8.ValidString(got) || len(got) > tc.limit {
+			t.Errorf("shortenToLimit(%q, %d) = %q, %v; want %q, %v", tc.in, tc.limit, got, cut, tc.want, tc.cut)
+		}
+	}
+}

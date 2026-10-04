@@ -12,7 +12,7 @@ Munus/
 │   ├── ext-text.go         # text limits, control/bidi-char and UTF-8 validation, tag rules, terminal sanitising (incl. stderr writer)
 │   ├── ext-export-import.go# JSON v2 export, import (v1/v2, file or stdin; streaming decode, 50k-task cap) plan/apply, merge, backups
 │   ├── ui-form.go          # Bubble Tea task-entry form (insert/normal vim modes)
-│   ├── ui-list.go          # Bubble Tea list/dashboard, delete confirm, transfer overlay
+│   ├── ui-list.go          # Bubble Tea list/dashboard, delete confirm, transfer overlay (import/export steps run as background commands)
 │   └── *_test.go           # unit tests per file
 ├── tools/licenses/         # stdlib-only generator/check for THIRD_PARTY_LICENSES and the NOTICE module list (+ embedded musl COPYRIGHT)
 ├── THIRD_PARTY_LICENSES    # generated full license texts (Go, SQLite, musl, every compiled module); shipped in archives and image

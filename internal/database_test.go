@@ -1552,6 +1552,53 @@ func TestWithImmediateTransactions(t *testing.T) {
 	}
 }
 
+// P-053 / D-14: the busy timeout defaults to 15 s; a DSN that sets one keeps it.
+func TestWithBusyTimeout(t *testing.T) {
+	for dsn, want := range map[string]string{
+		"munus.db":                                 "munus.db?_busy_timeout=15000",
+		"munus.db?_txlock=immediate":               "munus.db?_txlock=immediate&_busy_timeout=15000",
+		"file:munus.db?mode=ro":                    "file:munus.db?mode=ro&_busy_timeout=15000",
+		"munus.db?_busy_timeout=2000":              "munus.db?_busy_timeout=2000",
+		"munus.db?_txlock=immediate&_timeout=3000": "munus.db?_txlock=immediate&_timeout=3000",
+		"munus.db?_busy_timeout=":                  "munus.db?_busy_timeout=",
+		"munus.db?x_busy_timeout=1":                "munus.db?x_busy_timeout=1&_busy_timeout=15000",
+		"munus.db?bad=%zz":                         "munus.db?bad=%zz",
+		"?odd":                                     "?odd",
+	} {
+		if got := withBusyTimeout(dsn); got != want {
+			t.Errorf("withBusyTimeout(%q) = %q, want %q", dsn, got, want)
+		}
+	}
+}
+
+// P-053: the connection sqlite opens really uses the default or the user's value.
+func TestNewDatabaseBusyTimeout(t *testing.T) {
+	dir := t.TempDir()
+	for name, tc := range map[string]struct {
+		dsn  string
+		want int
+	}{
+		"default":       {filepath.Join(dir, "a.db"), 15000},
+		"_busy_timeout": {filepath.Join(dir, "b.db") + "?_busy_timeout=2000", 2000},
+		"_timeout":      {filepath.Join(dir, "c.db") + "?_timeout=3000", 3000},
+	} {
+		t.Run(name, func(t *testing.T) {
+			db, err := NewDatabase(tc.dsn)
+			if err != nil {
+				t.Fatalf("NewDatabase failed: %v", err)
+			}
+			t.Cleanup(func() { _ = db.Close() })
+			var got int
+			if err := db.sqlDB.QueryRow("PRAGMA busy_timeout").Scan(&got); err != nil {
+				t.Fatalf("read busy_timeout: %v", err)
+			}
+			if got != tc.want {
+				t.Fatalf("busy_timeout = %d, want %d", got, tc.want)
+			}
+		})
+	}
+}
+
 // P-042 / N-036: a database that fails to migrate is closed, so repeated
 // failed opens do not leak file descriptors.
 func TestNewDatabaseClosesConnectionWhenSetupFails(t *testing.T) {
@@ -1692,5 +1739,82 @@ func TestDeferredDatabaseNoticeIsTakenOnce(t *testing.T) {
 	var nilDB *Database
 	if got := nilDB.takeNotice(); got != "" {
 		t.Fatalf("nil takeNotice = %q, want empty", got)
+	}
+}
+
+// openTwoHandles opens the same database file twice, like two Munus processes.
+func openTwoHandles(t *testing.T) (*Database, *Database) {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "munus.db")
+	first, err := NewDatabase(path)
+	if err != nil {
+		t.Fatalf("open first handle: %v", err)
+	}
+	t.Cleanup(func() { _ = first.Close() })
+	second, err := NewDatabase(path)
+	if err != nil {
+		t.Fatalf("open second handle: %v", err)
+	}
+	t.Cleanup(func() { _ = second.Close() })
+	return first, second
+}
+
+// P-052: the new status is computed from the status stored when the change is
+// written, not from a copy read earlier.
+func TestUpdateTaskStatusDecidesOnStoredStatus(t *testing.T) {
+	ctx := t.Context()
+	db, other := openTwoHandles(t)
+	task := &ItemModel{Title: "a", Description: "x"}
+	if err := db.CreateTask(ctx, task); err != nil {
+		t.Fatalf("setup failed: %v", err)
+	}
+	stale, _ := db.GetTaskByID(ctx, task.ID) // todo
+	if err := other.SetTaskStatus(ctx, task.ID, StatusDoing, time.Now()); err != nil {
+		t.Fatalf("setup failed: %v", err)
+	}
+
+	var seen TaskStatus
+	got, err := db.UpdateTaskStatus(ctx, task.ID, func(current TaskStatus) TaskStatus {
+		seen = current
+		return nextStatus(current)
+	}, time.Now())
+	if err != nil {
+		t.Fatalf("UpdateTaskStatus failed: %v", err)
+	}
+	if stale.Status != StatusTodo || seen != StatusDoing || got != StatusDone {
+		t.Fatalf("stale copy %q, callback saw %q, result %q; want todo, doing, done", stale.Status, seen, got)
+	}
+	stored, _ := other.GetTaskByID(ctx, task.ID)
+	if stored.Status != StatusDone || !stored.Completed || stored.CompletedAt == nil {
+		t.Fatalf("unexpected stored task: %+v", stored)
+	}
+}
+
+func TestUpdateTaskStatusErrorsWriteNothing(t *testing.T) {
+	ctx := t.Context()
+	db := newFileTestDB(t)
+	task := seedTask(t, db, &ItemModel{Title: "a", Description: "x", Status: StatusDoing})
+	before, _ := db.GetTaskByID(ctx, task.ID)
+	later := before.UpdatedAt.Add(time.Hour)
+
+	keep := func(current TaskStatus) TaskStatus { return current }
+	if got, err := db.UpdateTaskStatus(ctx, task.ID, keep, later); err != nil || got != StatusDoing {
+		t.Fatalf("unchanged status: got %q, %v", got, err)
+	}
+	if _, err := db.UpdateTaskStatus(ctx, task.ID, func(TaskStatus) TaskStatus { return "bogus" }, later); err == nil {
+		t.Fatal("expected an error for an invalid status")
+	}
+	if _, err := db.UpdateTaskStatus(ctx, 999, keep, later); !errors.Is(err, ErrTaskNotFound) {
+		t.Fatalf("expected ErrTaskNotFound, got %v", err)
+	}
+	if _, err := db.UpdateTaskStatus(ctx, task.ID, nil, later); err == nil {
+		t.Fatal("expected an error for a nil status function")
+	}
+	if _, err := db.UpdateTaskStatus(ctx, 0, keep, later); err == nil {
+		t.Fatal("expected an error for task id 0")
+	}
+	after, _ := db.GetTaskByID(ctx, task.ID)
+	if after.Status != StatusDoing || !after.UpdatedAt.Equal(before.UpdatedAt) {
+		t.Fatalf("expected nothing written, got %+v (was %+v)", after, before)
 	}
 }

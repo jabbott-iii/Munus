@@ -13,6 +13,8 @@
   U+2066–U+2069).
 - Imports: at most 32 MiB and 50,000 tasks, no data after the bundle, blank titles rejected by
   `--strict`; IDs from a file are kept only up to 1,000,000,000, IDs of existing tasks always.
+  Over-length text is rejected by `--strict` and shortened to the limits by default import (plan 4,
+  D-13), so nothing over the limits is ever stored by an import.
 - Tools downloaded by workflows are pinned by version and verified by SHA-256 before use
   (llvm-mingw in `cd.yml`); actions stay pinned to commit SHAs.
 - Release integrity (plan 4 phase A): archives and `checksums.txt` get a build provenance

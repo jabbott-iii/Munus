@@ -115,3 +115,20 @@ backfilled from `git log` for the changes made after that file's last entry.
   README, `maint.md`, `map.md`, `notes.md`, `plan.md` and `cybersec.md` updated; no workflow,
   `Makefile`, Dockerfile or dependency change. Behaviour change: next major release (D-22, maintainer
   to confirm).
+
+## 2026-10-03 — Plan 4 phase B: data and robustness (uncommitted)
+- Plan 5 was committed by the maintainer as `dc6b120` (pushed). Phase B of plan 4 was implemented on
+  top of it, following the decisions recorded on 2026-09-27 (D-13, D-14, D-15).
+- P-052: `Storage.UpdateTaskStatus` decides a status change on the stored status inside the writing
+  transaction; TUI `c`/`s` and `complete --undo` use it (`SetTaskStatus` became a wrapper).
+- P-053: the busy timeout defaults to 15 s (`withBusyTimeout`); a DSN that sets `_busy_timeout` or
+  `_timeout` keeps its value.
+- P-051: default import shortens over-length titles and descriptions at a character boundary and
+  reports the count (`Shortened`); `--strict` rejects such files with the task index.
+- P-054: TUI export, import preview and import run as Bubble Tea commands with a working state;
+  esc cancels, ctrl+c cancels and quits; late results are matched by step identity.
+- An independent review found no High issues; its Medium finding (step ids repeated across list
+  models, late results lost in the form) and its Low findings were fixed, and `c` now keeps the
+  user's intent while deciding on the stored status.
+- README, `maint.md`, `map.md`, `notes.md`, `plan.md` and `cybersec.md` updated; no workflow,
+  `Makefile`, Dockerfile or dependency change.

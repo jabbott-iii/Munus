@@ -207,7 +207,10 @@ with anything but whitespace after the export is rejected. Tasks already in the 
 task IDs from the file are kept up to 1,000,000,000 (a larger ID gets a new one). Version 1 files get
 their status from `completed`, and merging one keeps the tags (and `doing` status) of tasks that
 already exist. Control characters are removed from imported text, and a task whose title is then
-blank is imported as `(untitled)`.
+blank is imported as `(untitled)`. Text longer than the limits (titles 100 bytes, descriptions 500
+bytes), for example in exports of data saved by older versions, is shortened to fit at a character
+boundary; the import plan and result report how many tasks in the file were shortened
+(`Shortened: …`, `shortened=…`).
 
 - munus import --file tasks-backup.json — merge tasks from a JSON file (default `--mode merge`)
 - munus import --file - — read the export from standard input (`--mode replace` then needs `--yes`)
@@ -217,7 +220,7 @@ blank is imported as `(untitled)`.
 - munus import --file tasks-backup.json --mode replace — replace all local tasks (asks for confirmation unless `--yes`)
 - munus import --file tasks-backup.json --backup — write a backup of current tasks to `~/.munus/backups/` first
 - munus import --file tasks-backup.json --dry-run — show the import plan without changing anything
-- munus import --file tasks-backup.json --strict — reject unknown fields, unknown statuses, control characters, blank titles and a `completed` flag that contradicts `status`
+- munus import --file tasks-backup.json --strict — reject unknown fields, unknown statuses, control characters, over-length text, blank titles and a `completed` flag that contradicts `status`
 
 Examples:
 - munus import --file my-tasks.json
@@ -233,6 +236,14 @@ Examples:
 - `F` cycles the list filter (all → pending → in progress → overdue → done) and `#` cycles a tag filter; the active filter is shown next to the title. `?` (or `h`) shows every key binding.
 - In the edit form, `Enter` on the last field saves and `esc` returns to the list without saving. Clearing the deadline field removes the deadline.
 - The import preview applies only when you press `y`; `n`, `esc` or `q` cancel.
+- Exports, import previews and imports run in the background, so a slow file (for example on a
+  network share) does not freeze the interface; while one runs, `esc` cancels it and `ctrl+c`
+  quits. A cancelled import changes nothing; an import or export that finished anyway is reported
+  in the status line.
+- `c` and `s` decide on the task's current status in the database, so a change made by another
+  `munus` process in the meantime is taken into account: `c` completes a task shown as open
+  (nothing changes if it is already done) and reopens a task shown as done only if it is still
+  done; `s` moves the current status one step on.
 - Run `munus --vim` to enable Vim-style TUI behavior.
 - With `--vim` enabled:
   - Munus opens the task list first so list navigation acts like the primary dashboard.
@@ -245,6 +256,7 @@ Examples:
 | Setting | Default | Description |
 |---|---|---|
 | `MUNUS_DB_PATH` | `munus.db` in your data directory (see [Database location](#database-location)) | Path of the SQLite database file to use instead (the directory must exist), e.g. `export MUNUS_DB_PATH="$HOME/tasks/munus.db"`. `MUNUS_DB_PATH=munus.db` keeps one database per directory, as Munus v3.0.0 and older did. |
+| `_busy_timeout` in `MUNUS_DB_PATH` | 15000 (15 s) | How long a command waits, in milliseconds, while another `munus` process is writing, before it fails with "database is locked", e.g. `export MUNUS_DB_PATH="$HOME/tasks/munus.db?_busy_timeout=30000"` (only with `MUNUS_DB_PATH`). |
 | `--vim` | off | Enable Vim-style keybindings in the TUI. |
 
 On Linux and macOS, new database, export and backup files are created readable

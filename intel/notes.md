@@ -1,5 +1,30 @@
 # Engineering Notes & Open Questions
 
+## Plan 4 phase B baseline (2026-10-03; uncommitted change set on top of `dc6b120`)
+Same toolchain as the plan 5 baseline (Go 1.26.8 built from GitHub source, modules from a local file
+proxy verified against the unchanged `go.sum`). `gofmt -s -l .` clean; `go vet ./...` clean (also
+`GOOS=windows`/`darwin`, CGO off); `go.mod`/`go.sum` unchanged; `go test ./...` passes (coverage
+root 78.6%, `internal` 89.6%, `tools/licenses` 90.1%, 89.5% total); `go test -race -count=3
+-shuffle=on ./...` passes; staticcheck 2026.2.1 clean; the three fuzz targets ran 45 s each without
+findings (the import target now also checks the shortened count and that whatever `--strict`
+accepts, default import accepts unchanged). Mutation check: 22 targeted reversions; 21 caught at
+first, the 22nd (the context check before an export writes) led to
+`TestExportToFileCancelledWritesNothing`, after which all 22 are caught, plus 5 for the review
+fixes, all caught. An independent review found no High issues; its Medium finding was fixed (step
+ids restarted in every new list model, so a late result could be taken for a newer step, and the
+form dropped late results: steps are now identified by pointer and the form hands late outcomes to
+the list), and so were its Low findings: ctrl+c now cancels a running step, the cancellation test
+no longer depends on timing (it could wait out the 15 s busy timeout), and `c` follows the user's
+intent (see the residual risk below). Binary checks on Linux:
+with another process holding the write lock for 8 s, `munus add` waits and succeeds after 8.1 s
+(15 s default), while `?_busy_timeout=2000` fails after 2.0 s; an export of a database holding a
+5,000-character title is rejected by `import --strict` (`tasks[1]: title exceeds maximum length of
+100`) and imported by default with `Shortened: 1 task …` and `shortened=1`, the stored title being
+100 bytes. In a pseudo-terminal, an import preview of a FIFO without a writer shows "Reading …" and
+`[esc] Cancel`; esc closes the dialog ("Import cancelled") while the read is still blocked, and
+ctrl+c exits. Not run: golangci-lint, gosec, CodeQL, govulncheck, the Docker build, macOS and
+Windows test runs.
+
 ## Plan 5 baseline (2026-10-03; uncommitted change set on top of `40f26d4`, target the next major release)
 Go 1.26.8 built from GitHub source; modules served from a local file proxy built from GitHub mirrors
 at the exact versions in `go.mod` and verified against the unchanged `go.sum` (`go mod verify`: all
@@ -257,7 +282,8 @@ unless noted. Security items live in `cybersec.md`.
     when a migration failed; the TUI path prompt accepted only single-byte keys. All fixed (P-042;
     Alt+letter also no longer types into TUI text fields). Still open (deferred, needs a design):
     TUI import/export run synchronously in `Update`, so a slow path such as a FIFO hangs the
-    interface.
+    interface. Fixed by plan 4 phase B (P-054, uncommitted): the steps run as Bubble Tea commands
+    and esc cancels them.
 
 ## Behaviour changes to be aware of
 - Export JSON v1 gains an optional `completed_at` field. Older Munus versions ignore it, but an
@@ -305,6 +331,13 @@ unless noted. Security items live in `cybersec.md`.
   `MUNUS_DB_PATH` is set; `munus list` prints deadlines as `YYYY-MM-DD HH:MM` plus a relative label,
   and `none` instead of `<nil>`.
 
+- Plan 4 phase B (uncommitted): default import shortens titles over 100 bytes and descriptions
+  over 500 bytes at a character boundary and reports how many tasks it shortened (`--strict` rejects
+  such files with the task index); the busy timeout is 15 s unless the DSN sets one; TUI `c`/`s` and
+  `complete --undo` decide on the stored status; TUI exports, import previews and imports run in the
+  background (esc cancels, a cancelled import changes nothing); the TUI status line is sanitised;
+  `complete` on an unknown ID reports "failed to update task" (was "failed to load task").
+
 ## Residual risks / open questions
 (Plan 4 in `plan.md`, decided 2026-09-27, addresses the open ones below.)
 - CI, Docker, Security and release (`v2.1.1`) workflows are validated on GitHub (2026-09-24); all
@@ -323,12 +356,16 @@ unless noted. Security items live in `cybersec.md`.
   `plan.md`). Final per D-17 (a), 2026-09-27: the process exits and SQLite rolls back an unfinished
   transaction, so a write is either complete or absent; no cancellation handling is planned.
 - Plan 3 phases B–C: SQLite does not queue waiting writers fairly, so under heavy, sustained
-  contention a writer can still exceed the 5 s busy timeout ("database is locked"); a user can raise
-  it with `MUNUS_DB_PATH=…?_busy_timeout=…`. The `tzdata` pin must be bumped when Alpine 3.24 drops
+  contention a writer can still exceed the busy timeout ("database is locked"); since plan 4 phase B
+  (P-053) the default is 15 s instead of 5 s, and a user can change it with
+  `MUNUS_DB_PATH=…?_busy_timeout=…`. The `tzdata` pin must be bumped when Alpine 3.24 drops
   that package revision (procedure in `maint.md`).
-- Plan 3 phase A: TUI `c`/`s` compute the next status from the list's copy, which may be stale
-  (the write itself no longer overwrites other fields); `complete --undo` decides from a read made
-  just before the write, so a task changed from done to `doing` in that window becomes `todo`.
+- Plan 3 phase A: TUI `c`/`s` computed the next status from the list's copy, which may be stale,
+  and `complete --undo` decided from a read made just before the write; fixed by plan 4 phase B
+  (P-052, uncommitted): both decide on the stored status inside the writing transaction. `c` keeps
+  the user's intent: on a task shown as open it completes (no change if another process already
+  completed it); on a task shown as done it reopens only if the task is still done. `s` advances the
+  stored status, which may be a step further than the list showed; the reloaded list shows it.
   `databaseFilePath` skips DSNs with a custom (non-unix/win32) vfs, whose files sqlite may still
   create with the umask. A database file removed after a rejected DSN could in theory belong to a
   second process that opened the same file at that instant with a valid DSN.
@@ -358,7 +395,21 @@ unless noted. Security items live in `cybersec.md`.
   fresh; `go version` is logged) and images are pinned by tag, not digest; Dependabot does not track
   the `debian:11`/`alpine:3.24` smoke-test images.
 - Existing DB files keep their permissions; only newly created ones are `0600`.
-- Over-length text stored by pre-validation versions (via unchecked import) cannot be re-imported.
+- Over-length text stored by pre-validation versions (via unchecked import) could not be
+  re-imported; since plan 4 phase B (P-051, uncommitted) default import shortens it (D-13). Merging
+  such an export back into the database it came from therefore updates those tasks to the shortened
+  text (the plan shows them as updates, and the shortened count is reported); `--strict` rejects the
+  file instead.
+- Plan 4 phase B (P-054): a TUI read blocked in the operating system (for example opening a FIFO
+  that has no writer) and SQLite's busy wait for another process's lock cannot be interrupted; esc
+  stops waiting at once, and the step ends when the call returns, the lock is released or the busy
+  timeout passes (or Munus exits). An export or import cancelled with esc may still finish if it was
+  past the point of cancelling; its outcome is then reported in the status line. A backup written
+  inside an import transaction that is then rolled back stays in `~/.munus/backups`.
+- Plan 4 phase B (P-053): the other TUI writes (task create, edit, delete, `c`/`s`) still run inside
+  `Update`; with the 15 s busy timeout, another process holding the write lock can now freeze the
+  interface for up to 15 s (was 5 s), and ctrl+c is not handled until the write returns. Moving
+  them into commands like the transfers would remove that (not planned yet).
 - `CONTRIBUTING.md` was empty in `e32fd8a`; plan 2 (P-025) drafts it from repository facts for
   maintainer review. `NOTICE` lists every third-party module compiled into the release binaries
   (all 29 in `go.mod`, three of them Windows-only), plus embedded SQLite, the Go standard library and

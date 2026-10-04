@@ -78,6 +78,22 @@ func itemStatus(t *ItemModel) TaskStatus {
 	return StatusTodo
 }
 
+// completedStatus returns done whatever the current status is, the
+// transition of `complete` and of the TUI's c key on a task shown as open.
+func completedStatus(TaskStatus) TaskStatus {
+	return StatusDone
+}
+
+// reopenedStatus returns todo for a done task and leaves any other status
+// unchanged, the transition of `complete --undo` and of the TUI's c key on a
+// task shown as done.
+func reopenedStatus(s TaskStatus) TaskStatus {
+	if s == StatusDone {
+		return StatusTodo
+	}
+	return s
+}
+
 // nextStatus returns the status after s in the todo → doing → done cycle.
 func nextStatus(s TaskStatus) TaskStatus {
 	switch s {

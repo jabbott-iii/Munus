@@ -67,6 +67,9 @@ func (m *ListModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.statusMessage = ""
 		return m, nil
 
+	case transferResultMsg:
+		return m.handleTransferResult(msg)
+
 	case tea.KeyMsg:
 		if m.transfer != nil {
 			// Transfer input is its own text-entry mode, so list-level bindings such
@@ -428,7 +431,7 @@ func (m *ListModel) View() string {
 		s.WriteString(lipgloss.NewStyle().
 			Foreground(lipgloss.Color("#4CAF50")).
 			PaddingLeft(1).
-			Render(m.statusMessage))
+			Render(sanitizeForTerminal(m.statusMessage, false)))
 	}
 
 	if m.confirmingDelete && m.taskToDelete != nil {
@@ -744,17 +747,19 @@ func (m *ListModel) GetCurrentTask() *ItemModel {
 	return nil
 }
 
-// ToggleComplete marks the selected task done, or todo when it is done.
+// ToggleComplete completes the selected task, or reopens it when it is shown
+// as done. Like `complete` and `complete --undo`, the change is decided on
+// the stored status: completing a task that is already done changes nothing,
+// and reopening leaves a task that is no longer done as it is.
 func (m *ListModel) ToggleComplete() error {
 	task := m.GetCurrentTask()
 	if task == nil {
 		return fmt.Errorf("no task selected")
 	}
-	next := StatusDone
 	if task.Completed {
-		next = StatusTodo
+		return m.updateSelectedStatus(task, reopenedStatus)
 	}
-	return m.setSelectedStatus(task, next)
+	return m.updateSelectedStatus(task, completedStatus)
 }
 
 // CycleStatus moves the selected task to the next status (todo → doing →
@@ -764,15 +769,17 @@ func (m *ListModel) CycleStatus() error {
 	if task == nil {
 		return fmt.Errorf("no task selected")
 	}
-	return m.setSelectedStatus(task, nextStatus(itemStatus(task)))
+	return m.updateSelectedStatus(task, nextStatus)
 }
 
-// setSelectedStatus stores only the new status of task (never the list's
-// possibly stale copy of its other fields), then updates the in-memory row;
-// the caller reloads the list afterwards.
-func (m *ListModel) setSelectedStatus(task *ItemModel, status TaskStatus) error {
+// updateSelectedStatus stores next(stored status) for task, deciding from the
+// status stored at write time rather than the list's possibly stale copy, and
+// writes only the status (never the copy's other fields); then it updates the
+// in-memory row. The caller reloads the list afterwards.
+func (m *ListModel) updateSelectedStatus(task *ItemModel, next func(TaskStatus) TaskStatus) error {
 	now := time.Now()
-	if err := m.storage.SetTaskStatus(context.Background(), task.ID, status, now); err != nil {
+	status, err := m.storage.UpdateTaskStatus(context.Background(), task.ID, next, now)
+	if err != nil {
 		return err
 	}
 	task.setStatus(status, now)
@@ -804,6 +811,29 @@ func (m *ListModel) handleTransferKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 
 	state := m.transfer
+
+	// While a step runs in the background, esc cancels it and closes the
+	// dialog (an export or import still reports how it ended), ctrl+c quits,
+	// and every other key waits.
+	if state.working != "" {
+		switch msg.String() {
+		case "ctrl+c":
+			state.op.cancel()
+			return m, tea.Quit
+		case "esc":
+			state.op.cancel()
+			m.transfer = nil
+			switch {
+			case state.action == transferActionExport:
+				m.statusMessage = "Cancelling the export…"
+			case state.stage == transferStageConfirm:
+				m.statusMessage = "Cancelling the import…"
+			default:
+				m.statusMessage = "Import cancelled"
+			}
+		}
+		return m, nil
+	}
 
 	// Only an explicit "y" applies an import; Enter is ignored here so a
 	// double Enter on the path prompt cannot confirm (for example) a replace.
@@ -904,20 +934,17 @@ func (m *ListModel) exportFromTransfer() (tea.Model, tea.Cmd) {
 
 	filter := ExportFilter{IncludeCompleted: m.transfer.includeCompleted}
 	svc := &TaskServiceAdapter{storage: m.storage}
-	ctx := context.Background()
-	plan, err := PlanExport(ctx, svc, filter)
-	if err != nil {
-		m.transfer.operationError = err
-		return m, nil
+	op, ctx := m.startTransfer("Exporting to " + path + "…")
+	return m, func() tea.Msg {
+		msg := transferResultMsg{op: op, step: transferStepExport, path: path}
+		plan, err := PlanExport(ctx, svc, filter)
+		if err == nil {
+			err = ExportToFile(ctx, svc, filter, path, true)
+		}
+		msg.exported, msg.err = plan.Total, err
+		msg.cancelled = err != nil && ctx.Err() != nil
+		return msg
 	}
-	if err := ExportToFile(ctx, svc, filter, path, true); err != nil {
-		m.transfer.operationError = err
-		return m, nil
-	}
-
-	m.statusMessage = fmt.Sprintf("✓ Exported %d tasks to %s", plan.Total, path)
-	m.transfer = nil
-	return m, nil
 }
 
 func (m *ListModel) planImportFromTransfer() (tea.Model, tea.Cmd) {
@@ -931,31 +958,22 @@ func (m *ListModel) planImportFromTransfer() (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
-	data, err := readImportSource(path, nil)
-	if err != nil {
-		m.transfer.operationError = err
-		return m, nil
+	svc := &TaskServiceAdapter{storage: m.storage}
+	cfg := m.transferImportConfig()
+	read := m.importReader()
+	op, ctx := m.startTransfer("Reading " + path + "…")
+	return m, func() tea.Msg {
+		msg := transferResultMsg{op: op, step: transferStepPlan, path: path}
+		data, err := read(path)
+		if err == nil {
+			var plan ImportPlan
+			plan, err = planImportData(ctx, svc, data, cfg)
+			msg.plan, msg.data = &plan, data
+		}
+		msg.err = err
+		msg.cancelled = err != nil && ctx.Err() != nil
+		return msg
 	}
-	plan, err := planImportData(context.Background(), &TaskServiceAdapter{storage: m.storage}, data, ImportConfig{
-		Mode:         m.transfer.importMode,
-		SkipExisting: m.transfer.skipExisting,
-		OnConflict:   "overwrite",
-		IDStrategy:   "preserve",
-		Strict:       m.transfer.strict,
-		Backup:       m.transfer.backup,
-	})
-	if err != nil {
-		m.transfer.operationError = err
-		return m, nil
-	}
-
-	m.transfer.path = path
-	m.transfer.cursor = utf8.RuneCountInString(path)
-	m.transfer.plan = &plan
-	m.transfer.data = data
-	m.transfer.stage = transferStageConfirm
-	m.transfer.operationError = nil
-	return m, nil
 }
 
 func (m *ListModel) applyImportFromTransfer() (tea.Model, tea.Cmd) {
@@ -964,41 +982,145 @@ func (m *ListModel) applyImportFromTransfer() (tea.Model, tea.Cmd) {
 	}
 
 	// Apply exactly the bytes that were previewed, even if the file changed
-	// since; read the file only if no preview data is held.
+	// since; read the file only if no preview data is held. The storage work
+	// stays one transaction (applyImportData), which a cancelled context rolls
+	// back unless it has already committed.
 	data := m.transfer.data
-	if data == nil {
+	path := m.transfer.path
+	svc := &TaskServiceAdapter{storage: m.storage}
+	cfg := m.transferImportConfig()
+	read := m.importReader()
+	op, ctx := m.startTransfer("Importing…")
+	return m, func() tea.Msg {
+		msg := transferResultMsg{op: op, step: transferStepApply, path: path}
 		var err error
-		if data, err = readImportSource(m.transfer.path, nil); err != nil {
-			m.transfer.operationError = err
-			return m, nil
+		if data == nil {
+			data, err = read(path)
 		}
+		if err == nil {
+			msg.result, err = applyImportData(ctx, svc, data, cfg)
+		}
+		msg.err = err
+		msg.cancelled = err != nil && ctx.Err() != nil
+		return msg
 	}
-	res, err := applyImportData(context.Background(), &TaskServiceAdapter{storage: m.storage}, data, ImportConfig{
+}
+
+// startTransfer marks the dialog as waiting for a background step and
+// returns the step's identity and context; esc cancels it (handleTransferKey).
+func (m *ListModel) startTransfer(working string) (*transferOp, context.Context) {
+	ctx, cancel := context.WithCancel(context.Background())
+	op := &transferOp{cancel: cancel}
+	m.transfer.working = working
+	m.transfer.op = op
+	m.transfer.operationError = nil
+	return op, ctx
+}
+
+// transferImportConfig is the import configuration the dialog's options select.
+func (m *ListModel) transferImportConfig() ImportConfig {
+	return ImportConfig{
 		Mode:         m.transfer.importMode,
 		SkipExisting: m.transfer.skipExisting,
 		OnConflict:   "overwrite",
 		IDStrategy:   "preserve",
 		Strict:       m.transfer.strict,
 		Backup:       m.transfer.backup,
-	})
-	if err != nil {
-		m.transfer.operationError = err
+	}
+}
+
+func (m *ListModel) importReader() func(string) ([]byte, error) {
+	if m.readImport != nil {
+		return m.readImport
+	}
+	return readImportFile
+}
+
+// handleTransferResult applies the result of a background step. A result
+// the dialog no longer waits for (esc was pressed) is dropped for a preview,
+// which changes nothing; an export or import may still have finished, or been
+// rolled back, so its outcome is reported and an import reloads the list.
+func (m *ListModel) handleTransferResult(msg transferResultMsg) (tea.Model, tea.Cmd) {
+	waiting := m.transfer != nil && m.transfer.working != "" && m.transfer.op == msg.op
+	if !waiting {
+		if outcome := lateTransferOutcome(msg); outcome != "" {
+			m.statusMessage = outcome
+		}
+		if msg.step == transferStepApply {
+			m.loading, m.err = true, nil
+			return m, m.loadData
+		}
 		return m, nil
 	}
 
-	status := fmt.Sprintf("✓ Import complete: created=%d updated=%d unchanged=%d skipped=%d conflicted=%d", res.Created, res.Updated, res.Unchanged, res.Skipped, res.Conflicted)
-	if len(res.SkippedIDs) > 0 {
-		status += fmt.Sprintf(" • skipped IDs=%s", formatTaskIDs(res.SkippedIDs))
+	state := m.transfer
+	state.op.cancel() // release the step's context
+	state.working, state.op = "", nil
+	if msg.err != nil {
+		state.operationError = msg.err
+		return m, nil
 	}
-	if res.BackupPath != "" {
-		status += fmt.Sprintf(" • backup=%s", res.BackupPath)
+	switch msg.step {
+	case transferStepExport:
+		m.statusMessage = exportOutcome(msg)
+		m.transfer = nil
+	case transferStepPlan:
+		state.path = msg.path
+		state.cursor = utf8.RuneCountInString(msg.path)
+		state.plan = msg.plan
+		state.data = msg.data
+		state.stage = transferStageConfirm
+	case transferStepApply:
+		m.statusMessage = importOutcome(msg)
+		m.transfer = nil
+		m.loading, m.err = true, nil
+		return m, m.loadData
 	}
+	return m, nil
+}
 
-	m.statusMessage = status
-	m.transfer = nil
-	m.loading = true
-	m.err = nil
-	return m, m.loadData
+// lateTransferOutcome describes how a step that is no longer waited for
+// ended: "" for a preview, which changes nothing.
+func lateTransferOutcome(msg transferResultMsg) string {
+	switch msg.step {
+	case transferStepExport:
+		return exportOutcome(msg)
+	case transferStepApply:
+		return importOutcome(msg)
+	default:
+		return ""
+	}
+}
+
+// exportOutcome describes how an export step ended, for the status line.
+func exportOutcome(msg transferResultMsg) string {
+	switch {
+	case msg.err == nil:
+		return fmt.Sprintf("✓ Exported %d tasks to %s", msg.exported, msg.path)
+	case msg.cancelled:
+		return "Export cancelled"
+	default:
+		return "✗ Export failed: " + msg.err.Error()
+	}
+}
+
+// importOutcome describes how an import step ended, for the status line. A
+// failed import changed nothing: its transaction was rolled back.
+func importOutcome(msg transferResultMsg) string {
+	switch {
+	case msg.cancelled:
+		return "Import cancelled; nothing was imported"
+	case msg.err != nil:
+		return "✗ Import failed: " + msg.err.Error()
+	}
+	status := importCompleteLine(msg.result)
+	if len(msg.result.SkippedIDs) > 0 {
+		status += fmt.Sprintf(" • skipped IDs=%s", formatTaskIDs(msg.result.SkippedIDs))
+	}
+	if msg.result.BackupPath != "" {
+		status += fmt.Sprintf(" • backup=%s", msg.result.BackupPath)
+	}
+	return status
 }
 
 func (m *ListModel) renderTransferOverlay(baseView string) string {
@@ -1027,7 +1149,17 @@ func (m *ListModel) renderTransferOverlay(baseView string) string {
 
 	var dialog strings.Builder
 
-	if m.transfer.action == transferActionExport {
+	if m.transfer.working != "" {
+		title := "Import Tasks"
+		if m.transfer.action == transferActionExport {
+			title = "Export Tasks"
+		}
+		dialog.WriteString(titleStyle.Render(title))
+		dialog.WriteString("\n\n")
+		dialog.WriteString(sanitizeForTerminal(m.transfer.working, false))
+		dialog.WriteString("\n\n")
+		dialog.WriteString(helpStyle.Render("[esc] Cancel  [ctrl+c] Quit"))
+	} else if m.transfer.action == transferActionExport {
 		dialog.WriteString(titleStyle.Render("Export Tasks"))
 		dialog.WriteString("\n\n")
 		dialog.WriteString("Path:\n")
@@ -1101,6 +1233,9 @@ func (m *ListModel) renderTransferOverlay(baseView string) string {
 				if err != nil {
 					return ""
 				}
+			}
+			if m.transfer.plan.Shortened > 0 {
+				dialog.WriteString("\n" + shortenedNote(m.transfer.plan.Shortened) + "\n")
 			}
 			dialog.WriteString("\n")
 			dialog.WriteString(helpStyle.Render("[y] Import  [n/esc] Cancel"))

@@ -110,6 +110,23 @@ func openForCommandWithNotice(cmd *cobra.Command, db *Database) (string, error) 
 	return notice, nil
 }
 
+// shortenedNote explains that default import shortened n tasks whose text
+// was longer than the limits (plan 4, D-13).
+func shortenedNote(n int) string {
+	return fmt.Sprintf("Shortened: %d %s had a title over %d bytes or a description over %d bytes, cut to fit (--strict rejects such files)",
+		n, plural(n, "task", "tasks"), MaxTitleLength, MaxDescriptionLength)
+}
+
+// importCompleteLine summarises an applied import for the CLI and the TUI.
+func importCompleteLine(res ImportResult) string {
+	line := fmt.Sprintf("✓ Import complete: created=%d updated=%d unchanged=%d skipped=%d conflicted=%d",
+		res.Created, res.Updated, res.Unchanged, res.Skipped, res.Conflicted)
+	if res.Shortened > 0 {
+		line += fmt.Sprintf(" shortened=%d", res.Shortened)
+	}
+	return line
+}
+
 // -------------------------------------- export ------------------------------------------------------------------------------------ //
 
 func NewExportCmd(db *Database) *cobra.Command {
@@ -255,6 +272,9 @@ func NewImportCmd(db *Database) *cobra.Command {
 			if len(plan.ConflictIDs) > 0 {
 				_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Conflicting task IDs: %s\n\n", formatTaskIDs(plan.ConflictIDs))
 			}
+			if plan.Shortened > 0 {
+				_, _ = fmt.Fprintf(cmd.OutOrStdout(), "%s\n\n", shortenedNote(plan.Shortened))
+			}
 
 			if opts.DryRun {
 				_, _ = fmt.Fprintln(cmd.OutOrStdout(), "Dry-run only. No changes applied.")
@@ -282,9 +302,7 @@ func NewImportCmd(db *Database) *cobra.Command {
 			if res.BackupPath != "" {
 				_, _ = fmt.Fprintf(cmd.OutOrStdout(), "✓ Backup created: %s\n", res.BackupPath)
 			}
-			_, _ = fmt.Fprintf(cmd.OutOrStdout(),
-				"✓ Import complete: created=%d updated=%d unchanged=%d skipped=%d conflicted=%d\n",
-				res.Created, res.Updated, res.Unchanged, res.Skipped, res.Conflicted)
+			_, _ = fmt.Fprintf(cmd.OutOrStdout(), "%s\n", importCompleteLine(res))
 			if len(res.SkippedIDs) > 0 {
 				_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Skipped existing task IDs: %s\n", formatTaskIDs(res.SkippedIDs))
 			}
@@ -300,7 +318,7 @@ func NewImportCmd(db *Database) *cobra.Command {
 	cmd.Flags().StringVar(&opts.IDStrategy, "id-strategy", "preserve", "ID policy: preserve|regenerate")
 	cmd.Flags().BoolVar(&opts.DryRun, "dry-run", false, "Validate and show plan without applying")
 	cmd.Flags().BoolVarP(&opts.Yes, "yes", "y", false, "Skip confirmation prompts")
-	cmd.Flags().BoolVar(&opts.Strict, "strict", false, "Fail on unknown fields, unknown statuses, status/completed contradictions and control characters")
+	cmd.Flags().BoolVar(&opts.Strict, "strict", false, "Fail on unknown fields, unknown statuses, status/completed contradictions, control characters and over-length text")
 	cmd.Flags().BoolVar(&opts.Backup, "backup", false, "Create backup before applying changes")
 
 	return cmd
@@ -772,22 +790,17 @@ func CompleteTaskCmd(db *Database) *cobra.Command {
 			if err := openForCommand(cmd, db); err != nil {
 				return err
 			}
-			task, err := db.GetTaskByID(ctx, taskID)
-			if err != nil {
-				return fmt.Errorf("failed to load task %d: %w", taskID, err)
-			}
 
-			// --undo only reopens completed tasks; any other task is left as it
-			// is (nothing is written). Only the status is written, so edits
-			// made elsewhere since the task was read are kept.
-			status := StatusDone
+			// --undo only reopens a task that is done when the change is
+			// written (decided on the stored status, in the same transaction);
+			// any other task is left as it is. Only the status is written, so
+			// edits made elsewhere are kept.
+			next := completedStatus
 			if undo {
-				status = StatusTodo
+				next = reopenedStatus
 			}
-			if !undo || task.Completed {
-				if err := db.SetTaskStatus(ctx, taskID, status, time.Now()); err != nil {
-					return fmt.Errorf("failed to update task %d: %w", taskID, err)
-				}
+			if _, err := db.UpdateTaskStatus(ctx, taskID, next, time.Now()); err != nil {
+				return fmt.Errorf("failed to update task %d: %w", taskID, err)
 			}
 
 			if undo {

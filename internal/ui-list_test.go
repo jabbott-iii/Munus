@@ -1102,7 +1102,8 @@ func TestListModelExportFromTransfer(t *testing.T) {
 			path:   filepath.Join(t.TempDir(), "export.json"),
 		}
 
-		list.exportFromTransfer()
+		_, cmd := list.exportFromTransfer()
+		finishTransfer(t, list, cmd)
 		if list.transfer.operationError == nil {
 			t.Fatalf("expected operation error")
 		}
@@ -1116,7 +1117,8 @@ func TestListModelExportFromTransfer(t *testing.T) {
 			path:   t.TempDir(), // directory path should fail
 		}
 
-		list.exportFromTransfer()
+		_, cmd := list.exportFromTransfer()
+		finishTransfer(t, list, cmd)
 		if list.transfer.operationError == nil {
 			t.Fatalf("expected operation error")
 		}
@@ -1135,7 +1137,8 @@ func TestListModelExportFromTransfer(t *testing.T) {
 			includeCompleted: true,
 		}
 
-		list.exportFromTransfer()
+		_, cmd := list.exportFromTransfer()
+		finishTransfer(t, list, cmd)
 		if list.transfer != nil {
 			t.Fatalf("expected transfer state cleared after export")
 		}
@@ -1188,7 +1191,8 @@ func TestListModelPlanImportFromTransfer(t *testing.T) {
 			path:       badFile,
 			importMode: "merge",
 		}
-		list.planImportFromTransfer()
+		_, cmd := list.planImportFromTransfer()
+		finishTransfer(t, list, cmd)
 		if list.transfer.operationError == nil {
 			t.Fatalf("expected operation error")
 		}
@@ -1218,7 +1222,8 @@ func TestListModelPlanImportFromTransfer(t *testing.T) {
 			importMode: "merge",
 		}
 
-		list.planImportFromTransfer()
+		_, cmd := list.planImportFromTransfer()
+		finishTransfer(t, list, cmd)
 		if list.transfer.plan == nil {
 			t.Fatalf("expected plan to be populated")
 		}
@@ -1251,7 +1256,8 @@ func TestListModelApplyImportFromTransfer(t *testing.T) {
 			path:       filepath.Join(t.TempDir(), "missing.json"),
 			importMode: "merge",
 		}
-		list.applyImportFromTransfer()
+		_, cmd := list.applyImportFromTransfer()
+		finishTransfer(t, list, cmd)
 		if list.transfer.operationError == nil {
 			t.Fatalf("expected operation error")
 		}
@@ -1294,7 +1300,8 @@ func TestListModelApplyImportFromTransfer(t *testing.T) {
 			backup:       true,
 		}
 
-		_, cmd := list.applyImportFromTransfer()
+		_, started := list.applyImportFromTransfer()
+		cmd := finishTransfer(t, list, started)
 		if list.transfer != nil {
 			t.Fatalf("expected transfer to be cleared")
 		}
@@ -1346,7 +1353,8 @@ func TestListModelApplyImportFromTransfer(t *testing.T) {
 			backup:     true,
 		}
 
-		_, cmd := list.applyImportFromTransfer()
+		_, started := list.applyImportFromTransfer()
+		cmd := finishTransfer(t, list, started)
 		if cmd == nil {
 			t.Fatalf("expected reload command")
 		}
@@ -1428,6 +1436,29 @@ func TestYesNoLabel(t *testing.T) {
 func loadList(t *testing.T, list *ListModel) {
 	t.Helper()
 	_, _ = list.Update(list.loadData())
+}
+
+// finishTransfer runs the background command a transfer step returned and
+// delivers its result to the list, as Bubble Tea would, returning the
+// command that follows (for example the list reload after an import).
+func finishTransfer(t *testing.T, list *ListModel, cmd tea.Cmd) tea.Cmd {
+	t.Helper()
+	if cmd == nil {
+		t.Fatal("expected a background transfer command")
+	}
+	msg, ok := cmd().(transferResultMsg)
+	if !ok {
+		t.Fatalf("expected a transferResultMsg, got %T", msg)
+	}
+	_, next := list.Update(msg)
+	return next
+}
+
+// pressAndFinish sends key to the list and completes the transfer step it starts.
+func pressAndFinish(t *testing.T, list *ListModel, key tea.KeyMsg) tea.Cmd {
+	t.Helper()
+	_, cmd := list.Update(key)
+	return finishTransfer(t, list, cmd)
 }
 
 func TestListModelShowsAllDeadlinedTasks(t *testing.T) {
@@ -1588,8 +1619,8 @@ func (f *failingUpdateStorage) UpdateTask(context.Context, *ItemModel) error {
 	return errors.New("disk full")
 }
 
-func (f *failingUpdateStorage) SetTaskStatus(context.Context, int, TaskStatus, time.Time) error {
-	return errors.New("disk full")
+func (f *failingUpdateStorage) UpdateTaskStatus(context.Context, int, func(TaskStatus) TaskStatus, time.Time) (TaskStatus, error) {
+	return "", errors.New("disk full")
 }
 
 func TestListModelFailedToggleKeepsStoredState(t *testing.T) {
@@ -1642,7 +1673,7 @@ func TestListModelImportConfirmRequiresY(t *testing.T) {
 		l := NewListModel(db)
 		loadList(t, l)
 		l.transfer = &transferState{action: transferActionImport, stage: transferStageInput, path: file, importMode: "replace", backup: true}
-		l.Update(tea.KeyMsg{Type: tea.KeyEnter}) // preview
+		pressAndFinish(t, l, tea.KeyMsg{Type: tea.KeyEnter}) // preview
 		if l.transfer == nil || l.transfer.stage != transferStageConfirm {
 			t.Fatalf("expected confirm stage, got %+v", l.transfer)
 		}
@@ -1666,7 +1697,7 @@ func TestListModelImportConfirmRequiresY(t *testing.T) {
 		t.Error("ctrl+c at the confirm stage should quit")
 	}
 	l = newConfirm()
-	l.Update(runeKey('y'))
+	pressAndFinish(t, l, runeKey('y'))
 	if tasks, _ := db.ListTasks(t.Context()); len(tasks) != 0 {
 		t.Fatalf("y should apply the replace import, tasks=%d", len(tasks))
 	}
@@ -1940,7 +1971,7 @@ func TestListModelImportAppliesThePreviewedFile(t *testing.T) {
 	l := NewListModel(db)
 	loadList(t, l)
 	l.transfer = &transferState{action: transferActionImport, stage: transferStageInput, path: file, importMode: "merge"}
-	l.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	pressAndFinish(t, l, tea.KeyMsg{Type: tea.KeyEnter})
 	if l.transfer == nil || l.transfer.stage != transferStageConfirm {
 		t.Fatalf("expected confirm stage, got %+v", l.transfer)
 	}
@@ -1953,7 +1984,7 @@ func TestListModelImportAppliesThePreviewedFile(t *testing.T) {
 	if err := os.WriteFile(file, changed, 0o600); err != nil {
 		t.Fatalf("rewrite import file: %v", err)
 	}
-	l.Update(runeKey('y'))
+	pressAndFinish(t, l, runeKey('y'))
 
 	tasks, err := db.ListTasks(t.Context())
 	if err != nil || len(tasks) != 1 || tasks[0].Title != "previewed" {
@@ -1990,6 +2021,47 @@ func TestListModelStatusKeysKeepConcurrentEdits(t *testing.T) {
 		wantStatus := map[rune]TaskStatus{'c': StatusDone, 's': StatusDoing}[key]
 		if got.Status != wantStatus || list.GetCurrentTask().Status != wantStatus {
 			t.Errorf("key %q: stored %q, shown %q, want %q", key, got.Status, list.GetCurrentTask().Status, wantStatus)
+		}
+	}
+}
+
+// P-052: c and s decide on the status stored when the key is pressed, not on
+// the list's copy, which another process may have made stale. s advances the
+// stored status; c completes a task shown as open (nothing changes if it is
+// already done) and reopens a task shown as done only while it is still done.
+func TestListModelStatusKeysDecideOnStoredStatus(t *testing.T) {
+	cases := []struct {
+		key          rune
+		shown        TaskStatus // when the list loaded
+		storedBefore TaskStatus // set by another process after the list loaded
+		want         TaskStatus
+	}{
+		{'s', StatusTodo, StatusDoing, StatusDone}, // the stale copy would give doing
+		{'s', StatusTodo, StatusDone, StatusTodo},
+		{'c', StatusTodo, StatusDone, StatusDone},   // already done: stays done
+		{'c', StatusDone, StatusDoing, StatusDoing}, // no longer done: left alone
+		{'c', StatusDone, StatusDone, StatusTodo},
+	}
+	for _, tc := range cases {
+		ctx := t.Context()
+		db, other := openTwoHandles(t)
+		task := &ItemModel{Title: "a", Description: "d", Status: tc.shown, Completed: tc.shown == StatusDone}
+		if err := db.CreateTask(ctx, task); err != nil {
+			t.Fatalf("setup failed: %v", err)
+		}
+		list := NewListModel(db)
+		loadList(t, list)
+		if err := other.SetTaskStatus(ctx, task.ID, tc.storedBefore, time.Now()); err != nil {
+			t.Fatalf("setup failed: %v", err)
+		}
+
+		_, cmd := list.Update(runeKey(tc.key))
+		if cmd == nil || list.err != nil {
+			t.Fatalf("key %q: expected a reload and no error, got err=%v", tc.key, list.err)
+		}
+		got, _ := other.GetTaskByID(ctx, task.ID)
+		if got.Status != tc.want || list.GetCurrentTask().Status != tc.want {
+			t.Errorf("key %q on %q after %q elsewhere: stored %q, shown %q, want %q", tc.key, tc.shown, tc.storedBefore, got.Status, list.GetCurrentTask().Status, tc.want)
 		}
 	}
 }
@@ -2061,5 +2133,283 @@ func TestTransferPathRenderIsSanitized(t *testing.T) {
 	list.transfer = &transferState{action: transferActionImport, stage: transferStageInput, path: "a\x1b]0;x\x07\u202eb", cursor: 1}
 	if got := list.addTransferCursor(list.transfer.path); strings.ContainsAny(got, "\x1b\a\u202e") {
 		t.Fatalf("control characters reached the path render: %q", got)
+	}
+}
+
+// ============================== plan 4: TUI file I/O off the event loop ==============================
+
+// P-054 / D-15: reading the import file runs in a Bubble Tea command, so a
+// slow file (a network share, a FIFO) never blocks the interface: keys are
+// still handled, the dialog shows the step, and esc stops waiting. A preview
+// that finishes after esc is dropped.
+func TestTransferPreviewDoesNotBlockTheInterface(t *testing.T) {
+	data, err := marshalBundle([]Task{{ID: "1", Title: "a"}}, false)
+	if err != nil {
+		t.Fatalf("setup failed: %v", err)
+	}
+	started, release := make(chan struct{}), make(chan struct{})
+	list := NewListModel(newFileTestDB(t))
+	loadList(t, list)
+	list.readImport = func(string) ([]byte, error) {
+		close(started)
+		<-release
+		return data, nil
+	}
+	list.transfer = &transferState{action: transferActionImport, stage: transferStageInput, path: "slow.json", importMode: "merge"}
+
+	_, cmd := list.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if cmd == nil || list.transfer == nil || list.transfer.working == "" {
+		t.Fatalf("expected the preview to start in the background, got %+v", list.transfer)
+	}
+	results := make(chan tea.Msg, 1)
+	go func() { results <- cmd() }()
+	<-started // the reader is now blocked
+
+	list.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
+	list.Update(runeKey('x')) // waits; never typed into the path
+	if list.transfer == nil || list.transfer.path != "slow.json" || list.viewportWidth != 100 {
+		t.Fatalf("expected the interface to keep handling messages, got %+v", list.transfer)
+	}
+	if view := list.View(); !strings.Contains(view, "Reading slow.json") || !strings.Contains(view, "[esc] Cancel") {
+		t.Fatalf("expected the working state in the dialog, got:\n%s", view)
+	}
+
+	list.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	if list.transfer != nil || list.statusMessage != "Import cancelled" {
+		t.Fatalf("expected esc to stop waiting, got transfer %+v, status %q", list.transfer, list.statusMessage)
+	}
+	close(release)
+	if _, next := list.Update(<-results); next != nil || list.transfer != nil {
+		t.Fatalf("a preview that finished after esc reopened the dialog: %+v", list.transfer)
+	}
+}
+
+// A late result of an earlier step never lands in a newer dialog.
+func TestTransferIgnoresResultsOfEarlierSteps(t *testing.T) {
+	data, err := marshalBundle([]Task{{ID: "1", Title: "a"}}, false)
+	if err != nil {
+		t.Fatalf("setup failed: %v", err)
+	}
+	list := NewListModel(newFileTestDB(t))
+	loadList(t, list)
+	list.readImport = func(string) ([]byte, error) { return data, nil }
+	open := func() tea.Cmd {
+		list.transfer = &transferState{action: transferActionImport, stage: transferStageInput, path: "tasks.json", importMode: "merge"}
+		_, cmd := list.Update(tea.KeyMsg{Type: tea.KeyEnter})
+		return cmd
+	}
+	first := open()
+	list.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	second := open()
+
+	list.Update(first())
+	if list.transfer == nil || list.transfer.working == "" || list.transfer.stage != transferStageInput {
+		t.Fatalf("the first step's result was applied to the second dialog: %+v", list.transfer)
+	}
+	list.Update(second())
+	if list.transfer == nil || list.transfer.stage != transferStageConfirm || list.transfer.plan == nil {
+		t.Fatalf("expected the second preview, got %+v", list.transfer)
+	}
+}
+
+// esc while an import is applied cancels its context, so nothing is imported
+// (another process holds the write lock, so the import could not commit
+// anyway); the status says so and the list is reloaded.
+func TestTransferImportCancelImportsNothing(t *testing.T) {
+	ctx := t.Context()
+	db, other := openTwoHandles(t)
+	data, err := marshalBundle([]Task{{ID: "7", Title: "imported"}}, false)
+	if err != nil {
+		t.Fatalf("setup failed: %v", err)
+	}
+	lock, err := other.sqlDB.Conn(ctx)
+	if err != nil {
+		t.Fatalf("setup failed: %v", err)
+	}
+	if _, err := lock.ExecContext(ctx, "BEGIN IMMEDIATE"); err != nil {
+		t.Fatalf("take the write lock: %v", err)
+	}
+
+	list := NewListModel(db)
+	loadList(t, list)
+	plan := ImportPlan{Incoming: 1}
+	list.transfer = &transferState{action: transferActionImport, stage: transferStageConfirm, path: "tasks.json", importMode: "merge", plan: &plan, data: data}
+	_, cmd := list.Update(runeKey('y'))
+	if cmd == nil || list.transfer == nil || list.transfer.working == "" {
+		t.Fatalf("expected the import to start in the background, got %+v", list.transfer)
+	}
+	list.Update(tea.KeyMsg{Type: tea.KeyEsc}) // before the step runs: deterministic
+	if list.transfer != nil || list.statusMessage != "Cancelling the import…" {
+		t.Fatalf("expected esc to cancel, got transfer %+v, status %q", list.transfer, list.statusMessage)
+	}
+	_, reload := list.Update(cmd())
+	if list.statusMessage != "Import cancelled; nothing was imported" || reload == nil || !list.loading {
+		t.Fatalf("expected the cancellation reported and a reload, got status %q, reload %v", list.statusMessage, reload != nil)
+	}
+
+	if _, err := lock.ExecContext(ctx, "ROLLBACK"); err != nil {
+		t.Fatalf("release the write lock: %v", err)
+	}
+	_ = lock.Close()
+	if tasks, err := db.ListTasks(ctx); err != nil || len(tasks) != 0 {
+		t.Fatalf("expected nothing imported, got %+v (err %v)", tasks, err)
+	}
+}
+
+// pausingStorage pauses inside the import transaction until the context is
+// cancelled, so a test can cancel an import mid-transaction.
+type pausingStorage struct {
+	*Database
+	inside chan struct{}
+}
+
+func (p *pausingStorage) ReplaceAllTasksFunc(ctx context.Context, fn func([]*ItemModel) ([]*ItemModel, error)) error {
+	return p.Database.ReplaceAllTasksFunc(ctx, func(current []*ItemModel) ([]*ItemModel, error) {
+		close(p.inside)
+		<-ctx.Done()
+		return fn(current)
+	})
+}
+
+// Cancelled inside the transaction, the import is rolled back.
+func TestTransferImportCancelledMidTransactionRollsBack(t *testing.T) {
+	ctx := t.Context()
+	db := newFileTestDB(t)
+	seedTask(t, db, &ItemModel{Title: "kept", Description: "x"})
+	data, err := marshalBundle([]Task{{ID: "7", Title: "imported"}}, false)
+	if err != nil {
+		t.Fatalf("setup failed: %v", err)
+	}
+	storage := &pausingStorage{Database: db, inside: make(chan struct{})}
+	list := NewListModel(storage)
+	loadList(t, list)
+	plan := ImportPlan{Incoming: 1}
+	list.transfer = &transferState{action: transferActionImport, stage: transferStageConfirm, path: "tasks.json", importMode: "replace", plan: &plan, data: data}
+	_, cmd := list.Update(runeKey('y'))
+	results := make(chan tea.Msg, 1)
+	go func() { results <- cmd() }()
+	<-storage.inside // the transaction is open
+
+	list.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	list.Update(<-results)
+	if list.statusMessage != "Import cancelled; nothing was imported" {
+		t.Fatalf("unexpected status %q", list.statusMessage)
+	}
+	tasks, err := db.ListTasks(ctx)
+	if err != nil || len(tasks) != 1 || tasks[0].Title != "kept" {
+		t.Fatalf("expected the replace import rolled back, got %+v (err %v)", tasks, err)
+	}
+}
+
+// Review finding: steps are identified by pointer, not by a per-list counter,
+// so a late result of a step started in an earlier list (before a trip to the
+// form) never matches a step of the newer list.
+func TestTransferResultFromEarlierListIsIgnored(t *testing.T) {
+	data, err := marshalBundle([]Task{{ID: "1", Title: "a"}}, false)
+	if err != nil {
+		t.Fatalf("setup failed: %v", err)
+	}
+	db := newFileTestDB(t)
+	first := NewListModel(db)
+	loadList(t, first)
+	first.readImport = func(string) ([]byte, error) { return data, nil }
+	first.transfer = &transferState{action: transferActionImport, stage: transferStageInput, path: "a.json", importMode: "merge"}
+	_, stale := first.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	first.Update(tea.KeyMsg{Type: tea.KeyEsc})
+
+	model, _ := first.Update(runeKey('n')) // to the form
+	model, _ = model.Update(tea.KeyMsg{Type: tea.KeyCtrlL})
+	second, ok := model.(*ListModel)
+	if !ok {
+		t.Fatalf("expected a new list, got %T", model)
+	}
+	loadList(t, second)
+	second.readImport = first.readImport
+	second.transfer = &transferState{action: transferActionImport, stage: transferStageInput, path: "b.json", importMode: "merge"}
+	_, fresh := second.Update(tea.KeyMsg{Type: tea.KeyEnter})
+
+	second.Update(stale())
+	if second.transfer == nil || second.transfer.working == "" {
+		t.Fatalf("the earlier list's result was taken as this list's: %+v", second.transfer)
+	}
+	second.Update(fresh())
+	if second.transfer == nil || second.transfer.stage != transferStageConfirm || second.transfer.path != "b.json" {
+		t.Fatalf("expected this list's preview, got %+v", second.transfer)
+	}
+}
+
+// Review finding: an export or import that finishes while the form is open
+// is reported when the list returns.
+func TestFormKeepsLateTransferOutcome(t *testing.T) {
+	db := newFileTestDB(t)
+	seedTask(t, db, &ItemModel{Title: "a", Description: "x"})
+	list := NewListModel(db)
+	loadList(t, list)
+	out := filepath.Join(t.TempDir(), "tasks.json")
+	list.transfer = &transferState{action: transferActionExport, stage: transferStageInput, path: out, includeCompleted: true}
+	_, cmd := list.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	list.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	model, _ := list.Update(runeKey('n'))
+	form, ok := model.(*FormModel)
+	if !ok {
+		t.Fatalf("expected the form, got %T", model)
+	}
+	form.Update(cmd())
+	model, _ = form.Update(tea.KeyMsg{Type: tea.KeyCtrlL})
+	back, ok := model.(*ListModel)
+	if !ok || back.statusMessage != "Export cancelled" {
+		t.Fatalf("expected the late outcome on the list, got %T %q", model, back.statusMessage)
+	}
+}
+
+// An export cancelled before it writes leaves no file and says so.
+func TestTransferExportCancelWritesNothing(t *testing.T) {
+	db := newFileTestDB(t)
+	seedTask(t, db, &ItemModel{Title: "a", Description: "x"})
+	list := NewListModel(db)
+	loadList(t, list)
+	out := filepath.Join(t.TempDir(), "tasks.json")
+	list.transfer = &transferState{action: transferActionExport, stage: transferStageInput, path: out, includeCompleted: true}
+
+	_, cmd := list.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if cmd == nil || list.transfer == nil || list.transfer.working == "" {
+		t.Fatalf("expected the export to start in the background, got %+v", list.transfer)
+	}
+	list.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	if list.statusMessage != "Cancelling the export…" {
+		t.Fatalf("unexpected status %q", list.statusMessage)
+	}
+	list.Update(cmd())
+	if list.statusMessage != "Export cancelled" {
+		t.Fatalf("expected the cancelled export reported, got %q", list.statusMessage)
+	}
+	if _, err := os.Stat(out); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("a cancelled export wrote the file (stat: %v)", err)
+	}
+
+	// Without esc the export completes as before.
+	list.transfer = &transferState{action: transferActionExport, stage: transferStageInput, path: out, includeCompleted: true}
+	pressAndFinish(t, list, tea.KeyMsg{Type: tea.KeyEnter})
+	if list.transfer != nil || !strings.Contains(list.statusMessage, "Exported 1 tasks") {
+		t.Fatalf("expected the export to finish, got %+v, status %q", list.transfer, list.statusMessage)
+	}
+}
+
+// ctrl+c quits while a step runs and cancels the step.
+func TestTransferCtrlCQuitsWhileWorking(t *testing.T) {
+	data, err := marshalBundle([]Task{{ID: "1", Title: "a"}}, false)
+	if err != nil {
+		t.Fatalf("setup failed: %v", err)
+	}
+	list := NewListModel(newFileTestDB(t))
+	loadList(t, list)
+	list.readImport = func(string) ([]byte, error) { return data, nil }
+	list.transfer = &transferState{action: transferActionImport, stage: transferStageInput, path: "x.json", importMode: "merge"}
+	_, step := list.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if _, cmd := list.Update(tea.KeyMsg{Type: tea.KeyCtrlC}); cmd == nil {
+		t.Fatal("expected ctrl+c to quit while a step runs")
+	}
+	if msg, ok := step().(transferResultMsg); !ok || !msg.cancelled {
+		t.Fatalf("expected ctrl+c to cancel the step, got %+v", msg)
 	}
 }

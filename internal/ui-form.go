@@ -55,6 +55,14 @@ func (m *FormModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.viewportHeight = msg.Height
 		return m, nil
 
+	case transferResultMsg:
+		// An export or import cancelled from the list may finish while the
+		// form is open; its outcome is shown when the list returns.
+		if outcome := lateTransferOutcome(msg); outcome != "" {
+			m.pendingStatus = outcome
+		}
+		return m, nil
+
 	case tea.KeyMsg:
 		if model, cmd, handled := m.handleVimKey(msg); handled {
 			return model, cmd
@@ -397,6 +405,12 @@ func (m *FormModel) toList(status string) (tea.Model, tea.Cmd) {
 	lm := NewListModelWithOptions(m.storage, tuiOptions{vimEnabled: m.vimEnabled, notice: m.notice})
 	lm.viewportWidth, lm.viewportHeight = m.viewportWidth, m.viewportHeight
 	lm.filter, lm.tagFilter = m.listFilter, m.listTagFilter
+	if m.pendingStatus != "" {
+		if status != "" {
+			status += " • "
+		}
+		status += m.pendingStatus
+	}
 	lm.statusMessage = status
 	return lm, tea.Batch(lm.Init(), tea.WindowSize())
 }

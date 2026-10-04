@@ -23,9 +23,11 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"net/url"
 	"os"
 	"runtime"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -196,6 +198,9 @@ type ListModel struct {
 	filter           listFilter
 	tagFilter        string
 	now              func() time.Time // clock used for deadline labels and filters
+	// readImport reads an import file; it runs inside a Bubble Tea command,
+	// off the event loop (tests replace it with a blocking reader).
+	readImport func(path string) ([]byte, error)
 }
 
 type formInputMode int
@@ -223,6 +228,7 @@ type FormModel struct {
 	viewportHeight   int
 	listFilter       listFilter // list filters restored when returning to the list
 	listTagFilter    string
+	pendingStatus    string // outcome of an export or import that finished while the form was open
 }
 
 type tuiOptions struct {
@@ -273,6 +279,7 @@ func NewListModelWithOptions(storage Storage, opts tuiOptions) *ListModel {
 		vimEnabled:       opts.vimEnabled,
 		notice:           opts.notice,
 		now:              time.Now,
+		readImport:       readImportFile,
 	}
 	return m
 }
@@ -348,6 +355,7 @@ type ImportPlan struct {
 	Unchanged     int
 	Conflicts     int
 	ConflictIDs   []string
+	Shortened     int // tasks in the file whose over-length text was shortened (default import)
 }
 
 type ImportResult struct {
@@ -359,6 +367,7 @@ type ImportResult struct {
 	ConflictIDs []string
 	SkippedIDs  []string
 	BackupPath  string
+	Shortened   int // tasks in the file whose over-length text was shortened (default import)
 }
 
 type exportOpts struct {
@@ -415,6 +424,42 @@ type transferState struct {
 	plan             *ImportPlan
 	data             []byte // import file contents read for the preview and applied as previewed
 	operationError   error
+	// A step (export, preview, import) runs as a Bubble Tea command, so a
+	// slow file never freezes the interface (plan 4, P-054). While it runs,
+	// working describes it and op identifies it; esc cancels it and stops
+	// waiting for it.
+	working string
+	op      *transferOp
+}
+
+// transferOp identifies one background transfer step; results are matched by
+// pointer, so a late result never matches a newer step, even one started in
+// another list model.
+type transferOp struct {
+	cancel context.CancelFunc // cancels the step's context
+}
+
+// transferStep names the background step a transferResultMsg reports.
+type transferStep int
+
+const (
+	transferStepExport transferStep = iota + 1
+	transferStepPlan
+	transferStepApply
+)
+
+// transferResultMsg reports the end of an import or export step that ran as
+// a Bubble Tea command, off the event loop.
+type transferResultMsg struct {
+	op        *transferOp
+	step      transferStep
+	path      string
+	plan      *ImportPlan  // transferStepPlan
+	data      []byte       // transferStepPlan: the bytes that were previewed
+	result    ImportResult // transferStepApply
+	exported  int          // transferStepExport: number of tasks written
+	err       error
+	cancelled bool // the step failed after its context was cancelled
 }
 
 //-----------------------------------interface tasks------------------------------------------------------------------------------------------------------//
@@ -430,10 +475,14 @@ type Storage interface {
 	// ReplaceAllTasksFunc reads the current tasks and replaces them with the
 	// result of fn as one atomic operation (a single transaction for Database).
 	ReplaceAllTasksFunc(ctx context.Context, fn func(current []*ItemModel) ([]*ItemModel, error)) error
-	// SetTaskStatus changes only the status of task id (with completed,
-	// completed_at and updated_at), so concurrent edits to its other fields
-	// are kept. It returns ErrTaskNotFound when the task does not exist.
-	SetTaskStatus(ctx context.Context, id int, status TaskStatus, now time.Time) error
+	// UpdateTaskStatus sets the status of task id to next(current), where
+	// current is the status stored when the change is written (read in the
+	// same transaction), so the decision never rests on a stale copy. Only the
+	// status (with completed, completed_at and updated_at) is written, so
+	// concurrent edits to the other fields are kept. It returns the resulting
+	// status, and ErrTaskNotFound when the task does not exist. next runs
+	// inside the transaction and must not block.
+	UpdateTaskStatus(ctx context.Context, id int, next func(current TaskStatus) TaskStatus, now time.Time) (TaskStatus, error)
 }
 
 // NewDatabase opens (or creates) the sqlite file and runs migrations.
@@ -451,7 +500,7 @@ func openDatabase(path string, logWriter io.Writer) (*Database, error) {
 
 	created := createPrivateDatabaseFile(path)
 
-	conn, err := gorm.Open(sqlite.Open(withImmediateTransactions(path)), &gorm.Config{
+	conn, err := gorm.Open(sqlite.Open(withBusyTimeout(withImmediateTransactions(path))), &gorm.Config{
 		Logger: logger.New(log.New(logWriter, "", 0), logger.Config{LogLevel: logger.Silent}),
 	})
 	if err != nil {
@@ -497,6 +546,39 @@ func withImmediateTransactions(dsn string) string {
 	default:
 		return dsn + "&_txlock=immediate"
 	}
+}
+
+// defaultBusyTimeout is how long a connection waits for another process's
+// lock before failing with "database is locked" (plan 4, D-14); go-sqlite3's
+// own default is 5 s, which heavy contention between Munus processes can
+// exceed because SQLite does not queue waiting writers fairly.
+const defaultBusyTimeout = 15 * time.Second
+
+// withBusyTimeout sets go-sqlite3's busy timeout to defaultBusyTimeout unless
+// the DSN sets one itself (_busy_timeout or its alias _timeout), so a user's
+// value always wins. Like withImmediateTransactions it leaves a DSN starting
+// with '?' alone, as well as a DSN whose parameters cannot be parsed, which
+// go-sqlite3 then reports itself.
+func withBusyTimeout(dsn string) string {
+	param := "_busy_timeout=" + strconv.FormatInt(defaultBusyTimeout.Milliseconds(), 10)
+	pos := strings.IndexByte(dsn, '?')
+	switch {
+	case pos == 0:
+		return dsn
+	case pos < 0:
+		return dsn + "?" + param
+	}
+	params, err := url.ParseQuery(dsn[pos+1:])
+	if err != nil {
+		return dsn
+	}
+	if _, ok := params["_busy_timeout"]; ok {
+		return dsn
+	}
+	if _, ok := params["_timeout"]; ok {
+		return dsn
+	}
+	return dsn + "&" + param
 }
 
 // migrateSchema brings the schema and data up to date. The first attempt
@@ -993,22 +1075,34 @@ func (d *Database) UpdateTask(ctx context.Context, task *ItemModel) error {
 	})
 }
 
-// SetTaskStatus changes the status of task id, keeping completed and
-// completed_at consistent (see setStatus), and writes only those columns and
-// updated_at, so edits other processes made to the task are kept. Setting the
-// status the task already has changes nothing.
+// SetTaskStatus sets the status of task id to status; see UpdateTaskStatus.
 func (d *Database) SetTaskStatus(ctx context.Context, id int, status TaskStatus, now time.Time) error {
-	if id == 0 {
-		return errors.New("task id is required")
-	}
 	status, err := parseTaskStatus(string(status))
 	if err != nil {
 		return err
 	}
-	if err := d.ready(); err != nil {
-		return err
+	_, err = d.UpdateTaskStatus(ctx, id, func(TaskStatus) TaskStatus { return status }, now)
+	return err
+}
+
+// UpdateTaskStatus implements Storage. The task is read and written in one
+// transaction, which holds the write lock from its start (see
+// withImmediateTransactions), so no other process can change the status in
+// between. The new status keeps completed and completed_at consistent (see
+// setStatus); only those columns and updated_at are written, and nothing is
+// written when the status does not change.
+func (d *Database) UpdateTaskStatus(ctx context.Context, id int, next func(current TaskStatus) TaskStatus, now time.Time) (TaskStatus, error) {
+	if id == 0 {
+		return "", errors.New("task id is required")
 	}
-	return d.conn.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	if next == nil {
+		return "", errors.New("status function is required")
+	}
+	if err := d.ready(); err != nil {
+		return "", err
+	}
+	var result TaskStatus
+	err := d.conn.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var task ItemModel
 		if err := tx.First(&task, id).Error; err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -1016,6 +1110,11 @@ func (d *Database) SetTaskStatus(ctx context.Context, id int, status TaskStatus,
 			}
 			return err
 		}
+		status, err := parseTaskStatus(string(next(itemStatus(&task))))
+		if err != nil {
+			return err
+		}
+		result = status
 		before := task
 		task.setStatus(status, now)
 		if task.Status == before.Status && task.Completed == before.Completed {
@@ -1030,6 +1129,10 @@ func (d *Database) SetTaskStatus(ctx context.Context, id int, status TaskStatus,
 			"updated_at":   task.UpdatedAt,
 		}).Error
 	})
+	if err != nil {
+		return "", err
+	}
+	return result, nil
 }
 
 // DeleteTask deletes a task by id. It returns ErrTaskNotFound when no task

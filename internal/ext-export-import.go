@@ -234,6 +234,10 @@ func ExportToFile(ctx context.Context, svc *TaskServiceAdapter, f ExportFilter, 
 	if err != nil {
 		return err
 	}
+	// Last point at which a cancelled export (TUI esc) writes nothing.
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	return writeFileAtomic(path, b)
 }
 
@@ -350,10 +354,11 @@ func planImportData(ctx context.Context, svc *TaskServiceAdapter, data []byte, c
 	if err != nil {
 		return ImportPlan{}, err
 	}
-	incoming, version, err := parseImportData(data, cfg.Strict)
+	parsed, err := decodeImportData(data, cfg.Strict)
 	if err != nil {
 		return ImportPlan{}, err
 	}
+	incoming, version := parsed.tasks, parsed.version
 	current, err := svc.ListTasks(ctx)
 	if err != nil {
 		return ImportPlan{}, err
@@ -363,6 +368,7 @@ func planImportData(ctx context.Context, svc *TaskServiceAdapter, data []byte, c
 		SchemaVersion: version,
 		Incoming:      len(incoming),
 		Current:       len(current),
+		Shortened:     parsed.shortened,
 	}
 
 	if cfg.Mode == "replace" {
@@ -400,17 +406,20 @@ func applyImportData(ctx context.Context, svc *TaskServiceAdapter, data []byte, 
 	if err != nil {
 		return ImportResult{}, err
 	}
-	incoming, version, err := parseImportData(data, cfg.Strict)
+	parsed, err := decodeImportData(data, cfg.Strict)
 	if err != nil {
 		return ImportResult{}, err
 	}
+	incoming, version := parsed.tasks, parsed.version
 	if cfg.DryRun {
-		return dryRunImport(ctx, svc, incoming, version, cfg)
+		res, err := dryRunImport(ctx, svc, incoming, version, cfg)
+		res.Shortened = parsed.shortened
+		return res, err
 	}
 
 	var res ImportResult
 	err = svc.replaceAllFunc(ctx, func(current []Task) ([]Task, error) {
-		res = ImportResult{}
+		res = ImportResult{Shortened: parsed.shortened}
 		if cfg.Backup {
 			p, err := writeBackup(ctx, current)
 			if err != nil {
@@ -432,6 +441,7 @@ func applyImportData(ctx context.Context, svc *TaskServiceAdapter, data []byte, 
 
 		merged, mr := mergeVersion(current, incoming, cfg, version)
 		mr.BackupPath = res.BackupPath
+		mr.Shortened = res.Shortened
 		res = mr
 		return merged, nil
 	})
@@ -484,9 +494,15 @@ func readLimited(r io.Reader) ([]byte, error) {
 	return b, nil
 }
 
-// readImportFile reads and validates the import file at path.
-func readImportFile(path string, strict bool) ([]Task, int, error) {
-	data, err := readImportSource(path, nil)
+// readImportFile reads at most maxImportFileSize bytes from the file at path
+// (standard input is not available, for example in the TUI).
+func readImportFile(path string) ([]byte, error) {
+	return readImportSource(path, nil)
+}
+
+// readAndParseImportFile reads and validates the import file at path.
+func readAndParseImportFile(path string, strict bool) ([]Task, int, error) {
+	data, err := readImportFile(path)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -605,38 +621,64 @@ func decodeTaskList(dec *json.Decoder) ([]TaskDTO, error) {
 	return tasks, err
 }
 
-// parseImportData decodes and validates an export bundle (schema version 1 or 2).
+// importedData is a decoded and validated export bundle.
+type importedData struct {
+	tasks     []Task
+	version   int
+	shortened int // tasks whose over-length text was shortened (default import only)
+}
+
+// parseImportData decodes and validates an export bundle (schema version 1 or
+// 2); see decodeImportData.
 func parseImportData(b []byte, strict bool) ([]Task, int, error) {
+	d, err := decodeImportData(b, strict)
+	return d.tasks, d.version, err
+}
+
+// decodeImportData decodes and validates an export bundle (schema version 1
+// or 2) and reports how many tasks default import had to shorten.
+func decodeImportData(b []byte, strict bool) (importedData, error) {
 	bundle, err := decodeExportBundle(b, strict)
 	if err != nil {
-		return nil, 0, err
+		return importedData{}, err
 	}
 
 	if bundle.Version != 1 && bundle.Version != exportSchemaVersion {
-		return nil, 0, fmt.Errorf("unsupported import version: %d", bundle.Version)
+		return importedData{}, fmt.Errorf("unsupported import version: %d", bundle.Version)
 	}
 
 	now := time.Now()
 	out := make([]Task, 0, len(bundle.Tasks))
 	seen := map[string]struct{}{}
+	shortened := 0
 	for i, dto := range bundle.Tasks {
-		// Strict mode rejects control characters; otherwise they are removed so
-		// exports/backups of older data always re-import.
+		// Strict mode rejects control characters and over-length text;
+		// otherwise control characters are removed and text longer than the
+		// limits (stored before they existed, or by another tool) is shortened
+		// at a character boundary (plan 4, D-13), so exports and backups of
+		// older data always re-import. Shortening comes before the blank-title
+		// check, so a title cannot become blank unnoticed.
 		if !strict {
 			dto.Title = stripControlCharacters(dto.Title, false)
 			dto.Description = stripControlCharacters(dto.Description, true)
+			var titleCut, descriptionCut bool
+			dto.Title, titleCut = shortenToLimit(dto.Title, MaxTitleLength)
+			dto.Description, descriptionCut = shortenToLimit(dto.Description, MaxDescriptionLength)
+			if titleCut || descriptionCut {
+				shortened++
+			}
 		}
 		// A blank title (possibly blank only once control characters are
 		// removed) is rejected in strict mode; default import keeps the task
 		// under a placeholder title so affected exports and backups restore.
 		if isBlank(dto.Title) {
 			if strict {
-				return nil, 0, fmt.Errorf("tasks[%d].title is required", i)
+				return importedData{}, fmt.Errorf("tasks[%d].title is required", i)
 			}
 			dto.Title = untitledTaskTitle
 		}
 		if err := validateTaskText(dto.Title, dto.Description); err != nil {
-			return nil, 0, fmt.Errorf("tasks[%d]: %w", i, err)
+			return importedData{}, fmt.Errorf("tasks[%d]: %w", i, err)
 		}
 		// Canonicalise numeric IDs so "01" and "1" refer to the same task.
 		if n, err := strconv.Atoi(dto.ID); err == nil && n > 0 {
@@ -644,21 +686,21 @@ func parseImportData(b []byte, strict bool) ([]Task, int, error) {
 		}
 		if dto.ID != "" {
 			if _, ok := seen[dto.ID]; ok {
-				return nil, 0, fmt.Errorf("duplicate id in import: %q", dto.ID)
+				return importedData{}, fmt.Errorf("duplicate id in import: %q", dto.ID)
 			}
 			seen[dto.ID] = struct{}{}
 		}
 
 		status, err := importedStatus(dto, bundle.Version, strict)
 		if err != nil {
-			return nil, 0, fmt.Errorf("tasks[%d]: %w", i, err)
+			return importedData{}, fmt.Errorf("tasks[%d]: %w", i, err)
 		}
 		dto.Status = status
 		dto.Completed = status == StatusDone
 
 		tags, err := normalizeTags(dto.Tags)
 		if err != nil {
-			return nil, 0, fmt.Errorf("tasks[%d]: %w", i, err)
+			return importedData{}, fmt.Errorf("tasks[%d]: %w", i, err)
 		}
 		dto.Tags = tags
 
@@ -675,7 +717,7 @@ func parseImportData(b []byte, strict bool) ([]Task, int, error) {
 		}
 		out = append(out, fromDTO(Task(dto)))
 	}
-	return out, bundle.Version, nil
+	return importedData{tasks: out, version: bundle.Version, shortened: shortened}, nil
 }
 
 // importedStatus returns the status of an imported task. Version 1 files have
