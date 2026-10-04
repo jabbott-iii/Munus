@@ -20,9 +20,10 @@ Munus/
 ├── Makefile                # dev targets (build/test/race/cover/vet/fmt/lint/check/fuzz/licenses) + release tagging
 ├── .github/workflows/      # ci.yml, cd.yml, docker.yml, security.yml (actions SHA-pinned)
 ├── .github/dependabot.yml  # weekly grouped updates: actions, Go modules, Docker images
+├── .github/pull_request_template.md # contributor PR checklist (mirrors CONTRIBUTING.md)
 ├── .devcontainer/          # Ubuntu + Go + neovim + docker-outside-of-docker
 ├── intel/                  # agent/maintainer knowledge base (this folder)
-└── AGENTS.md, README.md, CONTRIBUTING.md, LICENSE, NOTICE, CODEOWNERS
+└── AGENTS.md, README.md, CONTRIBUTING.md, SECURITY.md, LICENSE, NOTICE, CODEOWNERS
 ```
 
 ## Runtime flow

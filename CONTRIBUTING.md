@@ -4,6 +4,7 @@
 - Create an issue to pitch an addition or change; pull requests with no corresponding issue will be denied.
 - If the issue already exists, comment on it before making a pull request that addresses it.
 - Confirmation of a pitched concept is required on the applicable issue before making a pull request that modifies the code base.
+- Report security vulnerabilities privately as described in `SECURITY.md`, not in an issue or pull request.
 
 ## Prerequisites
 - Go 1.26 or newer (see `go.mod`).
@@ -46,6 +47,8 @@ make test
   stored text without `sanitizeForTerminal`.
 
 ## Pull request expectations
+- Fill in the pull request template (`.github/pull_request_template.md`), which GitHub
+  loads when you open a pull request.
 - Reference the issue and describe what changed and why.
 - List the checks you ran and their results.
 - Update `README.md` for user-visible changes and the `intel/` documents when architecture,
