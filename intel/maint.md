@@ -1,6 +1,8 @@
 # Architecture & Maintainability Guidance (authoritative)
 
 > Authoritative per `AGENTS.md`. `CONTRIBUTING.md` must stay consistent with this file.
+> Decision, plan-item and note IDs (D-…, P-…, N-…) refer to `intel/plan.md` and `intel/notes.md`
+> as of commit `442e63c`; both were cleared on 2026-10-03 (see `history.md`).
 
 ## Overview
 Munus is a single-binary Go CLI/TUI task manager backed by a local SQLite file.

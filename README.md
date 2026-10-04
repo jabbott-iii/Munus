@@ -76,7 +76,7 @@ Extract munus_windows_amd64.zip (or munus_windows_arm64.zip) and add the .exe to
 ```
 
 Optional: archives and `checksums.txt` of releases built by the current release workflow
-(`v2.2.2` and later) carry a GitHub build provenance attestation, which the
+(`v3.0.0` and later) carry a GitHub build provenance attestation, which the
 [GitHub CLI](https://cli.github.com/) can verify:
 ```
 gh attestation verify munus_linux_amd64.tar.gz --repo jabbott-iii/Munus

@@ -132,3 +132,23 @@ backfilled from `git log` for the changes made after that file's last entry.
   user's intent while deciding on the stored status.
 - README, `maint.md`, `map.md`, `notes.md`, `plan.md` and `cybersec.md` updated; no workflow,
   `Makefile`, Dockerfile or dependency change.
+
+## 2026-10-03 — Documentation drift fixed; `plan.md` and `notes.md` cleared
+- Commit record: plan 4 phase A (P-046…P-050) was committed in `40f26d4` and released as `v3.0.0`
+  (not `v2.2.2`); plan 5 (P-059, P-060) was committed as `dc6b120` and plan 4 phase B
+  (P-051…P-054) as `442e63c`, both pushed to `main` and not yet released. Earlier entries that say
+  "uncommitted" describe the state when they were written.
+- README: build provenance attestations are available from `v3.0.0` (it said `v2.2.2`, which was
+  never released). `cybersec.md`: SEC-019 records `dc6b120` and stays In Progress until CI is
+  confirmed green on Linux, macOS and Windows.
+- At the maintainer's request, `intel/plan.md` and `intel/notes.md` were cleared (only their titles
+  remain). Their previous content — plans 1–5, decisions D-1…D-22, notes N-001…N-041, validation
+  baselines and residual risks — is in git at `442e63c`; the D-, P- and N- IDs in `maint.md`,
+  `cybersec.md` and this file refer to it. Open when they were cleared: P-055 (testable entry
+  point), P-056 (deferred), D-22 (release number for plan 5 and plan 4 phase B) and the residual
+  risks in `notes.md`.
+
+## 2026-10-03 — SEC-019 closed
+- The maintainer confirmed that CI passed on Linux, macOS and Windows for the default database
+  location change (`dc6b120`), the remaining validation for SEC-019; it is now Closed and no
+  security item is open.
