@@ -23,6 +23,8 @@
   fresh (latest Go 1.26 patch) and log `go version`, so the SEC-018 check still applies to them.
 - Dependency updates (Dependabot) go through the same review and checks as any pull request; they
   are never merged automatically.
+- Without `MUNUS_DB_PATH`, the database lives in the per-user data directory, created owner-only
+  (`0700`); an old `./munus.db` in the working directory is never opened or changed (plan 5).
 
 ## Issues
 
@@ -169,3 +171,11 @@
 - **Required remediation:** Per plan 3 decision D-5 (a): set `go-version: "1.26.x"` with `check-latest: true` in `ci.yml` and `cd.yml` (no `go.mod` change); set `cache: false` for the release build job; add the ignore patterns (plan 3, P-044 and P-045). Workflow changes are delivered as a patch.
 - **Validation:** CI and CD logs show the patched Go version; govulncheck reports no standard-library findings; `git check-ignore` matches `munus-export-20260927.json` and `munus.db-wal`.
 - **Resolution:** Closed 2026-09-27 (plan 3 phase C, P-044 and P-045): committed as `df70f29` and released in `v2.2.1`; the maintainer confirmed all CI, CD, Docker and Security runs green, including the new govulncheck job. `ci.yml`, `cd.yml` and the govulncheck job use `go-version: "1.26.x"` with `check-latest: true` (D-5 a), so setup-go installs the latest Go 1.26 patch release; the `cd.yml` build job uses `cache: false`; `security.yml` runs `go run golang.org/x/vuln/cmd/govulncheck@v1.8.0 ./...` (version-pinned, verified by the Go checksum database, `contents: read`); `.gitignore` ignores `munus-export-*.json`, `*.db-journal`, `*.db-wal`, `*.db-shm` and `.dockerignore` the SQLite side files and export files. Local validation: actionlint 1.7.12 with shellcheck clean, CRLF line endings kept, `git check-ignore` matches every pattern, govulncheck v1.8.0 clean with Go 1.26.8.
+
+### SEC-019 — Default database in the working directory spreads task data into project folders
+- **Status:** In Progress
+- **Affected component:** `database_path.go` (default `munus.db` in the working directory), `internal/database.go` (deferred open)
+- **Risk:** Low (confidentiality). Every command run without `MUNUS_DB_PATH` created or used `munus.db` in the current directory, so task data ended up in whatever folder the user was in: source repositories (this repository ignores `*.db`, most others do not), synced or shared folders. A `git add -A` or a shared folder can then publish personal task data. Verified 2026-10-03 with the `v3.0.0` code: `munus list` in a new directory exits 0 and creates `munus.db` there.
+- **Required remediation:** Default to a per-user data directory created owner-only; keep `MUNUS_DB_PATH` as the explicit override; never read or move an old `./munus.db` automatically, but tell the user about it (plan 5, P-059, D-20 and D-21).
+- **Validation:** Tests that help and version create nothing, that the first open creates a `0700` directory and a `0600` file, that an existing data directory is tightened, that an old `./munus.db` stays untouched and only produces a note on standard error, and that a location error creates nothing; a binary check on Linux; CI on Linux, macOS and Windows.
+- **Resolution:** 2026-10-03 (uncommitted): implemented as described (`resolveDatabaseLocation`, `ensurePrivateDir`, `legacyDatabaseNotice`). Validated locally on Linux by `TestDefaultLocationWithLegacyDatabase`, `TestDeferredDatabaseCreatesPrivateDataDirOnOpen`, `TestDeferredDatabaseTightensExistingDataDir`, `TestDeferredDatabaseReportsLocationError`, `TestRootCmd_NoLocationNoticeWithoutOpening`, `TestRootCmd_WritesLocationNoticeToErrorOutput`, `TestDatabaseLocationDefaultForThisPlatform` and a binary check (`drwx------`, `-rw-------`). `writeBackup` now creates and tightens the backup directory through the same `ensurePrivateDir` helper (SEC-001 behaviour unchanged; `TestWriteBackupTightensExistingDirectory` passes). To be closed once the change is committed and CI passes on all three platforms. Existing `./munus.db` files are not removed; the note and the README tell users how to keep or move their tasks.

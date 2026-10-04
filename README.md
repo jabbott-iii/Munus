@@ -19,7 +19,8 @@ SQLite database.
   - Delete tasks at any time
 
 - **Data Storage & Export**
-  - SQLite database for persistent storage
+  - SQLite database for persistent storage, kept in your per-user data directory so you see
+    the same tasks wherever you run `munus`
   - Export tasks to versioned JSON (all tasks by default)
   - Import tasks from JSON files or standard input (merge or replace), with optional backups;
     task IDs, statuses and tags are preserved across export and import
@@ -152,7 +153,11 @@ Examples:
 
 ### list
 
-- munus list — show all tasks with their status (`TODO`, `DOING`, `OVERDUE`, `DONE`), ID, deadline and tags
+- munus list — show all tasks with their status (`TODO`, `DOING`, `OVERDUE`, `DONE`), ID, deadline and tags.
+  Deadlines are shown in local time as `YYYY-MM-DD HH:MM` (the format `--deadline` accepts), followed for
+  unfinished tasks that are overdue or at most three days away by a label such as `(Overdue)`,
+  `(Overdue by 2 days)`, `(Due today!)`, `(Due tomorrow)` or `(3 days left)`; a task without a deadline
+  shows `none`
 - munus list --pending — only tasks that are not done (`--completed` shows only done tasks)
 - munus list --overdue — only unfinished tasks past their deadline
 - munus list --status todo|doing|done (`-s`) — only tasks with that status
@@ -239,12 +244,52 @@ Examples:
 
 | Setting | Default | Description |
 |---|---|---|
-| `MUNUS_DB_PATH` | `munus.db` in the current directory | Path of the SQLite database file. Set it to use one database regardless of where you run `munus`, e.g. `mkdir -p ~/.munus && export MUNUS_DB_PATH="$HOME/.munus/munus.db"` (the directory must exist). |
+| `MUNUS_DB_PATH` | `munus.db` in your data directory (see [Database location](#database-location)) | Path of the SQLite database file to use instead (the directory must exist), e.g. `export MUNUS_DB_PATH="$HOME/tasks/munus.db"`. `MUNUS_DB_PATH=munus.db` keeps one database per directory, as Munus v3.0.0 and older did. |
 | `--vim` | off | Enable Vim-style keybindings in the TUI. |
 
 On Linux and macOS, new database, export and backup files are created readable
-only by their owner (mode `0600`).
+only by their owner (mode `0600`), and the data and backup directories are owner-only
+(mode `0700`).
 Import backups are written to `.munus/backups/` under your home directory.
+
+### Database location
+
+Unless `MUNUS_DB_PATH` is set, Munus keeps its database in a per-user data directory, which it
+creates the first time a command opens the database (`--help` and `--version` create nothing):
+
+| OS | Default database |
+|---|---|
+| Linux and other Unix systems | `$XDG_DATA_HOME/munus/munus.db`, or `~/.local/share/munus/munus.db` when `XDG_DATA_HOME` is not set (a relative `XDG_DATA_HOME` is ignored) |
+| macOS | `~/Library/Application Support/munus/munus.db` |
+| Windows | `%LOCALAPPDATA%\munus\munus.db` |
+
+If the location cannot be determined (for example `HOME` is not set), commands that need the
+database fail with an error asking you to set `MUNUS_DB_PATH`.
+
+Munus v3.0.0 and older used `munus.db` in the current directory. When `MUNUS_DB_PATH` is not set
+and a command finds a `munus.db` in the current directory, it prints a note on standard error and
+uses the new location; the old file is not read or changed. The TUI shows the same note at the
+top of its screens. To keep its tasks, either:
+
+- keep using the old file: set `MUNUS_DB_PATH` to its path (or `MUNUS_DB_PATH=munus.db` to keep
+  one database per directory), or
+- copy its tasks into the new database; they get new IDs and existing tasks are kept:
+
+  ```bash
+  MUNUS_DB_PATH=./munus.db munus export --stdout | munus import --file - --id-strategy regenerate
+  ```
+
+  PowerShell:
+
+  ```powershell
+  $env:MUNUS_DB_PATH = ".\munus.db"; munus export --file old-tasks.json
+  Remove-Item Env:MUNUS_DB_PATH; munus import --file old-tasks.json --id-strategy regenerate
+  Remove-Item old-tasks.json
+  ```
+
+  Then delete or move the old `munus.db` so the note stops. If the new database is still empty,
+  you can instead move the old file to the path shown in the note, replacing the empty database
+  there; this keeps the task IDs.
 
 ## Docker
 
@@ -325,7 +370,7 @@ on Debian 11 and on Alpine.
 ## Project structure
 
 ```
-main.go, database_path.go   entry point and MUNUS_DB_PATH handling
+main.go, database_path.go   entry point, database location (MUNUS_DB_PATH or the per-user data directory)
 internal/                   CLI commands, TUI models, storage (tasks, status, tags), deadlines, import/export
 tools/licenses/             generates and checks THIRD_PARTY_LICENSES
 THIRD_PARTY_LICENSES        license texts of the third-party software in the binaries (generated)

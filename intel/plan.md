@@ -13,7 +13,43 @@ plan, built from the items still open in `notes.md` (residual risks) and earlier
 was committed as `97cf04b` and the maintainer decided D-9…D-19 on 2026-09-27 (phase A → `v2.2.2`,
 phases B and C → `v2.3.0`). Phase A is implemented and validated locally (uncommitted; the workflow,
 `dependabot.yml` and `Makefile` changes are delivered as a patch); its new workflow jobs still need
-their first GitHub runs.
+their first GitHub runs. Plan 5 below (2026-10-03) moves the default database out of the working
+directory and makes `munus list` deadlines readable; it is implemented and validated locally
+(uncommitted) and changes behaviour, so it targets the next major release (D-22).
+
+## Plan 5 — requested and implemented 2026-10-03 (uncommitted; next major release)
+
+Source: the 2026-10-03 production-readiness review of `v3.0.0` (`40f26d4`), findings 1 and 2. With
+the default `./munus.db`, `munus list` run in another directory printed nothing, exited 0 and created
+a new empty database there: the tasks seemed lost, and database files ended up in project folders,
+where they can be committed (SEC-019). `munus list` printed `-Deadline: <nil>` or Go's raw
+`time.Time` (`2026-10-06 16:52:00.11083786 -0700 -0700`). The maintainer asked for both to be
+resolved; this supersedes the plan-1/plan-2 decision to keep `./munus.db` as the default.
+
+### Decisions (2026-10-03)
+
+| ID | Decision | Options | Chosen |
+|---|---|---|---|
+| D-20 | Default database location (P-059) | (a) keep `./munus.db`; (b) the per-user data directory: `$XDG_DATA_HOME/munus` or `~/.local/share/munus` (Linux and other Unix), `~/Library/Application Support/munus` (macOS), `%LOCALAPPDATA%\munus` (Windows); (c) `~/.munus/munus.db` next to the backups | **(b)**, as the maintainer asked ("`os.UserConfigDir()` or the XDG data directory"); Windows uses the local, not the roaming, AppData because the file is a SQLite database. `MUNUS_DB_PATH` keeps priority, and `MUNUS_DB_PATH=munus.db` restores the old per-directory behaviour |
+| D-21 | An old `./munus.db` in the working directory (P-059) | (a) a notice on standard error; the old file is never opened or changed; (b) move or copy it automatically on the first run | **(a)**: an automatic move could pick the wrong file (there can be one per directory) or overwrite tasks; the README ("Database location") documents how to keep using it or copy its tasks (`export --stdout \| import --file - --id-strategy regenerate`) |
+| D-22 | Release | the default location changes behaviour for everyone without `MUNUS_DB_PATH` | The next major release, proposed as `v4.0.0` (the latest release is `v3.0.0`, which shipped plan 4 phase A); **maintainer to confirm** the number and whether plan 4 phases B and C ship with it |
+
+### Items
+
+| ID | Priority | Item | Ref | Acceptance | Status |
+|---|---|---|---|---|---|
+| P-059 | High | **Default database in the per-user data directory**, per D-20 and D-21. `database_path.go` resolves the location without side effects (`resolveDatabaseLocation`, `defaultDataDir`, `legacyDatabaseNotice`); `internal.DatabaseLocation` and `NewDeferredDatabaseAt` carry the path, the directory to create, the notice and a resolution error (`NewDeferredDatabase` unchanged); the first open creates the directory owner-only (`ensurePrivateDir`, now shared with the backup directory); `openForCommand` writes the notice once to the error output, and the TUI shows it at the top of every screen. | N-040, SEC-019 | `--help`/`--version` create nothing; the first command creates a `0700` directory and a `0600` file; the same tasks from any directory; an old `./munus.db` gives the notice on stderr only and stays untouched; `MUNUS_DB_PATH` (including `munus.db`) behaves as before; no home directory → an error naming `MUNUS_DB_PATH`, while help and version still work | Done (uncommitted): tests in `database_path_test.go`, `internal/database_test.go`, `internal/logic-cli_test.go`; Linux binary checks; the macOS and Windows defaults are covered by unit tests with an injected environment only |
+| P-060 | Low | **Readable deadlines in `munus list`**: local time in the `add --deadline` layout (`2006-01-02 15:04`), the TUI list's relative label for unfinished tasks that are overdue or due within three days, `none` without a deadline (`listDeadline`; `relativeDeadlineLabel` split out of `deadlineLabel` without changing the TUI). | N-041 | Deterministic test with a fixed zone: no `<nil>`, no seconds or nanoseconds, labels as in the TUI, no label for completed tasks | Done (uncommitted) |
+
+Validation as for plan 3 (see `notes.md`, "Plan 5 baseline"). No workflow, `Makefile`, Dockerfile or
+dependency change: the CI, CD and Docker smoke tests set `MUNUS_DB_PATH`, and so does the image.
+
+Release notes for the next major release must say: without `MUNUS_DB_PATH` the database is now in the
+per-user data directory (paths per OS); an existing `./munus.db` is no longer used (a note on standard
+error says so) — set `MUNUS_DB_PATH` or copy its tasks as the README describes; without a home
+directory (Windows: `%LOCALAPPDATA%`) commands need `MUNUS_DB_PATH`; `munus list` prints deadlines as
+`YYYY-MM-DD HH:MM` with a relative label and `none` without one, so scripts that parsed the old
+output must adapt (the JSON export is the machine-readable format).
 
 ## Plan 4 — drafted and decided 2026-09-27 (phase A → v2.2.2, phases B and C → v2.3.0)
 

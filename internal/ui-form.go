@@ -273,6 +273,7 @@ func (m *FormModel) View() string {
 		PaddingLeft(2)
 
 	var s strings.Builder
+	s.WriteString(renderNotice(m.notice))
 	heading := "Create New Task"
 	if m.editingID != 0 {
 		heading = fmt.Sprintf("Edit Task #%d", m.editingID)
@@ -393,7 +394,7 @@ func (m *FormModel) returnToList() (tea.Model, tea.Cmd, bool) {
 // toList switches to the task list, carrying the known terminal size and
 // asking for a fresh one so dialogs are sized correctly.
 func (m *FormModel) toList(status string) (tea.Model, tea.Cmd) {
-	lm := NewListModelWithOptions(m.storage, tuiOptions{vimEnabled: m.vimEnabled})
+	lm := NewListModelWithOptions(m.storage, tuiOptions{vimEnabled: m.vimEnabled, notice: m.notice})
 	lm.viewportWidth, lm.viewportHeight = m.viewportWidth, m.viewportHeight
 	lm.filter, lm.tagFilter = m.listFilter, m.listTagFilter
 	lm.statusMessage = status

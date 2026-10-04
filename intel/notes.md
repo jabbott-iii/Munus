@@ -1,5 +1,32 @@
 # Engineering Notes & Open Questions
 
+## Plan 5 baseline (2026-10-03; uncommitted change set on top of `40f26d4`, target the next major release)
+Go 1.26.8 built from GitHub source; modules served from a local file proxy built from GitHub mirrors
+at the exact versions in `go.mod` and verified against the unchanged `go.sum` (`go mod verify`: all
+modules verified). `gofmt -s -l .` clean; `go vet ./...` clean (also `GOOS=windows`/`darwin`, CGO
+off); `go.mod`/`go.sum` unchanged; `go test ./...` passes (coverage root 78.6%, was 25.0%; `internal`
+89.0%; `tools/licenses` 90.1%; 89.0% total), also with umask 077 and under TZ UTC, America/Phoenix,
+Pacific/Chatham and Asia/Kathmandu; `go test -race -count=1 -shuffle=on ./...` passes; staticcheck
+2026.2.1 clean. Mutation check: 19 targeted reversions, 18 caught; the 19th removed an `IsDir` check
+after `MkdirAll` that could never fail (`MkdirAll` already rejects a file), so the check was deleted.
+An independent review found no High or Medium issues; its Low findings were fixed: the TUI's
+alternate screen hid the note (now shown at the top of every TUI screen), the README's PowerShell
+steps left an export file behind, and no test used the real lookup for the platform it runs on
+(`TestDatabaseLocationDefaultForThisPlatform` now runs on every CI runner); `writeBackup` now uses
+the same `ensurePrivateDir` helper as the data directory.
+Binary checks on Linux: `--help` creates nothing in a fresh `HOME`; `add` in one directory and `list`
+in another show the same tasks; `~/.local/share/munus` is `drwx------` and the database
+`-rw-------`; with a v3-style `./munus.db` the note goes to standard error, `export --stdout` stays
+valid JSON and the old file is not used; `MUNUS_DB_PATH=munus.db` keeps the per-directory behaviour
+without a note; without `HOME`, `list` fails with an error naming `MUNUS_DB_PATH` while `--version`
+works; the README's `MUNUS_DB_PATH=./munus.db munus export --stdout | munus import --file -
+--id-strategy regenerate` copies an old database's tasks with new IDs. `list` prints
+`-Deadline: none` and `-Deadline: 2026-10-06 18:01 (3 days left)`. Not run: golangci-lint, gosec,
+CodeQL, govulncheck (its database is not reachable from this sandbox), the fuzz targets (the code
+they cover is unchanged), the Docker build (the image sets `MUNUS_DB_PATH`), macOS and Windows test
+runs and the README's PowerShell commands. The TUI was checked in a pseudo-terminal: the note is
+written to standard error before the TUI starts and shown on the form and list screens.
+
 ## Plan 4 phase A baseline (2026-09-27; uncommitted change set on top of `97cf04b`, target `v2.2.2`)
 Same toolchain as below (Go 1.26.8 + CGO, modules verified against `go.sum`): `gofmt -s -l .` clean;
 `go vet ./...` clean (also `GOOS=windows`/`darwin`, CGO off); `go mod tidy` leaves `go.mod`/`go.sum`
@@ -124,6 +151,7 @@ unless noted. Security items live in `cybersec.md`.
 - **N-005 DB created on any invocation — Fixed.** DB opens lazily; `--help`, `--version`, `help`,
   `completion` and flag errors create no file (required and grouped flag errors still do, N-033).
   Default location kept at `./munus.db` (maintainer decision); `MUNUS_DB_PATH` documented.
+  Superseded by N-040 (plan 5): the default is now the per-user data directory.
 - **N-008 TUI hid deadlined tasks beyond 10 — Fixed** (all listed, soonest first; header no longer says "Top 10").
 - **N-009 PgUp/PgDn selected an off-page task — Fixed** (cursor moves to first row of the new page).
 - **N-010 Sticky list error — Fixed** (any key dismisses; successful reload clears; `c` with no
@@ -134,8 +162,19 @@ unless noted. Security items live in `cybersec.md`.
   --tag urgent`) is silently reverted by the next `c` or `s` on that task (reproduced with a test on a
   file database). Now `Storage.SetTaskStatus` writes only the status columns; the TUI and `complete`
   use it (`TestListModelStatusKeysKeepConcurrentEdits`, `TestCompleteCmdWritesOnlyStatus`).
+- **N-040 Tasks depend on the working directory — Fixed (plan 5, P-059; uncommitted).** The default
+  database was `./munus.db`: `munus list` in another directory printed nothing, exited 0 and created
+  a new empty database there, so the tasks seemed lost and database files ended up in project
+  folders (where they can be committed, SEC-019). The default is now `munus.db` in the per-user data
+  directory (D-20); an old `./munus.db` in the working directory produces a note on standard error
+  and is never used or changed (D-21).
 
 ### Low
+- **N-041 `munus list` printed raw Go values — Fixed (plan 5, P-060; uncommitted).** `PrintList`
+  formatted the `*time.Time` deadline with `%v`: `-Deadline: <nil>` without a deadline and
+  `2026-10-06 16:52:00.11083786 -0700 -0700` otherwise. Deadlines are now shown in local time as
+  `YYYY-MM-DD HH:MM`, with the TUI's relative label for unfinished tasks that are overdue or due
+  within three days, and `none` without a deadline.
 - **N-011 Cursor not clamped after reload — Fixed.**
 - **N-012 Only `1M` worked — Fixed** (tokenising parser; `2M`, `12M 1d` work).
 - **N-013 Duration overflow — Fixed** (bounds: months ≤ 1200, other units ≤ ~100 years).
@@ -257,6 +296,15 @@ unless noted. Security items live in `cybersec.md`.
   license files in `/usr/share/licenses/munus/`; image and Linux binaries request 8 MiB thread
   stacks. `NOTICE` no longer lists module versions.
 
+- Plan 5 (uncommitted, next major release): without `MUNUS_DB_PATH` the database is `munus.db` in
+  the per-user data directory (Linux and other Unix `$XDG_DATA_HOME/munus` or
+  `~/.local/share/munus`, macOS `~/Library/Application Support/munus`, Windows
+  `%LOCALAPPDATA%\munus`), created `0700` on first use; an existing `./munus.db` is no longer used
+  (a note on standard error says so; `MUNUS_DB_PATH=munus.db` restores the old behaviour); without a
+  home directory (Windows: `%LOCALAPPDATA%`) commands that open the database fail unless
+  `MUNUS_DB_PATH` is set; `munus list` prints deadlines as `YYYY-MM-DD HH:MM` plus a relative label,
+  and `none` instead of `<nil>`.
+
 ## Residual risks / open questions
 (Plan 4 in `plan.md`, decided 2026-09-27, addresses the open ones below.)
 - CI, Docker, Security and release (`v2.1.1`) workflows are validated on GitHub (2026-09-24); all
@@ -287,7 +335,14 @@ unless noted. Security items live in `cybersec.md`.
 - A database written by a pre-v2.1.1 binary after migration is kept consistent by triggers; any
   other external tool editing the database directly can still store tags that bypass validation
   (output is sanitised, SEC-010).
-- The root package (`main.go`, `database_path.go`) has 25% statement coverage.
+- The root package (`main.go`, `database_path.go`) has 78.6% statement coverage since plan 5; `main`
+  itself is still untested (P-055).
+- Plan 5 (uncommitted): the macOS and Windows default paths are tested only with an injected
+  environment; the CI smoke tests set `MUNUS_DB_PATH`, so the first real use of those defaults is
+  outside CI. The note about an old `./munus.db` repeats on every command run in that directory until
+  the file is moved or `MUNUS_DB_PATH` is set (by design, D-21). Missing parents of the data
+  directory (for example `~/.local/share`) are created `0700`. Backups stay in `~/.munus/backups`,
+  outside the data directory. `munus list` output changed; scripts that parsed it must adapt.
 - Licensing (engineering notes, not legal advice; plan 4 phase A, P-046/P-047): archives and the
   image now carry the full texts of every compiled module, Go, SQLite and musl, and Linux binaries
   no longer contain glibc. Still not covered: Windows binaries statically link parts of the
@@ -330,3 +385,7 @@ git at `48b4da2^`).
   autofix package (which alone pulls in the cloud SDKs); zig from PyPI (`ziglang`) stands in for a
   musl C compiler when no Docker daemon is available; `check-jsonschema` validates `dependabot.yml`
   and the workflows against the SchemaStore schemas.
+- Plan 5: Go 1.26.8 was built from GitHub source with Go 1.24.7; modules came from a local `file://`
+  proxy built with `git archive` from GitHub mirrors of the modules on blocked hosts (gorm.io,
+  golang.org/x, gopkg.in, go.yaml.in), verified against the unchanged `go.sum`; staticcheck 2026.2.1
+  (v0.8.1) was built the same way.

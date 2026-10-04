@@ -3,7 +3,7 @@
 ```
 Munus/
 ├── main.go                 # entry: deferred DB, version stamp, run root cobra command
-├── database_path.go        # MUNUS_DB_PATH env → DB path (default ./munus.db)
+├── database_path.go        # DB location: MUNUS_DB_PATH, else munus.db in the per-user data dir; notice for an old ./munus.db
 ├── internal/
 │   ├── database.go         # Storage interface, gorm Database (lazy open, migration, tags, triggers), shared types
 │   ├── logic-cli.go        # cobra commands (root/TUI, add, edit, list, complete, delete, export, import)
@@ -28,7 +28,7 @@ Munus/
 ## Runtime flow
 ```mermaid
 flowchart LR
-  main[main.go] -->|MUNUS_DB_PATH| deferred[NewDeferredDatabase]
+  main[main.go] -->|MUNUS_DB_PATH or per-user data dir| deferred[NewDeferredDatabaseAt]
   main --> root[NewRootCmd]
   root -->|each command: validate args/flags, then openForCommand| db[(SQLite munus.db)]
   root -->|no subcommand| tui[Bubble Tea: FormModel / ListModel --vim]

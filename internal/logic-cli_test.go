@@ -137,6 +137,50 @@ func TestPrintList_MultipleTasks(t *testing.T) {
 	}
 }
 
+// Deadlines are shown in the local time zone in the `add --deadline` layout,
+// with the TUI's relative label for unfinished tasks due within three days or
+// overdue, and "none" without a deadline (never Go's raw time or "<nil>").
+func TestPrintListFormatsDeadlines(t *testing.T) {
+	mst := time.FixedZone("MST", -7*60*60)
+	now := time.Date(2026, 10, 3, 16, 0, 0, 0, mst)
+	at := func(m time.Month, d, h, min, sec, nsec int) *time.Time {
+		v := time.Date(2026, m, d, h, min, sec, nsec, mst).UTC() // stored as UTC
+		return &v
+	}
+	tasks := []*ItemModel{
+		{ID: 1, Title: "No deadline", Description: "x"},
+		{ID: 2, Title: "Soon", Description: "x", Deadline: at(10, 6, 16, 52, 0, 0)},
+		{ID: 3, Title: "Tomorrow", Description: "x", Deadline: at(10, 4, 8, 30, 15, 123456789)},
+		{ID: 4, Title: "Later", Description: "x", Deadline: at(10, 20, 9, 0, 0, 0)},
+		{ID: 5, Title: "Late", Description: "x", Deadline: at(10, 1, 9, 0, 0, 0)},
+		{ID: 6, Title: "Done late", Description: "x", Deadline: at(10, 1, 9, 0, 0, 0), Completed: true, Status: StatusDone},
+	}
+	var buf bytes.Buffer
+	printListAt(&buf, tasks, now)
+	out := buf.String()
+
+	wantFirst := "[○ TODO] ID: 1- No deadline:\nx\n -Deadline: none\n -Complete: false\n -Status: todo\n\n"
+	if !strings.HasPrefix(out, wantFirst) {
+		t.Fatalf("unexpected format for a task without deadline:\n%q\nwant prefix\n%q", out, wantFirst)
+	}
+	for _, want := range []string{
+		" -Deadline: 2026-10-06 16:52 (3 days left)\n",
+		" -Deadline: 2026-10-04 08:30 (Due tomorrow)\n",
+		" -Deadline: 2026-10-20 09:00\n",
+		"[⚠ OVERDUE] ID: 5- Late:\nx\n -Deadline: 2026-10-01 09:00 (Overdue by 2 days)\n",
+		"[✓ DONE] ID: 6- Done late:\nx\n -Deadline: 2026-10-01 09:00\n",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("expected %q in output:\n%s", want, out)
+		}
+	}
+	for _, unwanted := range []string{"<nil>", "+0000", "UTC", ".123"} {
+		if strings.Contains(out, unwanted) {
+			t.Errorf("unexpected %q in output:\n%s", unwanted, out)
+		}
+	}
+}
+
 // ============================================ NewAddCmd Tests ============================================
 
 func TestAddCmd_Success(t *testing.T) {
@@ -1058,6 +1102,70 @@ func TestRootCmd_ReportsDatabaseOpenFailure(t *testing.T) {
 	}
 	if strings.Contains(errOut.String(), "Usage:") {
 		t.Fatalf("expected no usage text for database errors, got %q", errOut.String())
+	}
+}
+
+// The location notice goes to the error output, once, when a command opens
+// the database; standard output (here an export to stdout) stays clean.
+func TestRootCmd_WritesLocationNoticeToErrorOutput(t *testing.T) {
+	const notice = "munus: note: example notice"
+	db := NewDeferredDatabaseAt(DatabaseLocation{Path: filepath.Join(t.TempDir(), "munus.db"), Notice: notice})
+	t.Cleanup(func() { _ = db.Close() })
+	root := NewRootCmd(db)
+	out, errOut := &bytes.Buffer{}, &bytes.Buffer{}
+	root.SetOut(out)
+	root.SetErr(errOut)
+	root.SetArgs([]string{"export", "--stdout"})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("export failed: %v", err)
+	}
+	if got := strings.Count(errOut.String(), notice); got != 1 {
+		t.Fatalf("expected the notice once in the error output, got %d in %q", got, errOut.String())
+	}
+	if strings.Contains(out.String(), notice) {
+		t.Fatalf("notice reached standard output: %q", out.String())
+	}
+	var bundle ExportBundle
+	if err := json.Unmarshal(out.Bytes(), &bundle); err != nil {
+		t.Fatalf("standard output is not a valid export: %v\n%s", err, out.String())
+	}
+}
+
+// The root command passes the notice on to the TUI.
+func TestOpenForCommandWithNoticeReturnsNotice(t *testing.T) {
+	db := NewDeferredDatabaseAt(DatabaseLocation{Path: filepath.Join(t.TempDir(), "munus.db"), Notice: "hello"})
+	t.Cleanup(func() { _ = db.Close() })
+	cmd := &cobra.Command{}
+	errOut := &bytes.Buffer{}
+	cmd.SetErr(errOut)
+	notice, err := openForCommandWithNotice(cmd, db)
+	if err != nil || notice != "hello" || errOut.String() != "hello\n" {
+		t.Fatalf("got notice %q, err %v, error output %q", notice, err, errOut.String())
+	}
+}
+
+// Help, version and argument errors open nothing, so they show no notice and
+// create neither the data directory nor the database.
+func TestRootCmd_NoLocationNoticeWithoutOpening(t *testing.T) {
+	const notice = "munus: note: example notice"
+	for _, args := range [][]string{{"--help"}, {"--version"}, {"list", "--status", "bogus"}, {"add", "-t", "x"}} {
+		t.Run(strings.Join(args, " "), func(t *testing.T) {
+			dir := filepath.Join(t.TempDir(), "munus")
+			db := NewDeferredDatabaseAt(DatabaseLocation{Path: filepath.Join(dir, "munus.db"), Dir: dir, Notice: notice})
+			root := NewRootCmd(db)
+			root.Version = "1.2.3"
+			out, errOut := &bytes.Buffer{}, &bytes.Buffer{}
+			root.SetOut(out)
+			root.SetErr(errOut)
+			root.SetArgs(args)
+			_ = root.Execute()
+			if strings.Contains(out.String()+errOut.String(), notice) {
+				t.Fatalf("unexpected notice for %v: %q", args, out.String()+errOut.String())
+			}
+			if _, err := os.Stat(dir); !os.IsNotExist(err) {
+				t.Fatalf("expected no data directory for %v, stat err=%v", args, err)
+			}
+		})
 	}
 }
 

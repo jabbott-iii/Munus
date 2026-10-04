@@ -40,6 +40,29 @@ type Database struct {
 	sqlDB *sql.DB
 	path  string
 	file  string // file sqlite actually opened ("" for in-memory databases)
+
+	// Set only for a deferred database that is not open yet (see
+	// NewDeferredDatabaseAt); opening replaces the whole struct.
+	dir         string // created owner-only before the first open
+	notice      string // written once by openForCommand
+	locationErr error  // returned by open instead of opening anything
+}
+
+// DatabaseLocation describes where a deferred Database lives and what to do
+// before it is first opened.
+type DatabaseLocation struct {
+	// Path is the database file path or sqlite DSN.
+	Path string
+	// Dir, when set, is created owner-only (0700) before the database is first
+	// opened; it is the directory that holds Path.
+	Dir string
+	// Notice, when set, is written to the command's error output when a
+	// command opens the database.
+	Notice string
+	// Err, when set, is returned when a command opens the database (for
+	// example when no default location could be determined), so that help and
+	// version output still work.
+	Err error
 }
 
 var (
@@ -169,6 +192,7 @@ type ListModel struct {
 	statusMessage    string
 	transfer         *transferState
 	vimEnabled       bool
+	notice           string // shown above the list (see tuiOptions)
 	filter           listFilter
 	tagFilter        string
 	now              func() time.Time // clock used for deadline labels and filters
@@ -192,6 +216,7 @@ type FormModel struct {
 	submitted        bool
 	formMode         formInputMode
 	vimEnabled       bool
+	notice           string // shown above the form (see tuiOptions)
 	editingID        int    // 0 when creating a task, otherwise the task being edited
 	originalDeadline string // deadline text shown when editing started
 	viewportWidth    int
@@ -202,6 +227,10 @@ type FormModel struct {
 
 type tuiOptions struct {
 	vimEnabled bool
+	// notice is shown at the top of every TUI screen, because the alternate
+	// screen hides what was written to the terminal before the TUI started
+	// (for example the note about an old ./munus.db).
+	notice string
 }
 
 // DataLoadedMsg is emitted when tasks are loaded from storage.
@@ -225,6 +254,7 @@ func NewFormModelWithOptions(storage Storage, opts tuiOptions) *FormModel {
 		currentField: titleField,
 		formMode:     formModeInsert,
 		vimEnabled:   opts.vimEnabled,
+		notice:       opts.notice,
 	}
 }
 
@@ -241,6 +271,7 @@ func NewListModelWithOptions(storage Storage, opts tuiOptions) *ListModel {
 		confirmingDelete: false,
 		taskToDelete:     nil,
 		vimEnabled:       opts.vimEnabled,
+		notice:           opts.notice,
 		now:              time.Now,
 	}
 	return m
@@ -573,10 +604,18 @@ func migrateStatusAndTags(conn *gorm.DB) error {
 // NewDeferredDatabase returns a Database for path that is opened on the first
 // call to open, so commands such as --help never create a database file.
 func NewDeferredDatabase(path string) *Database {
+	return NewDeferredDatabaseAt(DatabaseLocation{Path: path})
+}
+
+// NewDeferredDatabaseAt is NewDeferredDatabase for a location that may also
+// need its directory created, carry a notice for the user, or have failed to
+// resolve. Nothing is created before the first open.
+func NewDeferredDatabaseAt(loc DatabaseLocation) *Database {
+	path := loc.Path
 	if path == "" {
 		path = "munus.db"
 	}
-	return &Database{path: path}
+	return &Database{path: path, dir: loc.Dir, notice: loc.Notice, locationErr: loc.Err}
 }
 
 // open opens the database if it is not open yet. It is safe to call repeatedly.
@@ -587,11 +626,51 @@ func (d *Database) open() error {
 	if d.conn != nil {
 		return nil
 	}
+	if d.locationErr != nil {
+		return d.locationErr
+	}
+	if d.dir != "" {
+		if err := ensurePrivateDir(d.dir); err != nil {
+			return fmt.Errorf("create data directory: %w", err)
+		}
+	}
 	opened, err := NewDatabase(d.path)
 	if err != nil {
 		return err
 	}
 	*d = *opened
+	return nil
+}
+
+// takeNotice returns the notice of a database that has not been opened yet
+// and clears it, so it is shown at most once.
+func (d *Database) takeNotice() string {
+	if d == nil || d.conn != nil {
+		return ""
+	}
+	notice := d.notice
+	d.notice = ""
+	return notice
+}
+
+// ensurePrivateDir creates dir (and missing parents) owner-only and tightens
+// an existing dir that others can access, like the backup directory.
+func ensurePrivateDir(dir string) error {
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return err
+	}
+	// MkdirAll fails when dir exists but is not a directory.
+	info, err := os.Stat(dir)
+	if err != nil {
+		return err
+	}
+	if info.Mode().Perm()&0o077 != 0 {
+		// A directory needs its execute bit to be entered, so 0700 (not 0600)
+		// is its owner-only mode; gosec's G302 assumes a regular file.
+		if err := os.Chmod(dir, 0o700); err != nil { // #nosec G302 -- owner-only directory mode, see above
+			return fmt.Errorf("restrict directory permissions: %w", err)
+		}
+	}
 	return nil
 }
 
@@ -606,9 +685,10 @@ func createPrivateDatabaseFile(dsn string) string {
 	if !ok {
 		return ""
 	}
-	// The path is the user's own setting (MUNUS_DB_PATH or ./munus.db), so
-	// there is no privilege boundary for G304 to protect; O_EXCL only ever
-	// creates a new file and never opens an existing one.
+	// The path is the user's own setting (MUNUS_DB_PATH or the default in the
+	// user's data directory), so there is no privilege boundary for G304 to
+	// protect; O_EXCL only ever creates a new file and never opens an existing
+	// one.
 	f, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE|os.O_EXCL, 0o600) // #nosec G304 -- user-configured database path, see above
 	if err != nil {
 		return ""

@@ -110,20 +110,30 @@ func calendarDaysBetween(now, deadline time.Time) int {
 // deadlineLabel describes deadline relative to now for the task list. urgent
 // is true for overdue tasks and tasks due today.
 func deadlineLabel(deadline, now time.Time) (label string, urgent bool) {
+	if label, urgent, ok := relativeDeadlineLabel(deadline, now); ok {
+		return label, urgent
+	}
+	return deadline.In(now.Location()).Format("Jan 2, 3:04 PM"), false
+}
+
+// relativeDeadlineLabel is deadlineLabel for deadlines that are overdue or at
+// most three calendar days away; ok is false for later deadlines, which
+// deadlineLabel shows as a date instead.
+func relativeDeadlineLabel(deadline, now time.Time) (label string, urgent, ok bool) {
 	days := calendarDaysBetween(now, deadline)
 	switch {
 	case deadline.Before(now) && days >= 0:
-		return "Overdue", true
+		return "Overdue", true, true
 	case deadline.Before(now):
-		return fmt.Sprintf("Overdue by %d %s", -days, plural(-days, "day", "days")), true
+		return fmt.Sprintf("Overdue by %d %s", -days, plural(-days, "day", "days")), true, true
 	case days == 0:
-		return "Due today!", true
+		return "Due today!", true, true
 	case days == 1:
-		return "Due tomorrow", false
+		return "Due tomorrow", false, true
 	case days <= 3:
-		return fmt.Sprintf("%d days left", days), false
+		return fmt.Sprintf("%d days left", days), false, true
 	default:
-		return deadline.In(now.Location()).Format("Jan 2, 3:04 PM"), false
+		return "", false, false
 	}
 }
 

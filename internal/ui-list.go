@@ -228,7 +228,7 @@ func (m *ListModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.taskToDelete = nil
 				return m, nil
 			}
-			fm := NewFormModelWithOptions(m.storage, tuiOptions{vimEnabled: m.vimEnabled})
+			fm := NewFormModelWithOptions(m.storage, tuiOptions{vimEnabled: m.vimEnabled, notice: m.notice})
 			fm.viewportWidth, fm.viewportHeight = m.viewportWidth, m.viewportHeight
 			fm.listFilter, fm.listTagFilter = m.filter, m.tagFilter
 			return fm, nil
@@ -347,6 +347,7 @@ func (m *ListModel) View() string {
 
 	var s strings.Builder
 
+	s.WriteString(renderNotice(m.notice))
 	s.WriteString(titleStyle.Render(" Task List"))
 	if label := m.filterLabel(); label != "" {
 		s.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("#9CA3AF")).Render("  Filter: " + label))
@@ -494,6 +495,15 @@ func (m *ListModel) View() string {
 	}
 
 	return s.String()
+}
+
+// renderNotice renders a TUI notice (sanitised, like all text that reaches
+// the terminal) followed by a blank line, or "" when there is none.
+func renderNotice(notice string) string {
+	if notice == "" {
+		return ""
+	}
+	return lipgloss.NewStyle().Foreground(lipgloss.Color("#F59E0B")).Render(sanitizeForTerminal(notice, true)) + "\n\n"
 }
 
 func (m *ListModel) RenderTask(task *ItemModel, index int, isSelected bool,
@@ -690,7 +700,7 @@ func (m *ListModel) helpText() string {
 
 // openEditForm switches to the task form pre-filled with task.
 func (m *ListModel) openEditForm(task *ItemModel) (tea.Model, tea.Cmd) {
-	fm := NewFormModelWithOptions(m.storage, tuiOptions{vimEnabled: m.vimEnabled})
+	fm := NewFormModelWithOptions(m.storage, tuiOptions{vimEnabled: m.vimEnabled, notice: m.notice})
 	fm.editingID = task.ID
 	// Control characters stored before validation existed are dropped, so
 	// saving the edit also cleans the task.

@@ -469,6 +469,22 @@ func TestDeadlineLabel(t *testing.T) {
 	}
 }
 
+// relativeDeadlineLabel matches deadlineLabel up to three days ahead and
+// reports ok=false for later deadlines, which deadlineLabel shows as a date.
+func TestRelativeDeadlineLabel(t *testing.T) {
+	now := time.Date(2026, 3, 10, 9, 0, 0, 0, time.UTC)
+	for _, deadline := range []time.Time{now.Add(-50 * time.Hour), now.Add(-time.Hour), now.Add(time.Hour), now.Add(24 * time.Hour), now.AddDate(0, 0, 3)} {
+		label, urgent, ok := relativeDeadlineLabel(deadline, now)
+		wantLabel, wantUrgent := deadlineLabel(deadline, now)
+		if !ok || label != wantLabel || urgent != wantUrgent {
+			t.Errorf("relativeDeadlineLabel(%v) = %q/%v/%v, want %q/%v/true", deadline, label, urgent, ok, wantLabel, wantUrgent)
+		}
+	}
+	if label, _, ok := relativeDeadlineLabel(now.AddDate(0, 0, 4), now); ok || label != "" {
+		t.Errorf("expected no relative label four days ahead, got %q/%v", label, ok)
+	}
+}
+
 func TestTaskFilterMatches(t *testing.T) {
 	now := time.Date(2026, 3, 10, 9, 0, 0, 0, time.UTC)
 	past := now.Add(-time.Hour)

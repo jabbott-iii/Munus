@@ -30,8 +30,8 @@ var version = "dev"
 
 func main() {
 	// The sqlite database is opened lazily by the root command, so help and
-	// version output never create a database file.
-	db := internal.NewDeferredDatabase(databasePathFromEnv())
+	// version output never create a database file or its directory.
+	db := internal.NewDeferredDatabaseAt(databaseLocation())
 
 	rootCmd := internal.NewRootCmd(db)
 	rootCmd.Version = version

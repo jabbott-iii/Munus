@@ -775,6 +775,33 @@ func TestFormCarriesWindowSizeToList(t *testing.T) {
 	}
 }
 
+// The TUI's alternate screen hides the location note written before it
+// starts, so every screen shows it (sanitised) and switching keeps it.
+func TestTUIShowsNoticeOnEveryScreen(t *testing.T) {
+	const notice = "munus: note: example\x1b[2J"
+	form := NewFormModelWithOptions(&MockStorage{}, tuiOptions{notice: notice})
+	if view := form.View(); !strings.Contains(view, "munus: note: example") || strings.Contains(view, "\x1b[2J") {
+		t.Fatalf("form view does not show the sanitised notice: %q", view)
+	}
+	model, _ := form.Update(tea.KeyMsg{Type: tea.KeyCtrlL})
+	list, ok := model.(*ListModel)
+	if !ok {
+		t.Fatalf("expected list model, got %T", model)
+	}
+	list.Update(DataLoadedMsg{tasks: nil})
+	if view := list.View(); !strings.Contains(view, "munus: note: example") || strings.Contains(view, "\x1b[2J") {
+		t.Fatalf("list view does not show the sanitised notice: %q", view)
+	}
+	model, _ = list.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'n'}})
+	back, ok := model.(*FormModel)
+	if !ok || back.notice != notice {
+		t.Fatalf("expected the new form to keep the notice, got %T %+v", model, model)
+	}
+	if view := NewFormModel(&MockStorage{}).View(); strings.Contains(view, "munus: note") {
+		t.Fatalf("unexpected notice without one: %q", view)
+	}
+}
+
 func TestFormEditsMultiByteTextByRune(t *testing.T) {
 	form := NewFormModel(&MockStorage{})
 	form.fields[titleField] = "Café"

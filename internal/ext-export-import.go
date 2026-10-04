@@ -848,20 +848,9 @@ func writeBackup(ctx context.Context, tasks []Task) (string, error) {
 		return "", fmt.Errorf("locate home directory for backup: %w", err)
 	}
 	dir := filepath.Join(home, ".munus", "backups")
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return "", err
-	}
-	// Tighten a directory created with broader permissions by older versions.
-	info, err := os.Stat(dir)
-	if err != nil {
-		return "", err
-	}
-	if info.Mode().Perm()&0o077 != 0 {
-		// A directory needs its execute bit to be entered, so 0700 (not 0600)
-		// is its owner-only mode; gosec's G302 assumes a regular file.
-		if err := os.Chmod(dir, 0o700); err != nil { // #nosec G302 -- owner-only directory mode, see above
-			return "", fmt.Errorf("restrict backup directory permissions: %w", err)
-		}
+	// Also tightens a directory created with broader permissions by older versions.
+	if err := ensurePrivateDir(dir); err != nil {
+		return "", fmt.Errorf("prepare backup directory: %w", err)
 	}
 
 	// CreateTemp gives each backup a unique, owner-only (0600) file, so two

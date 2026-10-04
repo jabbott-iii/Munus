@@ -97,3 +97,21 @@ backfilled from `git log` for the changes made after that file's last entry.
 - An independent review found no High or Medium issues; its findings were fixed. README,
   `CONTRIBUTING.md`, `maint.md`, `map.md`, `notes.md`, `plan.md` and `cybersec.md` updated. The
   workflow, `dependabot.yml` and `Makefile` changes are delivered as a patch.
+
+## 2026-10-03 — Plan 5: default database location and readable list deadlines (uncommitted)
+- A production-readiness review of `v3.0.0` (`40f26d4`) found that the default `./munus.db` made the
+  task list depend on the working directory and that `munus list` printed raw Go values; the
+  maintainer asked for both to be fixed (plan 5, decisions D-20…D-22).
+- P-059: without `MUNUS_DB_PATH` the database lives in the per-user data directory, created
+  owner-only on first use; an old `./munus.db` in the working directory produces a note on standard
+  error and is never used or changed. `internal.DatabaseLocation` and `NewDeferredDatabaseAt` added
+  (`NewDeferredDatabase` unchanged).
+- P-060: `munus list` shows deadlines as local `YYYY-MM-DD HH:MM` with the TUI's relative label, and
+  `none` without a deadline.
+- An independent review found no High or Medium issues; its Low findings were fixed (the TUI shows
+  the note on every screen, the PowerShell steps remove their export file, a test of the real
+  platform lookup), and `writeBackup` now shares `ensurePrivateDir`.
+- SEC-019 recorded (In Progress until the change is committed and CI passes on every platform).
+  README, `maint.md`, `map.md`, `notes.md`, `plan.md` and `cybersec.md` updated; no workflow,
+  `Makefile`, Dockerfile or dependency change. Behaviour change: next major release (D-22, maintainer
+  to confirm).

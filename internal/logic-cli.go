@@ -44,16 +44,17 @@ func NewRootCmd(db *Database) *cobra.Command {
 	cmd := &cobra.Command{
 		Use: "munus",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if err := openForCommand(cmd, db); err != nil {
+			notice, err := openForCommandWithNotice(cmd, db)
+			if err != nil {
 				return err
 			}
-			opts := tuiOptions{vimEnabled: vim}
+			opts := tuiOptions{vimEnabled: vim, notice: notice}
 			initialModel := tea.Model(NewFormModelWithOptions(db, opts))
 			if vim {
 				initialModel = NewListModelWithOptions(db, opts)
 			}
 			p := tea.NewProgram(initialModel, tea.WithAltScreen(), tea.WithContext(cmd.Context()))
-			_, err := p.Run()
+			_, err = p.Run()
 			return err
 		},
 	}
@@ -87,11 +88,26 @@ func argumentsValidated(cmd *cobra.Command) {
 // --version, help, completion and every argument or flag error (including
 // invalid flag values, which cobra cannot check) leave the database untouched.
 func openForCommand(cmd *cobra.Command, db *Database) error {
+	_, err := openForCommandWithNotice(cmd, db)
+	return err
+}
+
+// openForCommandWithNotice is openForCommand that also returns the notice it
+// wrote, for the TUI, whose alternate screen hides earlier terminal output.
+func openForCommandWithNotice(cmd *cobra.Command, db *Database) (string, error) {
 	argumentsValidated(cmd)
-	if err := db.open(); err != nil {
-		return fmt.Errorf("failed to initialize database: %w", err)
+	// The notice (for example about a munus.db left in the working directory
+	// by an older version) goes to the error output, so standard output such
+	// as `export --stdout` stays clean. It is advisory: failing to write it
+	// must not stop the command.
+	notice := db.takeNotice()
+	if notice != "" {
+		_, _ = fmt.Fprintln(cmd.ErrOrStderr(), notice)
 	}
-	return nil
+	if err := db.open(); err != nil {
+		return notice, fmt.Errorf("failed to initialize database: %w", err)
+	}
+	return notice, nil
 }
 
 // -------------------------------------- export ------------------------------------------------------------------------------------ //
@@ -605,15 +621,39 @@ func taskStatusLabel(task *ItemModel, now time.Time) string {
 	}
 }
 
+// PrintList writes tasks in the `munus list` format.
 func PrintList(w io.Writer, tasks []*ItemModel) {
+	printListAt(w, tasks, time.Now())
+}
+
+// printListAt is PrintList with the clock passed in; status labels and
+// deadlines are computed for now and shown in its location.
+func printListAt(w io.Writer, tasks []*ItemModel, now time.Time) {
 	for _, t := range tasks {
-		_, _ = fmt.Fprintf(w, "[%s] ID: %v- %s:\n%s\n -Deadline: %v\n -Complete: %t\n -Status: %s\n", GetTaskStatus(t), t.ID,
-			sanitizeForTerminal(t.Title, false), sanitizeForTerminal(t.Description, true), t.Deadline, t.Completed, itemStatus(t))
+		_, _ = fmt.Fprintf(w, "[%s] ID: %v- %s:\n%s\n -Deadline: %s\n -Complete: %t\n -Status: %s\n", taskStatusLabel(t, now), t.ID,
+			sanitizeForTerminal(t.Title, false), sanitizeForTerminal(t.Description, true), listDeadline(t, now), t.Completed, itemStatus(t))
 		if len(t.Tags) > 0 {
 			_, _ = fmt.Fprintf(w, " -Tags: %s\n", sanitizeForTerminal(strings.Join(t.Tags, ", "), false))
 		}
 		_, _ = fmt.Fprintln(w)
 	}
+}
+
+// listDeadline formats a task's deadline for `munus list`: "none" when it has
+// no deadline, otherwise the time in now's location in the layout `add
+// --deadline` accepts, followed for unfinished tasks by the TUI list's
+// relative label when the deadline is overdue or at most three days away.
+func listDeadline(t *ItemModel, now time.Time) string {
+	if t.Deadline == nil {
+		return "none"
+	}
+	text := t.Deadline.In(now.Location()).Format(deadlineInputLayout)
+	if !t.Completed {
+		if label, _, ok := relativeDeadlineLabel(*t.Deadline, now); ok {
+			text += " (" + label + ")"
+		}
+	}
+	return text
 }
 
 // NewListCmd lists tasks
@@ -653,7 +693,8 @@ func NewListCmd(db *Database) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			PrintList(cmd.OutOrStdout(), filterItems(tasks, f, time.Now()))
+			now := time.Now()
+			printListAt(cmd.OutOrStdout(), filterItems(tasks, f, now), now)
 			return nil
 		},
 	}

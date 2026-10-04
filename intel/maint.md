@@ -14,7 +14,7 @@ Munus is a single-binary Go CLI/TUI task manager backed by a local SQLite file.
 ## Layering
 | Layer | Location | Responsibility |
 |---|---|---|
-| Entry point | `main.go`, `database_path.go` | Resolve DB path (`MUNUS_DB_PATH`, default `munus.db` in CWD), create a *deferred* DB, set `main.version`, run root command, close DB |
+| Entry point | `main.go`, `database_path.go` | Resolve the DB location (`MUNUS_DB_PATH`, else `munus.db` in the per-user data directory, plus a notice when the working directory holds an old `./munus.db`), create a *deferred* DB, set `main.version`, run root command, close DB |
 | CLI | `internal/logic-cli.go` | Cobra commands: root (TUI), `add`, `edit`, `list` (filters), `complete`, `delete`, `export`, `import`; each command validates its arguments and flags, then calls `openForCommand` to open the DB |
 | TUI | `internal/ui-form.go`, `internal/ui-list.go` | Bubble Tea models for the task form (create and edit) and list/dashboard (status cycling, filters, help panel, import/export overlay, optional Vim mode) |
 | Domain helpers | `internal/logic-tui.go`, `internal/ext-deadline.go` | Status transitions, overdue/upcoming logic, calendar-day deadline labels (clock passed in), task filters, deadline parsing (bounded) |
@@ -39,6 +39,11 @@ Munus is a single-binary Go CLI/TUI task manager backed by a local SQLite file.
   which turns off cobra's usage output and opens the database. Argument and flag errors therefore
   print usage and never create or migrate the database; later errors print only the error line.
   Yes/no prompts go through `Confirm` (whole line, `y`/`yes` any case, EOF = no).
+- `openForCommand` writes the deferred database's notice (`DatabaseLocation.Notice`) once to
+  `cmd.ErrOrStderr()` before opening, so standard output stays clean (`export --stdout`); help,
+  version and argument errors never open the database and so never show it. The root command gets
+  the notice from `openForCommandWithNotice` and passes it to the TUI (`tuiOptions.notice`), which
+  shows it, sanitised, at the top of every screen because the alternate screen hides earlier output.
 - Ctrl+C in CLI commands keeps Go's default behaviour (decided as final, D-17 a): the process exits
   at once and SQLite rolls back an unfinished transaction. Do not add signal handling unless that
   decision is revisited; keep every multi-step write inside one storage transaction so an interrupt
@@ -83,7 +88,10 @@ Munus is a single-binary Go CLI/TUI task manager backed by a local SQLite file.
 - **Deadlines:** relative deadlines count from an injected clock (`parseDeadlineAt`,
   `relativeDeadline`; `ParseDeadline` passes `time.Now()`): `d`, `w` and `M` are calendar units
   added with `AddDate` (same clock time across DST), `h` and `m` are elapsed time added after them.
-  Absolute deadlines are read in the clock's location.
+  Absolute deadlines are read in the clock's location. `munus list` shows a deadline in the
+  clock's location in `deadlineInputLayout` (`listDeadline`), followed for unfinished tasks by the
+  TUI's relative label when it is overdue or at most three calendar days away
+  (`relativeDeadlineLabel`, which `deadlineLabel` uses too), and `none` without a deadline.
 - **Missing tasks:** `UpdateTask` and `DeleteTask` return `ErrTaskNotFound` for a task that no
   longer exists (never re-create it); the TUI reloads the list on that error.
 - **Export format v2** adds `status` and `tags`; v1 files (no status/tags) still import, with the
@@ -101,7 +109,23 @@ Munus is a single-binary Go CLI/TUI task manager backed by a local SQLite file.
   task list, rejects more than 50,000 tasks (`maxImportTasks`) and any data after the bundle, and
   otherwise decodes like `json.Unmarshal`. The order is options → size → decode → validation →
   storage, so a rejected file never reaches storage.
-- **Files:** new DB, export and backup files are `0600`, backup dir `0700`. New database files are
+- **Database location (plan 5):** `MUNUS_DB_PATH` wins when it is set and non-empty (the user
+  manages that path and its directory). Otherwise the database is `munus.db` in the per-user data
+  directory (`defaultDataDir`): `$XDG_DATA_HOME/munus` (absolute values only) or
+  `~/.local/share/munus` on Linux and other Unix systems, `~/Library/Application Support/munus` on
+  macOS, `%LOCALAPPDATA%\munus` on Windows (local, not roaming: it holds a SQLite file). The
+  location is resolved at start without side effects (`resolveDatabaseLocation`, inputs injected
+  for tests) and handed to `internal.NewDeferredDatabaseAt`; the first open creates the directory
+  (`ensurePrivateDir`), so help and version create nothing. A location that cannot be resolved (no
+  home directory or `%LOCALAPPDATA%`, a relative path, a `?` in the path, which sqlite would read as
+  parameters) is carried as `DatabaseLocation.Err` and reported by the first open with a hint to set
+  `MUNUS_DB_PATH`. When the default is used and the working directory holds a regular file
+  `munus.db` that is not the default database (where v3.0.0 and older kept it), the location carries
+  a notice; the old file is never opened, moved or changed (D-21). Backups stay in
+  `~/.munus/backups`.
+- **Files:** new DB, export and backup files are `0600`; the backup directory and the default data
+  directory are `0700`, both through `ensurePrivateDir` (created so, and tightened when others can
+  access them). New database files are
   pre-created `0600` with `O_EXCL` for plain paths, `?` DSNs and `file:` URIs (`databaseFilePath`
   mirrors go-sqlite3 and sqlite's URI rules; a pre-created file is removed again if the driver then
   rejects the DSN). Exports use a random temp file + rename and refuse to overwrite the active

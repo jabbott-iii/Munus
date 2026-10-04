@@ -1595,3 +1595,102 @@ func TestConsistencyTriggerDDLIsIdempotent(t *testing.T) {
 		}
 	}
 }
+
+// A deferred database creates its data directory (owner-only) only when it is
+// first opened, and the database file inside it is owner-only too.
+func TestDeferredDatabaseCreatesPrivateDataDirOnOpen(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "data", "munus")
+	path := filepath.Join(dir, "munus.db")
+	db := NewDeferredDatabaseAt(DatabaseLocation{Path: path, Dir: dir})
+	t.Cleanup(func() { _ = db.Close() })
+
+	if _, err := os.Stat(dir); !os.IsNotExist(err) {
+		t.Fatalf("expected no data directory before open, stat err=%v", err)
+	}
+	if err := db.open(); err != nil {
+		t.Fatalf("open failed: %v", err)
+	}
+	dirInfo, err := os.Stat(dir)
+	if err != nil || !dirInfo.IsDir() {
+		t.Fatalf("expected data directory after open, got %v (err %v)", dirInfo, err)
+	}
+	fileInfo, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("expected database file after open: %v", err)
+	}
+	if runtime.GOOS == "windows" {
+		return // Unix permission bits do not apply
+	}
+	if got := dirInfo.Mode().Perm(); got != 0o700 {
+		t.Errorf("data directory mode = %o, want 700", got)
+	}
+	if got := fileInfo.Mode().Perm(); got != 0o600 {
+		t.Errorf("database file mode = %o, want 600", got)
+	}
+}
+
+func TestDeferredDatabaseTightensExistingDataDir(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Unix permission bits do not apply on Windows")
+	}
+	dir := filepath.Join(t.TempDir(), "munus")
+	if err := os.Mkdir(dir, 0o755); err != nil {
+		t.Fatalf("setup failed: %v", err)
+	}
+	if err := os.Chmod(dir, 0o755); err != nil { // the umask may have removed bits
+		t.Fatalf("setup failed: %v", err)
+	}
+	db := NewDeferredDatabaseAt(DatabaseLocation{Path: filepath.Join(dir, "munus.db"), Dir: dir})
+	t.Cleanup(func() { _ = db.Close() })
+	if err := db.open(); err != nil {
+		t.Fatalf("open failed: %v", err)
+	}
+	info, err := os.Stat(dir)
+	if err != nil {
+		t.Fatalf("stat failed: %v", err)
+	}
+	if got := info.Mode().Perm(); got != 0o700 {
+		t.Fatalf("data directory mode = %o, want 700", got)
+	}
+}
+
+func TestDeferredDatabaseDataDirMustBeADirectory(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "munus")
+	if err := os.WriteFile(dir, []byte("not a directory"), 0o600); err != nil {
+		t.Fatalf("setup failed: %v", err)
+	}
+	db := NewDeferredDatabaseAt(DatabaseLocation{Path: filepath.Join(dir, "munus.db"), Dir: dir})
+	err := db.open()
+	if err == nil || !strings.Contains(err.Error(), "create data directory") {
+		t.Fatalf("expected a data directory error, got %v", err)
+	}
+}
+
+// A location that could not be resolved reports its error when the database
+// is opened and creates nothing.
+func TestDeferredDatabaseReportsLocationError(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "munus")
+	locErr := errors.New("no home directory")
+	db := NewDeferredDatabaseAt(DatabaseLocation{Path: filepath.Join(dir, "munus.db"), Dir: dir, Err: locErr})
+	if err := db.open(); !errors.Is(err, locErr) {
+		t.Fatalf("open error = %v, want %v", err, locErr)
+	}
+	if _, err := os.Stat(dir); !os.IsNotExist(err) {
+		t.Fatalf("expected nothing created, stat err=%v", err)
+	}
+}
+
+func TestDeferredDatabaseNoticeIsTakenOnce(t *testing.T) {
+	db := NewDeferredDatabaseAt(DatabaseLocation{Path: filepath.Join(t.TempDir(), "munus.db"), Notice: "hello"})
+	t.Cleanup(func() { _ = db.Close() })
+	if got := db.takeNotice(); got != "hello" {
+		t.Fatalf("first takeNotice = %q, want %q", got, "hello")
+	}
+	if got := db.takeNotice(); got != "" {
+		t.Fatalf("second takeNotice = %q, want empty", got)
+	}
+	var nilDB *Database
+	if got := nilDB.takeNotice(); got != "" {
+		t.Fatalf("nil takeNotice = %q, want empty", got)
+	}
+}
