@@ -81,14 +81,25 @@ Maintain `CONTRIBUTING.md` and `README.md` at the repository root.
 - If a requested change would conflict with a closed or active security
   remediation item, do not implement the conflicting portion. Document the
   conflict and propose a compliant alternative.
-### SEC-001 — Example issue title
+- `intel/cybersec.md` is public. Describe each issue's class, affected component,
+  impact, remediation and validation, but never include exploit payloads, crafted
+  inputs or step-by-step reproduction; keep those in the private GitHub security
+  advisory (see `SECURITY.md`).
+- Until the fix for a vulnerability is released, keep its item generic (affected
+  area, severity, status) and handle the details in the private advisory; complete
+  the item after the release.
+- Use this format for each item:
 
-- **Status:** Open
-- **Affected component:** `src/auth/`
-- **Risk:** [Concise description]
-- **Required remediation:** [Specific corrective action]
-- **Validation:** [Test, review, scan, or other evidence required]
-- **Resolution:** [Completed only when status is Closed]
+  ```markdown
+  ### SEC-NNN — <Issue title>
+
+  - **Status:** Open | In Progress | Blocked | Closed
+  - **Affected component:** `<path>`
+  - **Risk:** <Concise description>
+  - **Required remediation:** <Specific corrective action>
+  - **Validation:** <Test, review, scan, or other evidence required>
+  - **Resolution:** <Completed only when status is Closed>
+  ```
 
 ## Change discipline
 - Keep changes narrowly scoped to the requested task.

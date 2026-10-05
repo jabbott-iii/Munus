@@ -152,3 +152,54 @@ backfilled from `git log` for the changes made after that file's last entry.
 - The maintainer confirmed that CI passed on Linux, macOS and Windows for the default database
   location change (`dc6b120`), the remaining validation for SEC-019; it is now Closed and no
   security item is open.
+
+## 2026-10-05 — CD publishes the container image to GitHub Packages
+- `cd.yml`: the `build` job's Linux rows (amd64, arm64) also build the runtime image with the
+  release version and OCI labels, smoke-test it (`--version`, a database on a volume, license
+  files) and upload it as an artifact. Two new tag-only jobs run after the GitHub Release: `image`
+  (`packages: write` only) loads both images, pushes `<tag>-amd64` and `<tag>-arm64` to
+  `ghcr.io/jabbott-iii/munus` and joins them into `<tag>` (and `latest` for `vX.Y.Z` tags);
+  `image-attest` (OIDC, no write access) attests the index digest. No new actions or other
+  dependencies.
+- `Dockerfile`: the `builder` stage takes `VERSION` (default `dev`) and stamps `main.version`, so
+  the published image reports its release; builds without the argument are unchanged.
+- Validation: actionlint 1.7.12 with shellcheck 0.11.0 is clean on all workflows and hadolint
+  2.15.1 on the Dockerfile; the publish script ran against a local test registry with stand-in
+  images on Docker 29.8.2 with both the classic and the containerd image store (two-platform index,
+  tags, digest output, rejected version strings, platform mismatch). The full image build, the
+  smoke-test steps and the push to ghcr.io were not run (no registry access in the review
+  environment); P-061 covers the first real run.
+- README, `CONTRIBUTING.md`, `SECURITY.md`, `maint.md`, `map.md`, `cybersec.md`, `plan.md` and
+  `notes.md` updated. Uncommitted.
+- Independent review: no High or Medium findings. Applied: both images are checked before either
+  is pushed; the `builder` stage logs `go version` (SEC-018 evidence for the image binary); README
+  and `SECURITY.md` say that only the multi-platform tags are attested and that images come from
+  releases after `v3.0.1`; P-061 and N-043 cover first-publish permissions and `latest` on re-runs.
+  Re-tested after the fixes: actionlint and hadolint clean; the push script passes with each image
+  store and when the images are saved with one store and pushed with the other.
+
+## 2026-10-05 — Security write-ups redacted; documentation drift fixed
+- At the maintainer's request, exploit payloads, crafted inputs and step-by-step reproductions were
+  removed from `cybersec.md` (SEC-005, 007, 008, 009, 013, 014, 015, 016, 017). All 19 items are
+  kept with their issue, impact, remediation, validation and resolution; the earlier wording stays
+  in git history.
+- `AGENTS.md`: the example item is now a fenced `SEC-NNN` template (it read like an open SEC-001
+  for `src/auth/`); new rules keep payloads and reproduction steps out of public docs and handle a
+  vulnerability in a private advisory until its fix is released. `cybersec.md` Requirements say the
+  same.
+- `cd.yml`: the `build` job's checkout no longer persists credentials, as the release requirement
+  in `cybersec.md` already stated.
+- Release record: `v3.0.1` (tag on `1274b1b`, 2026-10-03) shipped plan 5 (`dc6b120`) and plan 4
+  phase B (`442e63c`), which earlier entries describe as not yet released; D-22 is settled by that
+  release. SEC-001, SEC-010 and SEC-019 now name their commit and release (`v2.1.1`, `v2.2.0`,
+  `v3.0.1`); SEC-005 names the renamed `validateTaskText`, SEC-009 the later 1,000,000,000 cap.
+- Correction to the "CD publishes the container image" entry above: `image-attest` has
+  `attestations: write` together with OIDC; it cannot write contents or packages.
+- Drift fixed: title and description limits are bytes (README, `cybersec.md`); README's text rules,
+  the `--file -` replace rule (`--yes` unless `--dry-run`), the CI description and an owner-only
+  Docker host directory; `maint.md` (the TUI and the import/export adapter use `Storage`, CLI
+  commands take `*Database`; `edit` rejects blank descriptions; the length limits are declared in
+  `ui-form.go`; `make check` compared with CI; ID-reference header, also in `cybersec.md`);
+  `map.md` (`CODE_OF_CONDUCT.md`, `go.mod`/`go.sum`, attestation permission); `SECURITY.md` (fixes
+  are developed privately; the GHCR image as an install source); `CONTRIBUTING.md` (run `make fuzz`
+  after export changes too). Uncommitted.

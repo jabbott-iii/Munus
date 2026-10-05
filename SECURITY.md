@@ -7,8 +7,9 @@ vulnerability privately.
 
 ## Supported versions
 
-Security fixes are made on `main` and shipped as a new patch release of the latest release
-line. Older releases are not patched; upgrade to the latest release to get fixes.
+Security fixes are developed privately (see [Reporting a vulnerability](#reporting-a-vulnerability)),
+merged to `main` and shipped as a new patch release of the latest release line. Older releases are
+not patched; upgrade to the latest release to get fixes.
 
 | Version | Supported |
 | ------- | --------- |
@@ -37,7 +38,8 @@ anyway.
 ### What to include
 
 - The affected version (`munus --version`), operating system and architecture, and whether you
-  used a release binary, an image built from the `Dockerfile` or a build from source.
+  used a release binary, the container image from GitHub Packages, an image built from the
+  `Dockerfile` or a build from source.
 - The affected area, for example import, export, the TUI, terminal output, the database or
   backup files, the `Dockerfile` or the release workflow.
 - Steps to reproduce, with a minimal input file or command line where relevant. Remove any real
@@ -80,8 +82,8 @@ In scope are vulnerabilities in the code and release artifacts of this repositor
   of database paths, including `MUNUS_DB_PATH`;
 - deadline parsing or other input that can exhaust memory or crash Munus;
 - the `Dockerfile` and the image it builds, for example privileges or data on its volume;
-- the build and release pipeline: GitHub Actions workflows, release archives, `checksums.txt`
-  and build provenance attestations;
+- the build and release pipeline: GitHub Actions workflows, release archives, `checksums.txt`,
+  the container image published to GitHub Packages and build provenance attestations;
 - a known vulnerability in a dependency that is reachable from Munus code.
 
 Out of scope:
@@ -105,3 +107,5 @@ research. Munus does not offer a bug bounty.
 
 Release archives are published with `checksums.txt`, and releases from `v3.0.0` onward carry
 a GitHub build provenance attestation. See [Install](README.md#install) for how to verify them.
+The multi-platform container image tags published to GitHub Packages (releases after `v3.0.1`)
+carry one too; see [Docker](README.md#docker).

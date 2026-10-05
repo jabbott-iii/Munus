@@ -9,21 +9,22 @@ Munus/
 │   ├── logic-cli.go        # cobra commands (root/TUI, add, edit, list, complete, delete, export, import)
 │   ├── logic-tui.go        # status transitions, deadline labels, filters, overdue/upcoming helpers
 │   ├── ext-deadline.go     # ParseDeadline: absolute + bounded relative (m,h,d,w,M)
-│   ├── ext-text.go         # text limits, control/bidi-char and UTF-8 validation, tag rules, terminal sanitising (incl. stderr writer)
+│   ├── ext-text.go         # title/description length checks, control/bidi-char and UTF-8 validation, tag rules, terminal sanitising (incl. stderr writer)
 │   ├── ext-export-import.go# JSON v2 export, import (v1/v2, file or stdin; streaming decode, 50k-task cap) plan/apply, merge, backups
 │   ├── ui-form.go          # Bubble Tea task-entry form (insert/normal vim modes)
 │   ├── ui-list.go          # Bubble Tea list/dashboard, delete confirm, transfer overlay (import/export steps run as background commands)
 │   └── *_test.go           # unit tests per file
 ├── tools/licenses/         # stdlib-only generator/check for THIRD_PARTY_LICENSES and the NOTICE module list (+ embedded musl COPYRIGHT)
 ├── THIRD_PARTY_LICENSES    # generated full license texts (Go, SQLite, musl, every compiled module); shipped in archives and image
-├── Dockerfile, .dockerignore # CGO build on golang:1.26-alpine3.24 (pinned apk): image (→ alpine:3.24, non-root, license files) and `static` target (musl static Linux release binary)
+├── Dockerfile, .dockerignore # CGO build on golang:1.26-alpine3.24 (pinned apk): image (→ alpine:3.24, non-root, license files; published to ghcr.io by cd.yml) and `static` target (musl static Linux release binary)
 ├── Makefile                # dev targets (build/test/race/cover/vet/fmt/lint/check/fuzz/licenses) + release tagging
 ├── .github/workflows/      # ci.yml, cd.yml, docker.yml, security.yml (actions SHA-pinned)
 ├── .github/dependabot.yml  # weekly grouped updates: actions, Go modules, Docker images
 ├── .github/pull_request_template.md # contributor PR checklist (mirrors CONTRIBUTING.md)
 ├── .devcontainer/          # Ubuntu + Go + neovim + docker-outside-of-docker
 ├── intel/                  # agent/maintainer knowledge base (this folder)
-└── AGENTS.md, README.md, CONTRIBUTING.md, SECURITY.md, LICENSE, NOTICE, CODEOWNERS
+├── go.mod, go.sum          # module github.com/jabbott-iii/Munus (go 1.26.0)
+└── AGENTS.md, README.md, CONTRIBUTING.md, CODE_OF_CONDUCT.md, SECURITY.md, LICENSE, NOTICE, CODEOWNERS
 ```
 
 ## Runtime flow
@@ -73,6 +74,16 @@ erDiagram
 | Workflow | Trigger | Does |
 |---|---|---|
 | `ci.yml` | push/PR any branch | latest Go 1.26.x: tidy check, vet, golangci-lint, tests+coverage incl. the `THIRD_PARTY_LICENSES`/`NOTICE` check (Linux/macOS/Windows), native CGO build + smoke run |
-| `cd.yml` | `v*` tag | per-OS/arch native CGO builds: linux amd64/arm64 static musl via the Dockerfile `static` target (smoke-run also on Debian 11 and Alpine), darwin arm64 and amd64 (`macos-15-intel`), windows amd64 and arm64 (pinned llvm-mingw), others with latest Go 1.26.x and no build cache → archives with `LICENSE`/`NOTICE`/`THIRD_PARTY_LICENSES`, checksums, build provenance attestation, GitHub Release (the package/attest job has `contents: read` plus OIDC; only the tag-only publishing job has `contents: write`) |
+| `cd.yml` | `v*` tag | per-OS/arch native CGO builds: linux amd64/arm64 static musl via the Dockerfile `static` target (smoke-run also on Debian 11 and Alpine), darwin arm64 and amd64 (`macos-15-intel`), windows amd64 and arm64 (pinned llvm-mingw), others with latest Go 1.26.x and no build cache → archives with `LICENSE`/`NOTICE`/`THIRD_PARTY_LICENSES`, checksums, build provenance attestation, GitHub Release (the package/attest job has `contents: read` plus OIDC; only the tag-only publishing job has `contents: write`); the Linux rows also build and smoke-test the container image, which the tag-only `image` job (`packages: write` only) pushes to `ghcr.io` for linux/amd64 and arm64 and `image-attest` (OIDC and `attestations: write` only) attests |
 | `docker.yml` | push/PR to main | build image, `--help`, DB-on-volume, `TZ`, license-file and thread-stack checks; static Linux binary (amd64, arm64) built and run on the runner, Debian 11 and Alpine |
 | `security.yml` | push/PR + weekly | CodeQL (security-extended), gosec (non-failing) with SARIF upload, govulncheck (fails on reachable vulnerabilities) |
+
+### Release jobs (`cd.yml`)
+```mermaid
+flowchart LR
+  build["build: 6 OS/arch rows<br/>Linux rows also build and test the image<br/>contents: read"] -->|binaries| package["package: archives, checksums, attestation<br/>contents: read + OIDC"]
+  package --> release["release (tags): GitHub Release<br/>contents: write"]
+  release --> image["image (tags): push to ghcr.io<br/>packages: write"]
+  build -.->|image archives| image
+  image -->|index digest| attest["image-attest (tags)<br/>OIDC + attestations: write"]
+```

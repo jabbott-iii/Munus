@@ -18,7 +18,9 @@ COPY . .
 # stack unless the program's PT_GNU_STACK asks for more; cgo calls into SQLite
 # run on those threads, so both builds request glibc's usual 8 MiB.
 FROM source AS builder
-RUN CGO_ENABLED=1 go build -ldflags "-extldflags '-Wl,-z,stack-size=8388608'" -o /out/munus .
+ARG VERSION=dev
+RUN go version \
+    && CGO_ENABLED=1 go build -ldflags "-X main.version=${VERSION} -extldflags '-Wl,-z,stack-size=8388608'" -o /out/munus .
 
 # Fully static Linux release binary (cd.yml): musl instead of glibc, so no LGPL
 # static-linking terms apply and it runs on any Linux distribution. Only built

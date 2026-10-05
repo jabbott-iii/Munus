@@ -24,7 +24,7 @@ make test
 - The license header must be maintained on every source file.
 - Format the code: `gofmt -s -w .` (or `make fmt`).
 - Run the local checks: `make check` (formatting check, `go vet`, tests, race-detector tests and
-  golangci-lint when installed). After changing deadline parsing, text handling or import, also
+  golangci-lint when installed). After changing deadline parsing, text handling, import or export, also
   run `make fuzz`.
 - After adding, removing or updating a Go module, run `make licenses` (regenerates
   `THIRD_PARTY_LICENSES`; never edit it by hand) and keep the module list in `NOTICE` in step;
@@ -58,4 +58,6 @@ make test
 ## Releases
 Maintainers release by tagging: `make release VERSION=vX.Y.Z`. The CD workflow builds, smoke-tests
 and publishes the binaries (each archive with `LICENSE`, `NOTICE` and `THIRD_PARTY_LICENSES`) and
-attests their build provenance.
+attests their build provenance. It also builds and smoke-tests the container image for linux/amd64
+and linux/arm64 and, after the GitHub Release, publishes it to GitHub Packages
+(`ghcr.io/jabbott-iii/munus`) and attests it.

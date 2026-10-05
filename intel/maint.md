@@ -1,8 +1,9 @@
 # Architecture & Maintainability Guidance (authoritative)
 
 > Authoritative per `AGENTS.md`. `CONTRIBUTING.md` must stay consistent with this file.
-> Decision, plan-item and note IDs (D-…, P-…, N-…) refer to `intel/plan.md` and `intel/notes.md`
-> as of commit `442e63c`; both were cleared on 2026-10-03 (see `history.md`).
+> Decision, plan-item and note IDs up to D-22, P-060 and N-041 refer to `intel/plan.md` and
+> `intel/notes.md` as of commit `442e63c` (both were cleared on 2026-10-03, see `history.md`);
+> later IDs (P-061, N-042 onward) refer to the current files.
 
 ## Overview
 Munus is a single-binary Go CLI/TUI task manager backed by a local SQLite file.
@@ -20,14 +21,16 @@ Munus is a single-binary Go CLI/TUI task manager backed by a local SQLite file.
 | CLI | `internal/logic-cli.go` | Cobra commands: root (TUI), `add`, `edit`, `list` (filters), `complete`, `delete`, `export`, `import`; each command validates its arguments and flags, then calls `openForCommand` to open the DB |
 | TUI | `internal/ui-form.go`, `internal/ui-list.go` | Bubble Tea models for the task form (create and edit) and list/dashboard (status cycling, filters, help panel, import/export overlay, optional Vim mode) |
 | Domain helpers | `internal/logic-tui.go`, `internal/ext-deadline.go` | Status transitions, overdue/upcoming logic, calendar-day deadline labels (clock passed in), task filters, deadline parsing (bounded) |
-| Text safety | `internal/ext-text.go` | Shared length limits, control-character/UTF-8 validation, tag rules, terminal sanitising |
+| Text safety | `internal/ext-text.go` | Title/description length checks (limits declared in `ui-form.go`), control-character/UTF-8 validation, tag rules, terminal sanitising |
 | Transfer | `internal/ext-export-import.go` | Versioned JSON export (v2; imports v1 and v2), plan/apply import (merge/replace), stdin input, backups |
 | Storage | `internal/database.go` | `Storage` interface, `Database` (gorm) implementation incl. tags, migration and consistency triggers, all shared types |
 | Release tooling | `tools/licenses/` | Generates and checks `THIRD_PARTY_LICENSES` and the `NOTICE` module list (not part of the binary) |
 
 ## Conventions
 - All shared types (models, DTOs, options) live in `internal/database.go`.
-- UI and CLI code depend on the `Storage` interface; tests use it for fakes. Optional
+- The TUI models and the import/export service (`TaskServiceAdapter`) depend on the `Storage`
+  interface; tests use it for fakes. CLI commands take the deferred `*Database`, open it with
+  `openForCommand` and wrap it in `TaskServiceAdapter` for import and export. Optional
   capabilities are discovered with small unexported interfaces (e.g. `databaseFiler`)
   rather than type-asserting to `*Database`.
 - Follow `intel/golang.md`. Storage methods and import/export/backup functions take
@@ -109,7 +112,7 @@ Munus is a single-binary Go CLI/TUI task manager backed by a local SQLite file.
   back to `updated_at` for completed tasks without it.
 - **Text policy:** `add`, `edit`, the TUI form and `import --strict` reject control characters
   (C0/C1 and the bidi embedding/override/isolate controls U+202A–U+202E, U+2066–U+2069), invalid
-  UTF-8, over-length text and blank titles (`add` and the form also blank descriptions). Default
+  UTF-8, over-length text and blank titles (`add`, `edit` and the form also blank descriptions). Default
   import strips control characters (CRLF → LF), shortens text over the byte limits at a rune
   boundary (`shortenToLimit`; plan 4, D-13; counted as `Shortened` in the plan and result) and then
   stores a title that is blank as `(untitled)`, so older exports/backups always restore. All task text written to the terminal goes
@@ -176,7 +179,8 @@ Munus is a single-binary Go CLI/TUI task manager backed by a local SQLite file.
   `HOME=/app/data`. Stages: `source` (toolchain, modules, sources) → `builder` (image binary,
   dynamic musl) and `static-builder` → `static` (release binary, only built when targeted) → the
   runtime image, which also carries `LICENSE`, `NOTICE` and `THIRD_PARTY_LICENSES` in
-  `/usr/share/licenses/munus/`. Both builds link with `-Wl,-z,stack-size=8388608` (musl's default
+  `/usr/share/licenses/munus/`. Both builds stamp `main.version` from the `VERSION` build argument
+  (default `dev`; `cd.yml` passes the tag) and link with `-Wl,-z,stack-size=8388608` (musl's default
   thread stack is 128 KiB; `docker.yml` checks the image binary). Builder
   (`golang:1.26-alpine3.24`) and runtime (`alpine:3.24`) use the same Alpine release (same musl),
   and `apk` packages are pinned (`build-base`, `ca-certificates`, `tzdata`; the latter lets `TZ`
@@ -201,13 +205,22 @@ Munus is a single-binary Go CLI/TUI task manager backed by a local SQLite file.
   archives with the license files, writes `checksums.txt` and attests the archives and checksums
   with SHA-pinned `actions/attest-build-provenance` (attestations need a public repository or
   GitHub Enterprise Cloud); the `release` job (tags only, `contents: write`, no OIDC) downloads
-  those files and publishes them. The version string passed to the builds must match
-  `^[0-9A-Za-z._+-]+$`. Linux builds use the Dockerfile's images with `docker build --pull` (latest
-  Go 1.26 patch in `golang:1.26-alpine3.24`; `go version` is printed in the build log). Dependabot
-  (`.github/dependabot.yml`) proposes weekly, grouped updates for GitHub Actions (SHA pins), Go
-  modules and Docker images; Go minor releases of the `golang` image are ignored because they also
-  change `go.mod` and CI. The smoke-test images `debian:11` and `alpine:3.24` in `cd.yml` and
-  `docker.yml` are not tracked by Dependabot; move them together with the Alpine release.
+  those files and publishes them. Container image (GitHub Packages): the `build` job's Linux rows
+  also build the runtime image (`--pull`, `--provenance=false`, OCI labels for source, revision and
+  version), smoke-test it (`--version`, a database on a volume, license files) and upload it with
+  `docker save`; the `image` job (tags only, after `release`; `packages: write` only, no checkout,
+  no build, no OIDC) loads both images, checks each one's platform, pushes `<tag>-amd64` and
+  `<tag>-arm64` and joins them with `docker buildx imagetools create` into
+  `ghcr.io/<owner>/munus:<tag>` (plus `latest` for `vX.Y.Z` tags; a `+` in the tag becomes `_`);
+  `image-attest` (`contents: read`, `id-token: write`, `attestations: write`) attests that index
+  digest only, without pushing the attestation to the registry. Set no index annotations (N-042). The
+  version string passed to the builds must match `^[0-9A-Za-z._+-]+$`. Linux builds use the
+  Dockerfile's images with `docker build --pull` (latest Go 1.26 patch in `golang:1.26-alpine3.24`;
+  `go version` is printed in the build log). Dependabot (`.github/dependabot.yml`) proposes weekly,
+  grouped updates for GitHub Actions (SHA pins), Go modules and Docker images; Go minor releases of
+  the `golang` image are ignored because they also change `go.mod` and CI. The smoke-test images
+  `debian:11` and `alpine:3.24` in `cd.yml` and `docker.yml` are not tracked by Dependabot; move
+  them together with the Alpine release.
 - Smoke tests in steps with `shell: bash` (which adds `pipefail`) use `munus … | grep pattern >
   /dev/null`, not `grep -q`: `grep -q` exits at the first match and munus can then fail with
   SIGPIPE (about 5% of runs, N-038).
@@ -219,7 +232,9 @@ Munus is a single-binary Go CLI/TUI task manager backed by a local SQLite file.
 - Import reads the current tasks, writes the backup and replaces the tasks inside one storage
   transaction (`ReplaceAllTasksFunc`), so concurrent writes are never lost; the preview can still
   differ from the result if another process writes between plan and apply.
-- The Makefile targets (`make check`) mirror CI locally; keep them in step with `ci.yml`. CI, CD and
+- `make check` (fmt-check, vet, test, race, lint) covers CI's vet, lint and test steps locally and
+  adds formatting and race checks that CI does not run (CI's `go mod tidy` drift check has no
+  target); keep them in step with `ci.yml`. CI, CD and
   the govulncheck job use the latest Go 1.26 patch release (`go-version: "1.26.x"`,
   `check-latest: true`); `go.mod` keeps the minimum version. Release builds do not use the setup-go
   cache.

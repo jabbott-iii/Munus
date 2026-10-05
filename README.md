@@ -82,6 +82,9 @@ Optional: archives and `checksums.txt` of releases built by the current release 
 gh attestation verify munus_linux_amd64.tar.gz --repo jabbott-iii/Munus
 ```
 
+Releases after `v3.0.1` also publish a container image for Linux (amd64 and arm64) to GitHub
+Packages; see [Docker](#docker).
+
 ### Build from source
 
 Prerequisites:
@@ -119,8 +122,9 @@ Munus is organized into focused command groups:
 ### add
 
 Title (`-t`) and description (`-d`) are required; the deadline (`-n`) and tags (`--tag`) are
-optional. Titles are limited to 100 characters and descriptions to 500, and neither may be blank;
-control characters (including bidirectional override characters) are rejected. Tags are 1–32
+optional. Titles are limited to 100 bytes and descriptions to 500 bytes (UTF-8, so non-ASCII text
+fits fewer characters), and neither may be blank. Control characters (descriptions may contain
+line breaks and tabs), bidirectional control characters and invalid UTF-8 are rejected. Tags are 1–32
 letters, digits, `-` or `_`, stored lowercase, at most 10 per task. Relative deadlines count
 from now: `d`, `w` and `M` are calendar days, weeks and months (the same clock time, also across a
 daylight-saving change), `h` and `m` are elapsed hours and minutes.
@@ -213,7 +217,7 @@ boundary; the import plan and result report how many tasks in the file were shor
 (`Shortened: …`, `shortened=…`).
 
 - munus import --file tasks-backup.json — merge tasks from a JSON file (default `--mode merge`)
-- munus import --file - — read the export from standard input (`--mode replace` then needs `--yes`)
+- munus import --file - — read the export from standard input (`--mode replace` then needs `--yes`, except with `--dry-run`)
 - munus import --file tasks-backup.json --skip-existing — keep local tasks when imported IDs collide
 - munus import --file tasks-backup.json --on-conflict skip|overwrite|rename — choose how changed tasks with the same ID are handled (default `overwrite`)
 - munus import --file tasks-backup.json --id-strategy regenerate — import every task as a new task with a new ID (default `preserve`)
@@ -309,6 +313,26 @@ The image stores its database at `/app/data/munus.db` (`MUNUS_DB_PATH`) and runs
 an unprivileged user (UID 10001). Mount `/app/data` to keep your tasks. `LICENSE`,
 `NOTICE` and `THIRD_PARTY_LICENSES` are in `/usr/share/licenses/munus/`.
 
+### Pull from GitHub Packages
+
+Releases after `v3.0.1` also publish the image to GitHub Packages (GitHub Container Registry)
+for linux/amd64 and linux/arm64. Tags: `vX.Y.Z` (both platforms), `vX.Y.Z-amd64` and
+`vX.Y.Z-arm64` (one platform each), and `latest` (the most recently published `vX.Y.Z` release):
+```bash
+docker pull ghcr.io/jabbott-iii/munus:latest
+docker run --rm -it -v munus-data:/app/data ghcr.io/jabbott-iii/munus:latest
+```
+
+Optional: the multi-platform tags (`vX.Y.Z`, `latest`) carry a build provenance attestation,
+which the [GitHub CLI](https://cli.github.com/) can verify; the per-platform tags have none of
+their own:
+```bash
+gh attestation verify oci://ghcr.io/jabbott-iii/munus:vX.Y.Z --repo jabbott-iii/Munus
+```
+
+The examples below use a locally built `munus:latest`; to use the published image, replace it
+with `ghcr.io/jabbott-iii/munus:<tag>`.
+
 ### Build
 ```bash
 docker build -t munus:latest .
@@ -326,9 +350,9 @@ With a named volume:
 docker run --rm -it -v munus-data:/app/data munus:latest
 ```
 
-With a host directory (run as your own user so the directory stays writable):
+With a host directory (created owner-only; run as your own user so it stays writable):
 ```bash
-mkdir -p ~/.munus
+mkdir -p -m 700 ~/.munus
 docker run --rm -it \
   --user "$(id -u):$(id -g)" \
   -v ~/.munus:/app/data \
@@ -374,8 +398,9 @@ go test ./...
 go test -race ./...
 ```
 
-CI (`.github/workflows/ci.yml`) additionally runs `go mod tidy` drift checks,
-golangci-lint v2.13.2 and a native build smoke test on Linux, macOS and Windows. The Docker
+CI (`.github/workflows/ci.yml`) runs a `go mod tidy` drift check, `go vet`, golangci-lint v2.13.2,
+the tests with coverage and a native build smoke test on Linux, macOS and Windows; the formatting
+check and the race detector run only locally (`make check`). The Docker
 workflow also builds the static Linux binary for amd64 and arm64 and runs it on the runner,
 on Debian 11 and on Alpine.
 

@@ -34,6 +34,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       # Linux builds use Go from the Dockerfile's builder image instead.
       - name: Set up Go
@@ -143,8 +145,58 @@ jobs:
           path: ${{ steps.build.outputs.binary }}
           if-no-files-found: error
 
+      # The image for GitHub Packages is built on the same native Linux runners
+      # (go-sqlite3 needs CGO) and handed to the publishing job as an artifact,
+      # so no job that builds or runs code can write packages. BuildKit's own
+      # provenance is off; the image-attest job attests the pushed image.
+      - name: Build container image
+        if: matrix.goos == 'linux'
+        shell: bash
+        env:
+          GOARCH: ${{ matrix.goarch }}
+          VERSION: ${{ steps.meta.outputs.tag }}
+        run: |
+          docker build --pull --provenance=false --build-arg "VERSION=${VERSION}" \
+            --label "org.opencontainers.image.source=${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}" \
+            --label "org.opencontainers.image.revision=${GITHUB_SHA}" \
+            --label "org.opencontainers.image.version=${VERSION}" \
+            --tag "munus:release-${GOARCH}" .
+
+      - name: Smoke test container image
+        if: matrix.goos == 'linux'
+        shell: bash
+        env:
+          IMAGE: munus:release-${{ matrix.goarch }}
+          VERSION: ${{ steps.meta.outputs.tag }}
+        run: |
+          test "$(docker run --rm "$IMAGE" --version)" = "munus version ${VERSION}"
+          docker volume create munus-release-smoke > /dev/null
+          docker run --rm -v munus-release-smoke:/app/data "$IMAGE" add --title smoke --description "release image smoke test"
+          docker run --rm -v munus-release-smoke:/app/data "$IMAGE" list | grep smoke > /dev/null
+          for file in LICENSE NOTICE THIRD_PARTY_LICENSES; do
+            docker run --rm --entrypoint cat "$IMAGE" "/usr/share/licenses/munus/$file" | cmp - "$file"
+          done
+
+      - name: Save container image
+        if: matrix.goos == 'linux'
+        shell: bash
+        env:
+          GOARCH: ${{ matrix.goarch }}
+        run: |
+          mkdir -p image
+          docker save --output "image/munus_linux_${GOARCH}.tar" "munus:release-${GOARCH}"
+
+      - name: Upload container image
+        if: matrix.goos == 'linux'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: image-linux-${{ matrix.goarch }}
+          path: image/munus_linux_${{ matrix.goarch }}.tar
+          if-no-files-found: error
+
   # Packaging and attestation run without write access to the repository; only
-  # the publishing job below can write, and it cannot mint OIDC tokens.
+  # the publishing jobs below (release, image) can write, and they cannot mint
+  # OIDC tokens.
   package:
     name: Package and attest
     needs: build
@@ -242,3 +294,102 @@ jobs:
             dist/*.tar.gz
             dist/*.zip
             dist/checksums.txt
+
+  # Publishes the tested images to GitHub Packages (ghcr.io) as one
+  # multi-platform image. Only this job can write packages; it checks out and
+  # builds nothing, and it cannot mint OIDC tokens.
+  image:
+    name: Publish container image
+    needs: release
+    if: github.ref_type == 'tag'
+    runs-on: ubuntu-latest
+    permissions:
+      packages: write
+    outputs:
+      name: ${{ steps.push.outputs.name }}
+      digest: ${{ steps.push.outputs.digest }}
+
+    steps:
+      - name: Download container images
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: image-linux-*
+          merge-multiple: true
+          path: image
+
+      - name: Log in to GitHub Container Registry
+        shell: bash
+        env:
+          REGISTRY_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin <<< "$REGISTRY_TOKEN"
+
+      # Tags: the git tag (multi-platform; the digest image-attest attests), the
+      # git tag with -amd64 or -arm64 (one platform each) and, for vX.Y.Z tags,
+      # latest, which follows the most recently published one. Image tags cannot
+      # contain "+", so semver build metadata uses "_" instead. Both images are
+      # checked before anything is pushed.
+      - name: Push image
+        id: push
+        shell: bash
+        env:
+          VERSION: ${{ github.ref_name }}
+        run: |
+          image="ghcr.io/${GITHUB_REPOSITORY,,}"
+          tag="${VERSION//+/_}"
+          if [[ ! "$tag" =~ ^[0-9A-Za-z_][0-9A-Za-z._-]{0,100}$ ]]; then
+            echo "unexpected version string: $VERSION" >&2
+            exit 1
+          fi
+          digest_of() {
+            local digest
+            digest="$(docker buildx imagetools inspect "$1" --format '{{json .Manifest}}' | jq -r .digest)"
+            if [[ ! "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+              echo "unexpected digest for $1: $digest" >&2
+              return 1
+            fi
+            echo "$digest"
+          }
+          for arch in amd64 arm64; do
+            docker load --input "image/munus_linux_${arch}.tar"
+            platform="$(docker image inspect --format '{{.Os}}/{{.Architecture}}' "munus:release-${arch}")"
+            if [ "$platform" != "linux/${arch}" ]; then
+              echo "munus:release-${arch} is built for ${platform}" >&2
+              exit 1
+            fi
+          done
+          sources=()
+          for arch in amd64 arm64; do
+            docker tag "munus:release-${arch}" "${image}:${tag}-${arch}"
+            docker push "${image}:${tag}-${arch}"
+            digest="$(digest_of "${image}:${tag}-${arch}")"
+            sources+=("${image}@${digest}")
+          done
+          tags=(--tag "${image}:${tag}")
+          if [[ "$VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            tags+=(--tag "${image}:latest")
+          fi
+          docker buildx imagetools create "${tags[@]}" "${sources[@]}"
+          digest="$(digest_of "${image}:${tag}")"
+          echo "name=${image}" >> "$GITHUB_OUTPUT"
+          echo "digest=${digest}" >> "$GITHUB_OUTPUT"
+
+  # Attests the published image. This job can mint OIDC tokens but cannot
+  # write packages or contents; the attestation is stored with GitHub, not in
+  # the registry.
+  image-attest:
+    name: Attest container image
+    needs: image
+    if: github.ref_type == 'tag'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+
+    steps:
+      # Verify with: gh attestation verify oci://ghcr.io/jabbott-iii/munus:<tag> --repo jabbott-iii/Munus
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-name: ${{ needs.image.outputs.name }}
+          subject-digest: ${{ needs.image.outputs.digest }}
