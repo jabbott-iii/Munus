@@ -14,7 +14,7 @@ Munus/
 │   ├── ui-form.go          # Bubble Tea task-entry form (insert/normal vim modes)
 │   ├── ui-list.go          # Bubble Tea list/dashboard, delete confirm, transfer overlay (import/export steps run as background commands)
 │   └── *_test.go           # unit tests per file
-├── assets/                 # demo.gif (TUI demo) and demo.tape (VHS script that regenerates it against a temporary database)
+├── assets/                 # TUI-demo.gif, CLI-demo.gif and the VHS tapes (*.tape) that regenerate them against a temporary database
 ├── tools/licenses/         # stdlib-only generator/check for THIRD_PARTY_LICENSES and the NOTICE module list (+ embedded musl COPYRIGHT)
 ├── THIRD_PARTY_LICENSES    # generated full license texts (Go, SQLite, musl, every compiled module); shipped in archives and image
 ├── Dockerfile, .dockerignore # CGO build on golang:1.26-alpine3.24 (pinned apk): image (→ alpine:3.24, non-root, license files; published to ghcr.io by cd.yml) and `static` target (musl static Linux release binary)

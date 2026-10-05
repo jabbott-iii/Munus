@@ -4,13 +4,13 @@
 # the "JetBrainsMono Nerd Font Mono" font (the list headings use Nerd Font
 # glyphs). A ./munus from `make build` is used if present, else munus on PATH:
 #
-#   make build && vhs assets/demo.tape
+#   make build && vhs assets/TUI-demo.tape
 #
 # The tape points MUNUS_DB_PATH at a new temporary database, so your own tasks
 # are never read or changed, and removes it at the end. Deadlines are relative
 # to the time of recording.
 
-Output assets/demo.gif
+Output assets/TUI-demo.gif
 
 Set Shell "bash"
 Set FontFamily "JetBrainsMono Nerd Font Mono"
@@ -25,9 +25,9 @@ Set CursorBlink false
 Set Framerate 24
 Set TypingSpeed 55ms
 
-# Seed a throwaway database (not recorded).
+# Seed a throwaway database (not recorded); stop if it cannot be created.
 Hide
-Type@1ms `export PATH="$PWD:$PATH" MUNUS_DB_PATH="$(mktemp -d)/munus.db"`
+Type@1ms `export PATH="$PWD:$PATH" && demo_dir="$(mktemp -d)" && export MUNUS_DB_PATH="$demo_dir/munus.db" || exit 1`
 Enter
 Type@1ms `munus add -t "Renew TLS certificates" -d "Rotate the internal CA-signed certs on the build hosts." -n "$(date -d yesterday +%F) 17:00" --tag ops >/dev/null`
 Enter
@@ -138,5 +138,5 @@ Enter
 Sleep 3.5s
 
 Hide
-Type `rm -rf -- "$(dirname -- "$MUNUS_DB_PATH")"`
+Type `rm -rf -- "${demo_dir:?}"`
 Enter
