@@ -45,7 +45,7 @@ later IDs (P-061, N-042 onward) refer to the current files.
 
 ### SEC-001 — User data files created world-readable
 - **Status:** Closed
-- **Affected component:** `internal/ext-export-import.go` (`ExportToFile`, `writeBackup`), SQLite file created by `NewDatabase`
+- **Affected component:** `../pkg` (`ExportToFile`, `writeBackup`), SQLite file created by `NewDatabase`
 - **Risk:** Low. Exports and backups are written `0644` and the backup dir `0755`; the DB file is created with default umask (observed `0644`). On shared hosts other users can read task data. Re-verified 2026-09-23 (umask 022: DB/export `-rw-r--r--`, backup dir `drwxr-xr-x`).
 - **Required remediation:** Write exports/backups with `0600`, backup dir `0700`; consider tightening DB file permissions after creation.
 - **Validation:** Unit test asserting file mode on non-Windows; manual `ls -l` check.
@@ -101,7 +101,7 @@ later IDs (P-061, N-042 onward) refer to the current files.
 
 ### SEC-008 — Unbounded deadline input can exhaust memory
 - **Status:** Closed
-- **Affected component:** `internal/ext-deadline.go` (`ParseRelativeTime`)
+- **Affected component:** `../pkg` (`ParseRelativeTime`)
 - **Risk:** Low (local, self-inflicted; import does not parse deadline strings). A very large month count drove an allocation proportional to its value before validation (reproduced as an out-of-memory crash). Related overflow: large unit values wrap `time.Duration` (N-013).
 - **Required remediation:** Bound numeric values (e.g. months ≤ 1200, total duration ≤ ~100 years) before building strings or multiplying; replace the string-length check.
 - **Validation:** Tests for huge month/day values return an error promptly.

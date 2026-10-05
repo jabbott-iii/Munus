@@ -24,7 +24,7 @@ import (
 	"runtime"
 	"strings"
 
-	"github.com/jabbott-iii/Munus/internal"
+	"github.com/jabbott-iii/Munus/pkg"
 )
 
 const (

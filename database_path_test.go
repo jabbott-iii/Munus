@@ -25,7 +25,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jabbott-iii/Munus/internal"
+	"github.com/jabbott-iii/Munus/pkg"
 )
 
 // fakeEnv returns a getenv function that sees only vars.

@@ -21,7 +21,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/jabbott-iii/Munus/internal"
+	"github.com/jabbott-iii/Munus/pkg"
 )
 
 // version is stamped at release time with -ldflags "-X main.version=<tag>";
