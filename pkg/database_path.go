@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package main
+package pkg
 
 import (
 	"errors"
@@ -23,8 +23,6 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
-
-	"github.com/jabbott-iii/Munus/pkg"
 )
 
 const (
@@ -33,9 +31,9 @@ const (
 	dataDirName      = "munus"
 )
 
-// databaseLocation returns where this process keeps its database; see
+// LocateDatabase returns where this process keeps its database; see
 // resolveDatabaseLocation.
-func databaseLocation() internal.DatabaseLocation {
+func LocateDatabase() DatabaseLocation {
 	return resolveDatabaseLocation(os.Getenv, runtime.GOOS, os.UserHomeDir)
 }
 
@@ -45,9 +43,9 @@ func databaseLocation() internal.DatabaseLocation {
 // the database. Munus v3.0.0 and older defaulted to munus.db in the working
 // directory; when such a file is found there, the location carries a notice.
 // Errors are carried in the location, so help and version output still work.
-func resolveDatabaseLocation(getenv func(string) string, goos string, home func() (string, error)) internal.DatabaseLocation {
+func resolveDatabaseLocation(getenv func(string) string, goos string, home func() (string, error)) DatabaseLocation {
 	if path := getenv(databasePathEnv); path != "" {
-		return internal.DatabaseLocation{Path: path}
+		return DatabaseLocation{Path: path}
 	}
 	dir, err := defaultDataDir(getenv, goos, home)
 	if err == nil && !filepath.IsAbs(dir) {
@@ -59,11 +57,11 @@ func resolveDatabaseLocation(getenv func(string) string, goos string, home func(
 		err = fmt.Errorf("default database path %q contains '?'", path)
 	}
 	if err != nil {
-		return internal.DatabaseLocation{
+		return DatabaseLocation{
 			Err: fmt.Errorf("locate the default database: %w; set %s to choose a database file", err, databasePathEnv),
 		}
 	}
-	return internal.DatabaseLocation{Path: path, Dir: dir, Notice: legacyDatabaseNotice(path)}
+	return DatabaseLocation{Path: path, Dir: dir, Notice: legacyDatabaseNotice(path)}
 }
 
 // defaultDataDir returns the per-user directory for Munus data on goos:

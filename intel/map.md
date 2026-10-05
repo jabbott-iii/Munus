@@ -2,10 +2,10 @@
 
 ```
 Munus/
-├── main.go                 # entry: deferred DB, version stamp, run root cobra command
-├── database_path.go        # DB location: MUNUS_DB_PATH, else munus.db in the per-user data dir; notice for an old ./munus.db
-├── internal/
+├── main.go                 # entry: pkg.LocateDatabase → deferred DB, version stamp, run root cobra command
+├── pkg/                    # package pkg: all application code (importable by other modules)
 │   ├── database.go         # Storage interface, gorm Database (lazy open, migration, tags, triggers), shared types
+│   ├── database_path.go    # LocateDatabase: MUNUS_DB_PATH, else munus.db in the per-user data dir; notice for an old ./munus.db
 │   ├── logic-cli.go        # cobra commands (root/TUI, add, edit, list, complete, delete, export, import)
 │   ├── logic-tui.go        # status transitions, deadline labels, filters, overdue/upcoming helpers
 │   ├── ext-deadline.go     # ParseDeadline: absolute + bounded relative (m,h,d,w,M)
@@ -14,7 +14,7 @@ Munus/
 │   ├── ui-form.go          # Bubble Tea task-entry form (insert/normal vim modes)
 │   ├── ui-list.go          # Bubble Tea list/dashboard, delete confirm, transfer overlay (import/export steps run as background commands)
 │   └── *_test.go           # unit tests per file
-├── assets/                 # TUI-demo.gif, CLI-demo.gif and the VHS tapes (*.tape) that regenerate them against a temporary database
+├── demo/                   # TUI-demo.gif, CLI-demo.gif and the VHS tapes (*.tape) that regenerate them against a temporary database
 ├── tools/licenses/         # stdlib-only generator/check for THIRD_PARTY_LICENSES and the NOTICE module list (+ embedded musl COPYRIGHT)
 ├── THIRD_PARTY_LICENSES    # generated full license texts (Go, SQLite, musl, every compiled module); shipped in archives and image
 ├── Dockerfile, .dockerignore # CGO build on golang:1.26-alpine3.24 (pinned apk): image (→ alpine:3.24, non-root, license files; published to ghcr.io by cd.yml) and `static` target (musl static Linux release binary)
@@ -31,7 +31,7 @@ Munus/
 ## Runtime flow
 ```mermaid
 flowchart LR
-  main[main.go] -->|MUNUS_DB_PATH or per-user data dir| deferred[NewDeferredDatabaseAt]
+  main[main.go] -->|LocateDatabase: MUNUS_DB_PATH or per-user data dir| deferred[NewDeferredDatabaseAt]
   main --> root[NewRootCmd]
   root -->|each command: validate args/flags, then openForCommand| db[(SQLite munus.db)]
   root -->|no subcommand| tui[Bubble Tea: FormModel / ListModel --vim]

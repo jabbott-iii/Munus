@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package internal
+package pkg
 
 import (
 	"context"
@@ -856,7 +856,7 @@ func TestFormReturnToListRequestsWindowSize(t *testing.T) {
 	for _, c := range batch {
 		kinds = append(kinds, fmt.Sprintf("%T", c()))
 	}
-	if !slices.Contains(kinds, "internal.DataLoadedMsg") || !slices.Contains(kinds, "tea.windowSizeMsg") {
+	if !slices.Contains(kinds, "pkg.DataLoadedMsg") || !slices.Contains(kinds, "tea.windowSizeMsg") {
 		t.Fatalf("expected data load and window size requests, got %v", kinds)
 	}
 }

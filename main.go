@@ -31,9 +31,9 @@ var version = "dev"
 func main() {
 	// The sqlite database is opened lazily by the root command, so help and
 	// version output never create a database file or its directory.
-	db := internal.NewDeferredDatabaseAt(databaseLocation())
+	db := pkg.NewDeferredDatabaseAt(pkg.LocateDatabase())
 
-	rootCmd := internal.NewRootCmd(db)
+	rootCmd := pkg.NewRootCmd(db)
 	rootCmd.Version = version
 	// main is the program's top-level boundary. Ctrl+C keeps its default
 	// behaviour (terminate the process), which is safe because every write is

@@ -17,17 +17,19 @@ Munus is a single-binary Go CLI/TUI task manager backed by a local SQLite file.
 ## Layering
 | Layer | Location | Responsibility |
 |---|---|---|
-| Entry point | `main.go`, `database_path.go` | Resolve the DB location (`MUNUS_DB_PATH`, else `munus.db` in the per-user data directory, plus a notice when the working directory holds an old `./munus.db`), create a *deferred* DB, set `main.version`, run root command, close DB |
-| CLI | `internal/logic-cli.go` | Cobra commands: root (TUI), `add`, `edit`, `list` (filters), `complete`, `delete`, `export`, `import`; each command validates its arguments and flags, then calls `openForCommand` to open the DB |
-| TUI | `internal/ui-form.go`, `internal/ui-list.go` | Bubble Tea models for the task form (create and edit) and list/dashboard (status cycling, filters, help panel, import/export overlay, optional Vim mode) |
-| Domain helpers | `internal/logic-tui.go`, `internal/ext-deadline.go` | Status transitions, overdue/upcoming logic, calendar-day deadline labels (clock passed in), task filters, deadline parsing (bounded) |
-| Text safety | `internal/ext-text.go` | Title/description length checks (limits declared in `ui-form.go`), control-character/UTF-8 validation, tag rules, terminal sanitising |
-| Transfer | `internal/ext-export-import.go` | Versioned JSON export (v2; imports v1 and v2), plan/apply import (merge/replace), stdin input, backups |
-| Storage | `internal/database.go` | `Storage` interface, `Database` (gorm) implementation incl. tags, migration and consistency triggers, all shared types |
+| Entry point | `main.go` | Resolve the DB location (`pkg.LocateDatabase`), create a *deferred* DB, set `main.version`, run root command, close DB |
+| DB location | `pkg/database_path.go` | `LocateDatabase`: `MUNUS_DB_PATH`, else `munus.db` in the per-user data directory, plus a notice when the working directory holds an old `./munus.db` |
+| CLI | `pkg/logic-cli.go` | Cobra commands: root (TUI), `add`, `edit`, `list` (filters), `complete`, `delete`, `export`, `import`; each command validates its arguments and flags, then calls `openForCommand` to open the DB |
+| TUI | `pkg/ui-form.go`, `pkg/ui-list.go` | Bubble Tea models for the task form (create and edit) and list/dashboard (status cycling, filters, help panel, import/export overlay, optional Vim mode) |
+| Domain helpers | `pkg/logic-tui.go`, `pkg/ext-deadline.go` | Status transitions, overdue/upcoming logic, calendar-day deadline labels (clock passed in), task filters, deadline parsing (bounded) |
+| Text safety | `pkg/ext-text.go` | Title/description length checks (limits declared in `ui-form.go`), control-character/UTF-8 validation, tag rules, terminal sanitising |
+| Transfer | `pkg/ext-export-import.go` | Versioned JSON export (v2; imports v1 and v2), plan/apply import (merge/replace), stdin input, backups |
+| Storage | `pkg/database.go` | `Storage` interface, `Database` (gorm) implementation incl. tags, migration and consistency triggers, all shared types |
 | Release tooling | `tools/licenses/` | Generates and checks `THIRD_PARTY_LICENSES` and the `NOTICE` module list (not part of the binary) |
 
 ## Conventions
-- All shared types (models, DTOs, options) live in `internal/database.go`.
+- All application code is package `pkg` in `pkg/` (importable by other modules, unlike `internal/`);
+  `main.go` only wires it up. All shared types (models, DTOs, options) live in `pkg/database.go`.
 - The TUI models and the import/export service (`TaskServiceAdapter`) depend on the `Storage`
   interface; tests use it for fakes. CLI commands take the deferred `*Database`, open it with
   `openForCommand` and wrap it in `TaskServiceAdapter` for import and export. Optional
@@ -127,8 +129,9 @@ Munus is a single-binary Go CLI/TUI task manager backed by a local SQLite file.
   directory (`defaultDataDir`): `$XDG_DATA_HOME/munus` (absolute values only) or
   `~/.local/share/munus` on Linux and other Unix systems, `~/Library/Application Support/munus` on
   macOS, `%LOCALAPPDATA%\munus` on Windows (local, not roaming: it holds a SQLite file). The
-  location is resolved at start without side effects (`resolveDatabaseLocation`, inputs injected
-  for tests) and handed to `internal.NewDeferredDatabaseAt`; the first open creates the directory
+  location is resolved at start without side effects (`pkg.LocateDatabase` calls
+  `resolveDatabaseLocation`, whose inputs are injected for tests) and handed to
+  `pkg.NewDeferredDatabaseAt`; the first open creates the directory
   (`ensurePrivateDir`), so help and version create nothing. A location that cannot be resolved (no
   home directory or `%LOCALAPPDATA%`, a relative path, a `?` in the path, which sqlite would read as
   parameters) is carried as `DatabaseLocation.Err` and reported by the first open with a hint to set

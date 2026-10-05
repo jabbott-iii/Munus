@@ -73,7 +73,7 @@ check: fmt-check vet test race lint
 fuzz:
 	@for target in $(FUZZ_TARGETS); do \
 		echo "== $$target"; \
-		$(GO) test ./internal -run '^$$' -fuzz "^$$target$$" -fuzztime $(FUZZTIME) || exit 1; \
+		$(GO) test ./pkg -run '^$$' -fuzz "^$$target$$" -fuzztime $(FUZZTIME) || exit 1; \
 	done
 
 # Full license texts of the third-party software in the release binaries;

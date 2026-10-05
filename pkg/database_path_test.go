@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package main
+package pkg
 
 import (
 	"bytes"
@@ -24,8 +24,6 @@ import (
 	"runtime"
 	"strings"
 	"testing"
-
-	"github.com/jabbott-iii/Munus/pkg"
 )
 
 // fakeEnv returns a getenv function that sees only vars.
@@ -60,7 +58,7 @@ func TestResolveDatabaseLocationUsesConfiguredPath(t *testing.T) {
 	want := filepath.Join(t.TempDir(), "tasks.db")
 
 	loc := resolveDatabaseLocation(fakeEnv(map[string]string{databasePathEnv: want}), "linux", fakeHome("", errors.New("unused")))
-	if loc != (internal.DatabaseLocation{Path: want}) {
+	if loc != (DatabaseLocation{Path: want}) {
 		t.Fatalf("location = %+v, want only Path %q", loc, want)
 	}
 }
@@ -187,7 +185,7 @@ func TestLegacyDatabaseNotice(t *testing.T) {
 // old ./munus.db and leaves that file and its tasks alone.
 func TestDefaultLocationWithLegacyDatabase(t *testing.T) {
 	work := chdirEmpty(t)
-	legacy := internal.NewDeferredDatabase(filepath.Join(work, databaseFileName))
+	legacy := NewDeferredDatabase(filepath.Join(work, databaseFileName))
 	run(t, legacy, "add", "-t", "legacy task", "-d", "from v3")
 	if err := legacy.Close(); err != nil {
 		t.Fatalf("close legacy database: %v", err)
@@ -199,11 +197,11 @@ func TestDefaultLocationWithLegacyDatabase(t *testing.T) {
 
 	data := t.TempDir()
 	dir := filepath.Join(data, dataDirName)
-	newLocation := func() internal.DatabaseLocation {
+	newLocation := func() DatabaseLocation {
 		return resolveDatabaseLocation(fakeEnv(map[string]string{"XDG_DATA_HOME": data}), "linux", fakeHome("", errors.New("unused")))
 	}
 
-	help := internal.NewDeferredDatabaseAt(newLocation())
+	help := NewDeferredDatabaseAt(newLocation())
 	if _, stderr := run(t, help, "--help"); strings.Contains(stderr, "no longer used") {
 		t.Fatalf("help showed the notice: %q", stderr)
 	}
@@ -211,7 +209,7 @@ func TestDefaultLocationWithLegacyDatabase(t *testing.T) {
 		t.Fatalf("help created the data directory, stat err=%v", err)
 	}
 
-	db := internal.NewDeferredDatabaseAt(newLocation())
+	db := NewDeferredDatabaseAt(newLocation())
 	t.Cleanup(func() { _ = db.Close() })
 	stdout, stderr := run(t, db, "list")
 	if strings.Contains(stdout, "legacy task") {
@@ -242,9 +240,9 @@ func TestDefaultLocationWithLegacyDatabase(t *testing.T) {
 }
 
 // run executes the root command with args and returns its output.
-func run(t *testing.T, db *internal.Database, args ...string) (stdout, stderr string) {
+func run(t *testing.T, db *Database, args ...string) (stdout, stderr string) {
 	t.Helper()
-	root := internal.NewRootCmd(db)
+	root := NewRootCmd(db)
 	root.Version = "test"
 	var out, errOut bytes.Buffer
 	root.SetOut(&out)
@@ -259,8 +257,8 @@ func run(t *testing.T, db *internal.Database, args ...string) (stdout, stderr st
 func TestDatabaseLocationReadsEnvironment(t *testing.T) {
 	want := filepath.Join(t.TempDir(), "tasks.db")
 	t.Setenv(databasePathEnv, want)
-	if loc := databaseLocation(); loc.Path != want || loc.Dir != "" || loc.Err != nil {
-		t.Fatalf("databaseLocation() = %+v, want Path %q", loc, want)
+	if loc := LocateDatabase(); loc.Path != want || loc.Dir != "" || loc.Err != nil {
+		t.Fatalf("LocateDatabase() = %+v, want Path %q", loc, want)
 	}
 }
 
@@ -284,11 +282,11 @@ func TestDatabaseLocationDefaultForThisPlatform(t *testing.T) {
 		dir = filepath.Join(xdg, dataDirName)
 	}
 
-	loc := databaseLocation()
+	loc := LocateDatabase()
 	if loc.Err != nil || loc.Dir != dir || loc.Path != filepath.Join(dir, databaseFileName) || loc.Notice != "" {
-		t.Fatalf("databaseLocation() = %+v, want %s in %s", loc, databaseFileName, dir)
+		t.Fatalf("LocateDatabase() = %+v, want %s in %s", loc, databaseFileName, dir)
 	}
-	db := internal.NewDeferredDatabaseAt(loc)
+	db := NewDeferredDatabaseAt(loc)
 	t.Cleanup(func() { _ = db.Close() })
 	run(t, db, "add", "-t", "here", "-d", "x")
 	if _, err := os.Stat(loc.Path); err != nil {

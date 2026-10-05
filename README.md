@@ -407,8 +407,9 @@ on Debian 11 and on Alpine.
 ## Project structure
 
 ```
-main.go, database_path.go   entry point, database location (MUNUS_DB_PATH or the per-user data directory)
-internal/                   CLI commands, TUI models, storage (tasks, status, tags), deadlines, import/export
+main.go                     entry point
+pkg/                        package pkg: CLI commands, TUI models, storage (tasks, status, tags), database
+                            location (MUNUS_DB_PATH or the per-user data directory), deadlines, import/export
 tools/licenses/             generates and checks THIRD_PARTY_LICENSES
 THIRD_PARTY_LICENSES        license texts of the third-party software in the binaries (generated)
 .github/workflows/          CI, release (CD), Docker and security workflows

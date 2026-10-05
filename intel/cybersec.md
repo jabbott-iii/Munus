@@ -4,6 +4,10 @@ Decision, plan-item and note IDs up to D-22, P-060 and N-041 cited below refer t
 and `intel/notes.md` as of commit `442e63c` (both were cleared on 2026-10-03, see `history.md`);
 later IDs (P-061, N-042 onward) refer to the current files.
 
+Paths: items below keep the paths they were written with. `internal/` was renamed to `pkg/` in
+`3e0fecd`, and the root `database_path.go` later moved to `pkg/database_path.go` (all of it now
+package `pkg`); the code those items describe did not change.
+
 ## Requirements
 - No credentials, tokens or production data in the repo or these documents.
 - This file is public: items describe the issue, impact, remediation and validation without

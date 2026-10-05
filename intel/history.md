@@ -203,3 +203,19 @@ backfilled from `git log` for the changes made after that file's last entry.
   `map.md` (`CODE_OF_CONDUCT.md`, `go.mod`/`go.sum`, attestation permission); `SECURITY.md` (fixes
   are developed privately; the GHCR image as an install source); `CONTRIBUTING.md` (run `make fuzz`
   after export changes too). Uncommitted.
+
+## 2026-10-05 — Application code moved into package `pkg`
+- `3e0fecd` (maintainer) renamed the `internal/` directory to `pkg/` so other modules can import
+  it; its files still declared `package internal`.
+- Now every file in `pkg/` declares `package pkg`, and `database_path.go` and its tests moved from
+  the root into `pkg/`. `databaseLocation` became the exported `pkg.LocateDatabase` (the name
+  `DatabaseLocation` is the location type); `main.go` only wires `pkg` up. No behaviour changed.
+- `TestFormReturnToListRequestsWindowSize` compares `%T` names, so it now expects
+  `pkg.DataLoadedMsg`. `make fuzz` targets `./pkg` (it still pointed at `./internal`).
+- Docs: `map.md` (also lists `demo/`, where `224b8c0` moved the demo GIFs), `maint.md`, README
+  project structure; `cybersec.md` notes that older items name the old paths.
+- Validation with Go 1.26.8 (built from source) and modules verified against `go.sum`:
+  `make check` (gofmt, vet, tests, race, golangci-lint v2.13.2: 0 issues), `go vet` for windows and
+  darwin (cgo off), `go mod tidy` (no drift), `make fuzz` (5 s per target), and the same 660 test
+  results as `224b8c0`, all passing (the 24 moved ones in `pkg`). Binaries built before and after
+  gave identical CLI output and both TUI modes started. Not run: CI, Docker build. Uncommitted.
