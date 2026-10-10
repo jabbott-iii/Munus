@@ -1,3 +1,6 @@
+<img width="1100" height="760" alt="CLI-demo" src="https://github.com/user-attachments/assets/10282629-7cb5-48e8-a513-bcdd701c6384" />
+<img width="1400" height="720" alt="TUI-demo" src="https://github.com/user-attachments/assets/a98028a2-c382-41b7-8d6e-2fe782ba048d" />
+
 # Munus
 
 Munus is a terminal task manager for people who live in the shell. It offers a
