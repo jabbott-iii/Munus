@@ -73,6 +73,13 @@ jobs:
         shell: bash
         run: |
           if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
+            # The image job derives the image tags from the release tag, so an
+            # unusable tag fails here, before the release job creates a
+            # release for it.
+            if [[ ! "${GITHUB_REF_NAME}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+              echo "tag ${GITHUB_REF_NAME} is not vMAJOR.MINOR.PATCH[-PRERELEASE]" >&2
+              exit 1
+            fi
             echo "tag=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
           else
             # manual run fallback
@@ -323,11 +330,11 @@ jobs:
           REGISTRY_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin <<< "$REGISTRY_TOKEN"
 
-      # Tags: the git tag (multi-platform; the digest image-attest attests), the
-      # git tag with -amd64 or -arm64 (one platform each) and, for vX.Y.Z tags,
-      # latest, which follows the most recently published one. Image tags cannot
-      # contain "+", so semver build metadata uses "_" instead. Both images are
-      # checked before anything is pushed.
+      # Image tags drop the release tag's "v": X.Y.Z (multi-platform; the digest
+      # image-attest attests) and X.Y.Z-amd64 / X.Y.Z-arm64 (one platform each).
+      # Stable releases (vX.Y.Z) also move X.Y and latest to this image;
+      # pre-releases (vX.Y.Z-rc.1) do not. Both images are checked before
+      # anything is pushed.
       - name: Push image
         id: push
         shell: bash
@@ -335,10 +342,15 @@ jobs:
           VERSION: ${{ github.ref_name }}
         run: |
           image="ghcr.io/${GITHUB_REPOSITORY,,}"
-          tag="${VERSION//+/_}"
-          if [[ ! "$tag" =~ ^[0-9A-Za-z_][0-9A-Za-z._-]{0,100}$ ]]; then
-            echo "unexpected version string: $VERSION" >&2
+          # The build job already rejected other tags.
+          if [[ ! "$VERSION" =~ ^v([0-9]+\.[0-9]+)\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+            echo "tag $VERSION is not vMAJOR.MINOR.PATCH[-PRERELEASE]; image tags cannot be derived from it" >&2
             exit 1
+          fi
+          version="${VERSION#v}"
+          tags=(--tag "${image}:${version}")
+          if [ -z "${BASH_REMATCH[2]}" ]; then
+            tags+=(--tag "${image}:${BASH_REMATCH[1]}" --tag "${image}:latest")
           fi
           digest_of() {
             local digest
@@ -359,17 +371,13 @@ jobs:
           done
           sources=()
           for arch in amd64 arm64; do
-            docker tag "munus:release-${arch}" "${image}:${tag}-${arch}"
-            docker push "${image}:${tag}-${arch}"
-            digest="$(digest_of "${image}:${tag}-${arch}")"
+            docker tag "munus:release-${arch}" "${image}:${version}-${arch}"
+            docker push "${image}:${version}-${arch}"
+            digest="$(digest_of "${image}:${version}-${arch}")"
             sources+=("${image}@${digest}")
           done
-          tags=(--tag "${image}:${tag}")
-          if [[ "$VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-            tags+=(--tag "${image}:latest")
-          fi
           docker buildx imagetools create "${tags[@]}" "${sources[@]}"
-          digest="$(digest_of "${image}:${tag}")"
+          digest="$(digest_of "${image}:${version}")"
           echo "name=${image}" >> "$GITHUB_OUTPUT"
           echo "digest=${digest}" >> "$GITHUB_OUTPUT"
 
@@ -387,7 +395,7 @@ jobs:
       attestations: write
 
     steps:
-      # Verify with: gh attestation verify oci://ghcr.io/jabbott-iii/munus:<tag> --repo jabbott-iii/Munus
+      # Verify with: gh attestation verify oci://ghcr.io/jabbott-iii/munus:X.Y.Z --repo jabbott-iii/Munus
       - name: Attest build provenance
         uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:

@@ -60,4 +60,6 @@ Maintainers release by tagging: `make release VERSION=vX.Y.Z`. The CD workflow b
 and publishes the binaries (each archive with `LICENSE`, `NOTICE` and `THIRD_PARTY_LICENSES`) and
 attests their build provenance. It also builds and smoke-tests the container image for linux/amd64
 and linux/arm64 and, after the GitHub Release, publishes it to GitHub Packages
-(`ghcr.io/jabbott-iii/munus`) and attests it.
+(`ghcr.io/jabbott-iii/munus`) and attests it. Image tags drop the `v`: `X.Y.Z`, plus `X.Y` and
+`latest` for stable releases. A tag that is not `vMAJOR.MINOR.PATCH[-PRERELEASE]` fails the CD run
+before a release is created.

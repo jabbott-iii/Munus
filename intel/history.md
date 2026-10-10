@@ -219,3 +219,18 @@ backfilled from `git log` for the changes made after that file's last entry.
   darwin (cgo off), `go mod tidy` (no drift), `make fuzz` (5 s per target), and the same 660 test
   results as `224b8c0`, all passing (the 24 moved ones in `pkg`). Binaries built before and after
   gave identical CLI output and both TUI modes started. Not run: CI, Docker build. Uncommitted.
+
+## 2026-10-05 — Image tags follow Salus (`X.Y.Z`, `X.Y`, `latest`)
+- `cd.yml` `image` job: image tags drop the release tag's `v`. Every release gets `X.Y.Z` (the
+  attested multi-platform index) and `X.Y.Z-amd64`/`X.Y.Z-arm64`; stable releases also move `X.Y`
+  (new) and `latest`; pre-releases move neither. Git tags, `make release VERSION=vX.Y.Z`, archive
+  names and `munus --version` keep the `v`.
+- The `build` job now fails a tag that is not `vMAJOR.MINOR.PATCH[-PRERELEASE]` before `package`
+  and `release` run (as Salus's image job does), so no release is created for a tag whose image
+  tags cannot be derived. Tags with `+` build metadata, which became `_` in image tags, are now
+  rejected.
+- Docs: README (Docker tag table), `CONTRIBUTING.md`, `maint.md`, `cybersec.md` requirement,
+  N-043, P-061. The `v3.0.2` image keeps its `v3.0.2` tags.
+- Validation: actionlint 1.7.12 with shellcheck 0.9.0 (clean before and after); the new `Set
+  release metadata` and `Push image` scripts run against sample tags with a stubbed `docker`.
+  Not run: a real CD run. Uncommitted.

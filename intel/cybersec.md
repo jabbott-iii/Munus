@@ -38,8 +38,8 @@ package `pkg`); the code those items describe did not change.
   job's Linux rows (`contents: read`) and handed over as artifacts. Only the tag-only `image` job can
   write packages (`packages: write` and nothing else; no checkout, no build, no OIDC token), and the
   `image-attest` job attests the pushed index digest with OIDC and `attestations: write` only (no
-  `contents` or `packages` write). Image tags are derived from the validated git tag (`+` becomes
-  `_`).
+  `contents` or `packages` write). Image tags are derived from the git tag, which the `build` job
+  requires to be `vMAJOR.MINOR.PATCH[-PRERELEASE]` before any release is created.
 - Dependency updates (Dependabot) go through the same review and checks as any pull request; they
   are never merged automatically.
 - Without `MUNUS_DB_PATH`, the database lives in the per-user data directory, created owner-only

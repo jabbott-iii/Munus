@@ -316,18 +316,30 @@ an unprivileged user (UID 10001). Mount `/app/data` to keep your tasks. `LICENSE
 ### Pull from GitHub Packages
 
 Releases after `v3.0.1` also publish the image to GitHub Packages (GitHub Container Registry)
-for linux/amd64 and linux/arm64. Tags: `vX.Y.Z` (both platforms), `vX.Y.Z-amd64` and
-`vX.Y.Z-arm64` (one platform each), and `latest` (the most recently published `vX.Y.Z` release):
+for linux/amd64 and linux/arm64. Pull it by version, without the `v` of the release tag, or as
+`latest`:
 ```bash
-docker pull ghcr.io/jabbott-iii/munus:latest
+docker pull ghcr.io/jabbott-iii/munus:X.Y.Z
 docker run --rm -it -v munus-data:/app/data ghcr.io/jabbott-iii/munus:latest
 ```
 
-Optional: the multi-platform tags (`vX.Y.Z`, `latest`) carry a build provenance attestation,
-which the [GitHub CLI](https://cli.github.com/) can verify; the per-platform tags have none of
-their own:
+| Tag | Points to |
+|---|---|
+| `X.Y.Z` | That release (linux/amd64 and linux/arm64) |
+| `X.Y` | The most recently published stable release of that minor version |
+| `latest` | The most recently published stable release |
+| `X.Y.Z-amd64`, `X.Y.Z-arm64` | One platform of that release |
+
+Pre-releases (tags such as `v3.1.0-rc.1`) get only their own version tags (`3.1.0-rc.1`,
+`3.1.0-rc.1-amd64` and `3.1.0-rc.1-arm64`) and never move `X.Y` or `latest`. In the image,
+`munus --version` reports the release tag, for example `munus version v3.1.0`. The `v3.0.2`
+image was published before this scheme, as `v3.0.2`, `v3.0.2-amd64` and `v3.0.2-arm64`.
+
+Optional: the multi-platform tags (`X.Y.Z`, `X.Y`, `latest`) carry a build provenance
+attestation, which the [GitHub CLI](https://cli.github.com/) can verify; the per-platform tags
+have none of their own:
 ```bash
-gh attestation verify oci://ghcr.io/jabbott-iii/munus:vX.Y.Z --repo jabbott-iii/Munus
+gh attestation verify oci://ghcr.io/jabbott-iii/munus:X.Y.Z --repo jabbott-iii/Munus
 ```
 
 The examples below use a locally built `munus:latest`; to use the published image, replace it

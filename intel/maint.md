@@ -212,9 +212,11 @@ Munus is a single-binary Go CLI/TUI task manager backed by a local SQLite file.
   also build the runtime image (`--pull`, `--provenance=false`, OCI labels for source, revision and
   version), smoke-test it (`--version`, a database on a volume, license files) and upload it with
   `docker save`; the `image` job (tags only, after `release`; `packages: write` only, no checkout,
-  no build, no OIDC) loads both images, checks each one's platform, pushes `<tag>-amd64` and
-  `<tag>-arm64` and joins them with `docker buildx imagetools create` into
-  `ghcr.io/<owner>/munus:<tag>` (plus `latest` for `vX.Y.Z` tags; a `+` in the tag becomes `_`);
+  no build, no OIDC) loads both images, checks each one's platform, pushes `X.Y.Z-amd64` and
+  `X.Y.Z-arm64` (the release tag without its `v`) and joins them with `docker buildx imagetools
+  create` into `ghcr.io/<owner>/munus:X.Y.Z`, plus `X.Y` and `latest` for stable `vX.Y.Z` tags
+  (pre-releases move neither; the scheme matches Salus). The `build` job fails a tag that is not
+  `vMAJOR.MINOR.PATCH[-PRERELEASE]`, so no release is created for it;
   `image-attest` (`contents: read`, `id-token: write`, `attestations: write`) attests that index
   digest only, without pushing the attestation to the registry. Set no index annotations (N-042). The
   version string passed to the builds must match `^[0-9A-Za-z._+-]+$`. Linux builds use the
