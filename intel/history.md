@@ -234,3 +234,16 @@ backfilled from `git log` for the changes made after that file's last entry.
 - Validation: actionlint 1.7.12 with shellcheck 0.9.0 (clean before and after); the new `Set
   release metadata` and `Push image` scripts run against sample tags with a stubbed `docker`.
   Not run: a real CD run. Uncommitted.
+
+## 2026-10-10 — Docker build fixed: `tzdata` pin bumped to `2026e-r0`
+- Docker workflow run #30 (`c377b79`, a README-only change) failed in `Build Docker image` after
+  8 s. Alpine 3.24 replaced `tzdata` 2026d with 2026e (aports `3.24-stable` `faa135a`,
+  2026-10-04) and its repositories keep only the newest revision, so the runtime stage's
+  `apk add tzdata=2026d-r0` can no longer be satisfied. `cd.yml` builds the same Dockerfile, so a
+  release would fail the same way. The step log (sign-in only) was not read; the cause is
+  inferred from the aports history and the failure's timing.
+- `Dockerfile`: `tzdata=2026e-r0`, per the bump procedure in `maint.md`. `build-base=0.5-r4` and
+  `ca-certificates=20260909-r0` are still the current `3.24-stable` revisions.
+- Validation: hadolint 2.15.1 clean. Not run: a Docker build (Docker Hub and the Alpine CDN were
+  not reachable from the validation environment); the Docker workflow on the next push confirms
+  the fix. Uncommitted.
