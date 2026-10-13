@@ -39,3 +39,8 @@ munus-export-*.json
 # Editor/IDE
 # .idea/
 # .vscode/
+
+# Personal Claude Code instructions and settings (shared ones are CLAUDE.md and
+# .claude/settings.json)
+CLAUDE.local.md
+.claude/settings.local.json

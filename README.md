@@ -430,5 +430,5 @@ THIRD_PARTY_LICENSES        license texts of the third-party software in the bin
 .github/workflows/          CI, release (CD), Docker and security workflows
 .github/dependabot.yml      weekly, grouped dependency updates
 Dockerfile                  container image and static Linux release binary
-intel/                      maintainer notes: architecture, security tracker, plans
+CLAUDE.md, .claude/         Claude Code instructions: conventions, path-scoped rules, maintenance skills
 ```

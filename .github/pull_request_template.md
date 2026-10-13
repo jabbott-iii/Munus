@@ -52,14 +52,15 @@ paste output here
 - [ ] User input goes through the existing validation helpers (task text, tags, deadlines), and stored text is printed only through `sanitizeForTerminal`
 - [ ] No new dependency, or the reason is explained in the summary
 - [ ] `README.md` updated for user-visible changes
-- [ ] `intel/` documents updated where architecture, security items or plans changed (`intel/history.md` is append-only)
+- [ ] `CLAUDE.md` / `.claude/rules/` updated where architecture, conventions or invariants changed
 - [ ] No local databases (`*.db`), coverage files, built binaries or secrets are included
 
 ## Security and compatibility
 
 <!--
 Security: does this touch input validation, file permissions, import limits, terminal output,
-CI/CD or dependencies? Reference any affected item in intel/cybersec.md (for example SEC-0XX).
+CI/CD or dependencies? Describe the effect on those controls. Report vulnerabilities privately
+as described in SECURITY.md, not in this pull request.
 Compatibility: does this change existing CLI or TUI behaviour, the export format or the database
 schema? Schema changes must stay additive, and v1/v2 export files must still import.
 Write "None" if neither applies.

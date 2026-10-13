@@ -6,6 +6,9 @@
 .junie
 .devcontainer
 intel
+.claude
+CLAUDE.md
+CLAUDE.local.md
 .env
 **/*.db
 **/*.db-journal

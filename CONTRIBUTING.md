@@ -38,7 +38,8 @@ make test
   images; they follow the same review and checks (Go module updates may need `make licenses`).
 
 ## Coding expectations
-- Follow `AGENTS.md`, `intel/golang.md` (Go rules) and `intel/maint.md` (architecture).
+- Follow `CLAUDE.md` and the rules in `.claude/rules/` (architecture, Go conventions and data
+  invariants). They are written for Claude Code but apply to every change.
 - Keep changes focused on the issue; avoid unrelated refactors and new dependencies.
 - Add or update tests for every behaviour change; tests must be deterministic (no sleeps, no
   dependence on the machine's time zone) and use `t.TempDir()` for files.
@@ -51,8 +52,8 @@ make test
   loads when you open a pull request.
 - Reference the issue and describe what changed and why.
 - List the checks you ran and their results.
-- Update `README.md` for user-visible changes and the `intel/` documents when architecture,
-  security items or plans change (`intel/history.md` is append-only).
+- Update `README.md` for user-visible changes, and `CLAUDE.md` or `.claude/rules/` when
+  architecture, conventions or invariants change.
 - Do not commit local databases (`*.db`), coverage files or built binaries.
 
 ## Releases

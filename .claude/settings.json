@@ -1,0 +1,49 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
+  "permissions": {
+    "allow": [
+      "Bash(make build)",
+      "Bash(make test)",
+      "Bash(make race)",
+      "Bash(make cover)",
+      "Bash(make vet)",
+      "Bash(make fmt)",
+      "Bash(make fmt-check)",
+      "Bash(make lint)",
+      "Bash(make check)",
+      "Bash(make fuzz *)",
+      "Bash(make licenses)",
+      "Bash(make help)",
+      "Bash(go test *)",
+      "Bash(go vet *)",
+      "Bash(go build *)",
+      "Bash(go mod tidy -diff)",
+      "Bash(go run ./tools/licenses *)",
+      "Bash(gofmt -s -l *)",
+      "Bash(golangci-lint run *)"
+    ],
+    "ask": [
+      "Bash(git commit *)",
+      "Bash(git push *)",
+      "Bash(git tag *)",
+      "Bash(git reset *)",
+      "Bash(git rebase *)",
+      "Bash(git merge *)",
+      "Bash(git checkout -- *)",
+      "Bash(git restore *)",
+      "Bash(git clean *)",
+      "Bash(make tag *)",
+      "Bash(make push-tag *)",
+      "Bash(make release *)",
+      "Bash(gh release *)",
+      "Bash(gh pr create *)",
+      "Bash(gh pr merge *)",
+      "Bash(docker push *)"
+    ],
+    "deny": [
+      "Read(/.env)",
+      "Read(/.env.*)",
+      "Edit(/THIRD_PARTY_LICENSES)"
+    ]
+  }
+}

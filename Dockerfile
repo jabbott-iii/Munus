@@ -1,5 +1,6 @@
 # Builder and runtime use the same pinned Alpine release (same musl), which also
-# keeps the package pins below valid; see intel/maint.md for how to bump them.
+# keeps the package pins below valid; see .claude/skills/dependency-update/SKILL.md
+# for how to bump them.
 FROM golang:1.26-alpine3.24 AS source
 
 WORKDIR /src

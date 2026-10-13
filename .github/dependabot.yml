@@ -21,7 +21,8 @@ updates:
         patterns: ["*"]
 
   # The Dockerfile's builder and runtime images must stay on the same Alpine
-  # release (see intel/maint.md); the licenses check in CI fails otherwise.
+  # release (see .claude/skills/dependency-update/SKILL.md); the licenses check
+  # in CI fails otherwise.
   - package-ecosystem: docker
     directory: /
     schedule:
