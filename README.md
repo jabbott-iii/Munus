@@ -78,15 +78,14 @@ Windows:
 Extract munus_windows_amd64.zip (or munus_windows_arm64.zip) and add the .exe to your PATH as munus.exe.
 ```
 
-Optional: archives and `checksums.txt` of releases built by the current release workflow
-(`v3.0.0` and later) carry a GitHub build provenance attestation, which the
-[GitHub CLI](https://cli.github.com/) can verify:
+Optional: release archives and `checksums.txt` carry a GitHub build provenance attestation,
+which the [GitHub CLI](https://cli.github.com/) can verify:
 ```
 gh attestation verify munus_linux_amd64.tar.gz --repo jabbott-iii/Munus
 ```
 
-Releases after `v3.0.1` also publish a container image for Linux (amd64 and arm64) to GitHub
-Packages; see [Docker](#docker).
+Releases also publish a container image for Linux (amd64 and arm64) to GitHub Packages; see
+[Docker](#docker).
 
 ### Build from source
 
@@ -137,6 +136,7 @@ changes the database; other errors (for example an unknown task ID) print only t
 
 - munus add --title "Title" --description "Description" — add a task with details
 - munus add --title "Title" --description "Description" --deadline "2h" — create a task with a deadline
+- munus add --title "Title" --description "Description" --tag work,home — add tags (repeat `--tag` or separate them with commas)
 
 Examples:
 - munus add --title "Feature Review" --description "Review new API endpoints"
@@ -175,7 +175,7 @@ Filters combine: a task must match all of them.
 ### complete
 
 - munus complete [task-id] — mark a task as complete (status `done`)
-- munus complete [task-id] --undo — reopen a completed task (status `todo`); a task in progress keeps `doing`
+- munus complete [task-id] --undo (`-u`) — reopen a completed task (status `todo`); a task in progress keeps `doing`
 
 Examples:
 - munus complete 1
@@ -195,13 +195,14 @@ By default, export writes pretty-printed JSON (schema version 2, including statu
 `munus-export-YYYYMMDD.json` in the current directory and includes every task, completed ones too.
 Export refuses to overwrite the active database file.
 
-- munus export --file tasks-backup.json — export to a specific file
+- munus export --file tasks-backup.json (`-f`) — export to a specific file
 - munus export --pending-only — skip completed tasks
 - munus export --stdout — write JSON to standard output (`--file -` does the same)
+- munus export --pretty=false — write compact instead of pretty-printed JSON
 - munus export --dry-run — show how many tasks would be exported, by status
 
 `-i/--include-completed` is still accepted for older scripts but no longer changes anything.
-Munus v2.1.1 and older cannot import version 2 files.
+Pre-1.0.0 builds up to v2.1.1 cannot import version 2 files.
 
 Examples:
 - munus export --file my-tasks.json
@@ -219,12 +220,12 @@ bytes), for example in exports of data saved by older versions, is shortened to 
 boundary; the import plan and result report how many tasks in the file were shortened
 (`Shortened: …`, `shortened=…`).
 
-- munus import --file tasks-backup.json — merge tasks from a JSON file (default `--mode merge`)
+- munus import --file tasks-backup.json (`-f`) — merge tasks from a JSON file (default `--mode merge`)
 - munus import --file - — read the export from standard input (`--mode replace` then needs `--yes`, except with `--dry-run`)
-- munus import --file tasks-backup.json --skip-existing — keep local tasks when imported IDs collide
+- munus import --file tasks-backup.json --skip-existing — keep local tasks when imported IDs collide (cannot be combined with `--on-conflict`)
 - munus import --file tasks-backup.json --on-conflict skip|overwrite|rename — choose how changed tasks with the same ID are handled (default `overwrite`)
 - munus import --file tasks-backup.json --id-strategy regenerate — import every task as a new task with a new ID (default `preserve`)
-- munus import --file tasks-backup.json --mode replace — replace all local tasks (asks for confirmation unless `--yes`)
+- munus import --file tasks-backup.json --mode replace — replace all local tasks (asks for confirmation unless `--yes`, `-y`)
 - munus import --file tasks-backup.json --backup — write a backup of current tasks to `~/.munus/backups/` first
 - munus import --file tasks-backup.json --dry-run — show the import plan without changing anything
 - munus import --file tasks-backup.json --strict — reject unknown fields, unknown statuses, control characters, over-length text, blank titles and a `completed` flag that contradicts `status`
@@ -238,10 +239,14 @@ Examples:
 ### Interactive TUI
 
 - Running munus with no subcommand launches the terminal UI for interactive task management.
-- By default, Munus keeps the existing non-Vim behavior: the TUI opens the new-task form, `tab`/`shift+tab` and `↑`/`↓` move between fields or tasks where applicable, `ctrl+l` switches to the task list, and `ctrl+c` quits.
-- In the task list: `e` expands a task, `c` toggles completion, `s` cycles the status (todo → doing → done), `u` edits the selected task, `d` opens the delete prompt and `y` confirms it, `n` creates a new task, `r` refreshes, `pgup`/`pgdown` (or `b`/`f`) change page, `x` exports and `i` imports.
+- By default, Munus keeps the existing non-Vim behavior: the TUI opens the new-task form, `tab`/`shift+tab` and `↑`/`↓` move between fields or tasks where applicable, `ctrl+l` switches to the task list, and `ctrl+c` quits (`esc` also quits from the new-task form).
+- In the task list: `e` expands a task, `c` toggles completion, `s` cycles the status (todo → doing → done), `u` edits the selected task, `d` opens the delete prompt and `y` confirms it (`n` or `esc` cancels), `n` creates a new task, `r` refreshes, `pgup`/`pgdown` (or `b`/`f`) change page, `x` exports, `i` imports and `q` quits.
 - `F` cycles the list filter (all → pending → in progress → overdue → done) and `#` cycles a tag filter; the active filter is shown next to the title. `?` (or `h`) shows every key binding.
 - In the edit form, `Enter` on the last field saves and `esc` returns to the list without saving. Clearing the deadline field removes the deadline.
+- `x` and `i` open a dialog: type a file path and press `Enter` to export, or to preview the import.
+  In the export dialog `alt+c` toggles whether completed tasks are included (they are by default); in
+  the import dialog `alt+m` switches between merge and replace, and `alt+o`, `alt+b` and `alt+s`
+  toggle skipping existing task IDs, the backup (on by default) and strict parsing.
 - The import preview applies only when you press `y`; `n`, `esc` or `q` cancel.
 - Exports, import previews and imports run in the background, so a slow file (for example on a
   network share) does not freeze the interface; while one runs, `esc` cancels it and `ctrl+c`
@@ -262,7 +267,7 @@ Examples:
 
 | Setting | Default | Description |
 |---|---|---|
-| `MUNUS_DB_PATH` | `munus.db` in your data directory (see [Database location](#database-location)) | Path of the SQLite database file to use instead (the directory must exist), e.g. `export MUNUS_DB_PATH="$HOME/tasks/munus.db"`. `MUNUS_DB_PATH=munus.db` keeps one database per directory, as Munus v3.0.0 and older did. |
+| `MUNUS_DB_PATH` | `munus.db` in your data directory (see [Database location](#database-location)) | Path of the SQLite database file to use instead (the directory must exist), e.g. `export MUNUS_DB_PATH="$HOME/tasks/munus.db"`. `MUNUS_DB_PATH=munus.db` keeps one database per directory, as pre-1.0.0 builds up to v3.0.0 did. |
 | `_busy_timeout` in `MUNUS_DB_PATH` | 15000 (15 s) | How long a command waits, in milliseconds, while another `munus` process is writing, before it fails with "database is locked", e.g. `export MUNUS_DB_PATH="$HOME/tasks/munus.db?_busy_timeout=30000"` (only with `MUNUS_DB_PATH`). |
 | `--vim` | off | Enable Vim-style keybindings in the TUI. |
 
@@ -285,7 +290,7 @@ creates the first time a command opens the database (`--help` and `--version` cr
 If the location cannot be determined (for example `HOME` is not set), commands that need the
 database fail with an error asking you to set `MUNUS_DB_PATH`.
 
-Munus v3.0.0 and older used `munus.db` in the current directory. When `MUNUS_DB_PATH` is not set
+Pre-1.0.0 builds up to v3.0.0 used `munus.db` in the current directory. When `MUNUS_DB_PATH` is not set
 and a command finds a `munus.db` in the current directory, it prints a note on standard error and
 uses the new location; the old file is not read or changed. The TUI shows the same note at the
 top of its screens. To keep its tasks, either:
@@ -318,8 +323,8 @@ an unprivileged user (UID 10001). Mount `/app/data` to keep your tasks. `LICENSE
 
 ### Pull from GitHub Packages
 
-Releases after `v3.0.1` also publish the image to GitHub Packages (GitHub Container Registry)
-for linux/amd64 and linux/arm64. Pull it by version, without the `v` of the release tag, or as
+Releases also publish the image to GitHub Packages (GitHub Container Registry) for linux/amd64
+and linux/arm64. Pull it by version, without the `v` of the release tag, or as
 `latest`:
 ```bash
 docker pull ghcr.io/jabbott-iii/munus:X.Y.Z
@@ -333,10 +338,10 @@ docker run --rm -it -v munus-data:/app/data ghcr.io/jabbott-iii/munus:latest
 | `latest` | The most recently published stable release |
 | `X.Y.Z-amd64`, `X.Y.Z-arm64` | One platform of that release |
 
-Pre-releases (tags such as `v3.1.0-rc.1`) get only their own version tags (`3.1.0-rc.1`,
-`3.1.0-rc.1-amd64` and `3.1.0-rc.1-arm64`) and never move `X.Y` or `latest`. In the image,
-`munus --version` reports the release tag, for example `munus version v3.1.0`. The `v3.0.2`
-image was published before this scheme, as `v3.0.2`, `v3.0.2-amd64` and `v3.0.2-arm64`.
+Pre-releases (tags such as `v1.1.0-rc.1`) get only their own version tags (`1.1.0-rc.1`,
+`1.1.0-rc.1-amd64` and `1.1.0-rc.1-arm64`) and never move `X.Y` or `latest`. In the image,
+`munus --version` reports the release tag, for example `munus version v1.0.0`. The pre-1.0.0
+`v3.0.2` image was published before this scheme, as `v3.0.2`, `v3.0.2-amd64` and `v3.0.2-arm64`.
 
 Optional: the multi-platform tags (`X.Y.Z`, `X.Y`, `latest`) carry a build provenance
 attestation, which the [GitHub CLI](https://cli.github.com/) can verify; the per-platform tags
@@ -430,5 +435,6 @@ THIRD_PARTY_LICENSES        license texts of the third-party software in the bin
 .github/workflows/          CI, release (CD), Docker and security workflows
 .github/dependabot.yml      weekly, grouped dependency updates
 Dockerfile                  container image and static Linux release binary
+demo/                       VHS tapes and the demo GIFs they record
 CLAUDE.md, .claude/         Claude Code instructions: conventions, path-scoped rules, maintenance skills
 ```

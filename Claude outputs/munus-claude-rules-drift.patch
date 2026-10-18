@@ -1,0 +1,96 @@
+diff --git a/.claude/rules/build-and-release.md b/.claude/rules/build-and-release.md
+index 1f8a8e3..71628dc 100644
+--- a/.claude/rules/build-and-release.md
++++ b/.claude/rules/build-and-release.md
+@@ -34,7 +34,9 @@ such change in the completion report. CI behaviour is proven only by a GitHub ru
+ - Every action is pinned to a full commit SHA with a `# vX.Y.Z` comment. Downloads are pinned by
+   version and verified by SHA-256 (llvm-mingw in `cd.yml`: bump `LLVM_MINGW_VERSION` and
+   `LLVM_MINGW_SHA256` together).
+-- Least privilege: top-level `permissions: contents: read`. In `cd.yml` only the tag-only
++- Least privilege: top-level `permissions: contents: read` (`security.yml` also grants
++  `security-events: write` at the top level for its Code Scanning uploads; its `govulncheck` job
++  narrows that to `contents: read`). In `cd.yml` only the tag-only
+   `release` job has `contents: write` (no OIDC); attestation jobs have `id-token: write` and
+   `attestations: write` only; the `image` job has `packages: write` only, no checkout and no build.
+   Release checkouts do not persist credentials. Do not widen any of this or add
+diff --git a/.claude/rules/cli-and-tui.md b/.claude/rules/cli-and-tui.md
+index db25e88..f356ce8 100644
+--- a/.claude/rules/cli-and-tui.md
++++ b/.claude/rules/cli-and-tui.md
+@@ -12,7 +12,9 @@ paths:
+ 
+ ## CLI (`pkg/logic-cli.go`)
+ 
+-- Each command is built by a `New…Cmd(db *Database)` constructor and registered on `NewRootCmd`.
++- Each command is built by a constructor that takes `db *Database` (`New…Cmd`; `delete` and
++  `complete` use the exported `DeleteTaskCmd` and `CompleteTaskCmd`) and is registered on
++  `NewRootCmd`.
+ - Validation order: cobra `Args` validators and required/grouped flags, then value checks at the
+   top of `RunE`, then `openForCommand`. `openForCommand` marks validation finished (cobra stops
+   printing usage), writes the legacy-location notice once to stderr and opens the database. So an
+diff --git a/.claude/rules/docs.md b/.claude/rules/docs.md
+index b60902c..eb2718b 100644
+--- a/.claude/rules/docs.md
++++ b/.claude/rules/docs.md
+@@ -22,8 +22,9 @@ engineering rules live in `CLAUDE.md` and `.claude/rules/`.
+   vars, platforms or integrations. If something cannot be verified, leave it out and say so in
+   the report; add a `TODO` only when the maintainer must supply the information.
+ - Never write that a command was run or passed in documentation.
+-- Version-specific notes (for example "Munus v3.0.0 and older", "Releases after `v3.0.1`") are
+-  historical facts; keep them unless they become wrong.
++- `v1.0.0` is the first release. Builds before it were numbered up to `v3.0.2` and have no tags,
++  so version notes name them as pre-1.0.0 builds (for example "pre-1.0.0 builds up to v3.0.0").
++  Such notes are historical facts; keep them unless they become wrong.
+ 
+ ## README
+ 
+diff --git a/.claude/rules/storage.md b/.claude/rules/storage.md
+index 726cb11..9a904d7 100644
+--- a/.claude/rules/storage.md
++++ b/.claude/rules/storage.md
+@@ -27,8 +27,9 @@ paths:
+   fails, again inside one. Every step must be idempotent and write only when something needs to
+   change; triggers use `CREATE TRIGGER IF NOT EXISTS`.
+ - Schema changes are additive: new columns need defaults; never drop or rename columns.
+-- Older binaries (v2.1.1) know nothing of `status` or tags. `consistencyTriggers` keep a migrated
+-  database consistent if an older binary writes to it; do not remove them.
++- Older binaries (pre-1.0.0 builds up to v2.1.1) know nothing of `status` or tags.
++  `consistencyTriggers` keep a migrated database consistent if an older binary writes to it; do
++  not remove them.
+ 
+ ## Data rules
+ 
+@@ -58,6 +59,6 @@ paths:
+   `%LOCALAPPDATA%\munus` on Windows.
+ - `resolveDatabaseLocation` has no side effects and takes its inputs as parameters; failures are
+   carried in `DatabaseLocation.Err` and reported on first open with a hint to set `MUNUS_DB_PATH`.
+-- A legacy `./munus.db` (v3.0.0 and older) only produces a notice; it is never opened, moved or
+-  changed. Backups stay in `~/.munus/backups`.
++- A legacy `./munus.db` (pre-1.0.0 builds up to v3.0.0) only produces a notice; it is never
++  opened, moved or changed. Backups stay in `~/.munus/backups`.
+ - Any change here means updating README "Configuration" and "Database location" in the same change.
+diff --git a/.claude/skills/release-prep/SKILL.md b/.claude/skills/release-prep/SKILL.md
+index c8955af..3b824f6 100644
+--- a/.claude/skills/release-prep/SKILL.md
++++ b/.claude/skills/release-prep/SKILL.md
+@@ -19,7 +19,8 @@ You prepare; the maintainer releases. Do not run `make tag`, `make push-tag`, `m
+   (`git rev-parse -q --verify refs/tags/$ARGUMENTS`) or remotely (`git ls-remote --tags origin`)
+   and is greater than the latest release tag
+   (`git for-each-ref --sort=-v:refname --format='%(refname:short)' refs/tags`). Say if the tag
+-  list looks incomplete compared with the versions the docs mention.
++  list looks incomplete compared with the versions the docs mention (the pre-1.0.0 builds numbered
++  up to `v3.0.2` have no tags; that is expected).
+ - Classify: patch, minor, major or pre-release. Pre-releases do not move the `X.Y` or `latest`
+   image tags.
+ 
+@@ -37,8 +38,8 @@ You prepare; the maintainer releases. Do not run `make tag`, `make push-tag`, `m
+   line supported, older lines per the policy "older releases are not patched") and apply it only
+   after confirmation.
+ - Run `/docs-drift` (scope `all`) and resolve **wrong** findings before tagging.
+-- README version notes ("Releases after …", "v3.0.0 and older") are historical; change them only
+-  if a new release makes one of them false.
++- README version notes (for example "pre-1.0.0 builds up to v3.0.0") are historical; change them
++  only if a new release makes one of them false.
+ 
+ ## 4. Hand-off
+ 

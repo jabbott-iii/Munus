@@ -13,8 +13,8 @@ not patched; upgrade to the latest release to get fixes.
 
 | Version | Supported |
 | ------- | --------- |
-| 3.0.x   | Yes       |
-| < 3.0   | No        |
+| 1.0.x   | Yes       |
+| Pre-1.0.0 builds (v3.0.x and older) | No |
 
 ## Reporting a vulnerability
 
@@ -105,7 +105,6 @@ research. Munus does not offer a bug bounty.
 
 ## Verifying releases
 
-Release archives are published with `checksums.txt`, and releases from `v3.0.0` onward carry
-a GitHub build provenance attestation. See [Install](README.md#install) for how to verify them.
-The multi-platform container image tags published to GitHub Packages (releases after `v3.0.1`)
-carry one too; see [Docker](README.md#docker).
+Release archives and `checksums.txt` are published with a GitHub build provenance attestation.
+See [Install](README.md#install) for how to verify them. The multi-platform container image tags
+published to GitHub Packages carry one too; see [Docker](README.md#docker).

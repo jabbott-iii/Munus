@@ -4,7 +4,7 @@
 # the "JetBrains Mono" and "DejaVu Sans Mono" fonts. A ./munus from
 # `make build` is used if present, else munus on PATH:
 #
-#   make build && vhs assets/CLI-demo.tape
+#   make build && vhs demo/CLI-demo.tape
 #
 # The tape runs in a new temporary directory with HOME and MUNUS_DB_PATH
 # pointing into it, so the database, the export and the import backup never
@@ -17,7 +17,7 @@
 # (Output "frames/") and encode the PNG frames with a two-pass
 # ffmpeg palettegen/paletteuse instead.
 
-Output assets/CLI-demo.gif
+Output demo/CLI-demo.gif
 
 Set Shell "bash"
 Set FontFamily "JetBrains Mono,DejaVu Sans Mono"

@@ -40,7 +40,7 @@ uses cgo by default when a C compiler is on `PATH` (check `go env CGO_ENABLED`).
 | `make check` | `fmt-check`, `vet`, `test`, `race`, `lint` — the default gate for any Go change |
 | `make test` / `make race` / `make cover` | Tests, race detector, coverage summary |
 | `make fmt` | `gofmt -s -w .` |
-| `make lint` | golangci-lint; **silently skipped if not installed** (CI uses v2.13.2) |
+| `make lint` | golangci-lint; **skipped without failing if not installed** (CI uses v2.13.2) |
 | `make fuzz` | Each fuzz target for `FUZZTIME` (default 30s); `make fuzz FUZZTIME=10s` |
 | `make licenses` | Regenerate `THIRD_PARTY_LICENSES` |
 | `go mod tidy -diff` | CI's tidy drift check (CI runs `go mod tidy && git diff --exit-code`); no make target |
@@ -139,7 +139,8 @@ Do not add new IDs of this kind, and do not edit existing ones unless asked.
 ## Project skills
 
 - `/pre-pr` — run the checks the diff needs and produce the validation report.
-- `/docs-drift [scope]` — audit README, CONTRIBUTING, SECURITY, PR template and NOTICE against the code.
+- `/docs-drift [scope]` — audit README, CONTRIBUTING, SECURITY, PR template, NOTICE, demo tapes and
+  these instructions against the code.
 - `/dependency-update [kind]` — Go modules, Actions, Docker/Alpine pins, Go minor bumps.
 - `/release-prep vX.Y.Z` — readiness checks and doc updates before a tag; prints the release command.
 

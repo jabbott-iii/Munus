@@ -26,9 +26,10 @@ make test
 - Run the local checks: `make check` (formatting check, `go vet`, tests, race-detector tests and
   golangci-lint when installed). After changing deadline parsing, text handling, import or export, also
   run `make fuzz`.
-- After adding, removing or updating a Go module, run `make licenses` (regenerates
-  `THIRD_PARTY_LICENSES`; never edit it by hand) and keep the module list in `NOTICE` in step;
-  `go test ./...` fails until both match the modules compiled into the release binaries.
+- After adding, removing or updating a Go module, run `go mod tidy` (CI fails if it changes
+  anything) and `make licenses` (regenerates `THIRD_PARTY_LICENSES`; never edit it by hand), and
+  keep the module list in `NOTICE` in step; `go test ./...` fails until both match the modules
+  compiled into the release binaries.
 - CI runs on Linux, macOS and Windows: a `go mod tidy` drift check, `go vet`, golangci-lint v2.13.2,
   tests with coverage, and a native build that is run as a smoke test, using the latest Go 1.26
   patch release. CodeQL, gosec and govulncheck run on every push, and the Docker image and the static
@@ -54,7 +55,7 @@ make test
 - List the checks you ran and their results.
 - Update `README.md` for user-visible changes, and `CLAUDE.md` or `.claude/rules/` when
   architecture, conventions or invariants change.
-- Do not commit local databases (`*.db`), coverage files or built binaries.
+- Do not commit local databases (`*.db`), coverage files, built binaries or secrets.
 
 ## Releases
 Maintainers release by tagging: `make release VERSION=vX.Y.Z`. The CD workflow builds, smoke-tests

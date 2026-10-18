@@ -4,13 +4,13 @@
 # the "JetBrainsMono Nerd Font Mono" font (the list headings use Nerd Font
 # glyphs). A ./munus from `make build` is used if present, else munus on PATH:
 #
-#   make build && vhs assets/TUI-demo.tape
+#   make build && vhs demo/TUI-demo.tape
 #
 # The tape points MUNUS_DB_PATH at a new temporary database, so your own tasks
 # are never read or changed, and removes it at the end. Deadlines are relative
 # to the time of recording.
 
-Output assets/TUI-demo.gif
+Output demo/TUI-demo.gif
 
 Set Shell "bash"
 Set FontFamily "JetBrainsMono Nerd Font Mono"
