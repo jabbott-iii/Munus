@@ -22,8 +22,9 @@ engineering rules live in `CLAUDE.md` and `.claude/rules/`.
   vars, platforms or integrations. If something cannot be verified, leave it out and say so in
   the report; add a `TODO` only when the maintainer must supply the information.
 - Never write that a command was run or passed in documentation.
-- Version-specific notes (for example "Munus v3.0.0 and older", "Releases after `v3.0.1`") are
-  historical facts; keep them unless they become wrong.
+- `v1.0.0` is the first release. Builds before it were numbered up to `v3.0.2` and have no tags,
+  so version notes name them as pre-1.0.0 builds (for example "pre-1.0.0 builds up to v3.0.0").
+  Such notes are historical facts; keep them unless they become wrong.
 
 ## README
 

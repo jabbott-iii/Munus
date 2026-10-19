@@ -19,7 +19,8 @@ You prepare; the maintainer releases. Do not run `make tag`, `make push-tag`, `m
   (`git rev-parse -q --verify refs/tags/$ARGUMENTS`) or remotely (`git ls-remote --tags origin`)
   and is greater than the latest release tag
   (`git for-each-ref --sort=-v:refname --format='%(refname:short)' refs/tags`). Say if the tag
-  list looks incomplete compared with the versions the docs mention.
+  list looks incomplete compared with the versions the docs mention (the pre-1.0.0 builds numbered
+  up to `v3.0.2` have no tags; that is expected).
 - Classify: patch, minor, major or pre-release. Pre-releases do not move the `X.Y` or `latest`
   image tags.
 
@@ -37,8 +38,8 @@ You prepare; the maintainer releases. Do not run `make tag`, `make push-tag`, `m
   line supported, older lines per the policy "older releases are not patched") and apply it only
   after confirmation.
 - Run `/docs-drift` (scope `all`) and resolve **wrong** findings before tagging.
-- README version notes ("Releases after …", "v3.0.0 and older") are historical; change them only
-  if a new release makes one of them false.
+- README version notes (for example "pre-1.0.0 builds up to v3.0.0") are historical; change them
+  only if a new release makes one of them false.
 
 ## 4. Hand-off
 

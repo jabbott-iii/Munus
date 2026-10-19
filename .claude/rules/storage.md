@@ -27,8 +27,9 @@ paths:
   fails, again inside one. Every step must be idempotent and write only when something needs to
   change; triggers use `CREATE TRIGGER IF NOT EXISTS`.
 - Schema changes are additive: new columns need defaults; never drop or rename columns.
-- Older binaries (v2.1.1) know nothing of `status` or tags. `consistencyTriggers` keep a migrated
-  database consistent if an older binary writes to it; do not remove them.
+- Older binaries (pre-1.0.0 builds up to v2.1.1) know nothing of `status` or tags.
+  `consistencyTriggers` keep a migrated database consistent if an older binary writes to it; do
+  not remove them.
 
 ## Data rules
 
@@ -58,6 +59,6 @@ paths:
   `%LOCALAPPDATA%\munus` on Windows.
 - `resolveDatabaseLocation` has no side effects and takes its inputs as parameters; failures are
   carried in `DatabaseLocation.Err` and reported on first open with a hint to set `MUNUS_DB_PATH`.
-- A legacy `./munus.db` (v3.0.0 and older) only produces a notice; it is never opened, moved or
-  changed. Backups stay in `~/.munus/backups`.
+- A legacy `./munus.db` (pre-1.0.0 builds up to v3.0.0) only produces a notice; it is never
+  opened, moved or changed. Backups stay in `~/.munus/backups`.
 - Any change here means updating README "Configuration" and "Database location" in the same change.

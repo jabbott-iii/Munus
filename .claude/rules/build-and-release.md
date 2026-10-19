@@ -34,7 +34,9 @@ such change in the completion report. CI behaviour is proven only by a GitHub ru
 - Every action is pinned to a full commit SHA with a `# vX.Y.Z` comment. Downloads are pinned by
   version and verified by SHA-256 (llvm-mingw in `cd.yml`: bump `LLVM_MINGW_VERSION` and
   `LLVM_MINGW_SHA256` together).
-- Least privilege: top-level `permissions: contents: read`. In `cd.yml` only the tag-only
+- Least privilege: top-level `permissions: contents: read` (`security.yml` also grants
+  `security-events: write` at the top level for its Code Scanning uploads; its `govulncheck` job
+  narrows that to `contents: read`). In `cd.yml` only the tag-only
   `release` job has `contents: write` (no OIDC); attestation jobs have `id-token: write` and
   `attestations: write` only; the `image` job has `packages: write` only, no checkout and no build.
   Release checkouts do not persist credentials. Do not widen any of this or add

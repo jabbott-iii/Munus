@@ -12,7 +12,9 @@ paths:
 
 ## CLI (`pkg/logic-cli.go`)
 
-- Each command is built by a `New…Cmd(db *Database)` constructor and registered on `NewRootCmd`.
+- Each command is built by a constructor that takes `db *Database` (`New…Cmd`; `delete` and
+  `complete` use the exported `DeleteTaskCmd` and `CompleteTaskCmd`) and is registered on
+  `NewRootCmd`.
 - Validation order: cobra `Args` validators and required/grouped flags, then value checks at the
   top of `RunE`, then `openForCommand`. `openForCommand` marks validation finished (cobra stops
   printing usage), writes the legacy-location notice once to stderr and opens the database. So an
