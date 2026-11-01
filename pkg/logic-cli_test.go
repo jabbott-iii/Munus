@@ -1776,3 +1776,176 @@ func TestImportOfMissingFileCreatesNoDatabase(t *testing.T) {
 		t.Fatalf("the database was created (stat: %v)", err)
 	}
 }
+
+// ============================================ Main Tests ============================================
+
+// runMain calls Main with standard output and standard error redirected to
+// files under t.TempDir() and returns the exit code and what was written to
+// each. It replaces os.Stdout and os.Stderr while Main runs, so tests that use
+// it must not run in parallel.
+func runMain(t *testing.T, ctx context.Context, version string, args []string) (code int, stdout, stderr string) {
+	t.Helper()
+	dir := t.TempDir()
+	outFile, err := os.Create(filepath.Join(dir, "stdout"))
+	if err != nil {
+		t.Fatalf("setup failed: %v", err)
+	}
+	errFile, err := os.Create(filepath.Join(dir, "stderr"))
+	if err != nil {
+		_ = outFile.Close()
+		t.Fatalf("setup failed: %v", err)
+	}
+	origOut, origErr := os.Stdout, os.Stderr
+	t.Cleanup(func() { os.Stdout, os.Stderr = origOut, origErr })
+
+	os.Stdout, os.Stderr = outFile, errFile
+	code = Main(ctx, version, args)
+	os.Stdout, os.Stderr = origOut, origErr
+
+	_ = outFile.Close()
+	_ = errFile.Close()
+	outBytes, err := os.ReadFile(outFile.Name())
+	if err != nil {
+		t.Fatalf("read standard output: %v", err)
+	}
+	errBytes, err := os.ReadFile(errFile.Name())
+	if err != nil {
+		t.Fatalf("read standard error: %v", err)
+	}
+	return code, string(outBytes), string(errBytes)
+}
+
+// Main reports the version it is given, as the munus binary does with the one
+// stamped into main.version, and creates no database for it.
+func TestMainPrintsVersion(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "munus.db")
+	t.Setenv(databasePathEnv, path)
+
+	code, stdout, stderr := runMain(t, t.Context(), "v1.2.3", []string{"--version"})
+	if code != 0 || stdout != "munus version v1.2.3\n" || stderr != "" {
+		t.Fatalf("got exit code %d, stdout %q, stderr %q", code, stdout, stderr)
+	}
+	if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("--version created the database (stat: %v)", err)
+	}
+}
+
+// Main returns 0 on success and 1 on any error; errors (with usage for flag
+// errors, and a pointer to --help for an unknown command) go to standard error
+// only.
+func TestMainExitCodes(t *testing.T) {
+	cases := []struct {
+		name   string
+		args   []string
+		code   int
+		stdout string
+		stderr string // contained in standard error, which is empty when stderr is ""
+		usage  bool
+	}{
+		{"success", []string{"add", "-t", "Title", "-d", "Desc"}, 0, "✔ Task created successfully!\n", "", false},
+		{"flag error", []string{"list", "--bogus"}, 1, "", "Error: unknown flag: --bogus", true},
+		{"unknown command", []string{"bogus"}, 1, "", `Error: unknown command "bogus" for "munus"`, false},
+		{"runtime error", []string{"complete", "999"}, 1, "", "Error: failed to update task 999: task not found", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv(databasePathEnv, filepath.Join(t.TempDir(), "munus.db"))
+			code, stdout, stderr := runMain(t, t.Context(), "v1.2.3", tc.args)
+			if code != tc.code {
+				t.Errorf("exit code %d, want %d (stderr %q)", code, tc.code, stderr)
+			}
+			if stdout != tc.stdout {
+				t.Errorf("stdout %q, want %q", stdout, tc.stdout)
+			}
+			if (tc.stderr == "" && stderr != "") || !strings.Contains(stderr, tc.stderr) {
+				t.Errorf("stderr %q, want %q in it", stderr, tc.stderr)
+			}
+			if got := strings.Contains(stderr, "Usage:"); got != tc.usage {
+				t.Errorf("usage printed: %t, want %t (stderr %q)", got, tc.usage, stderr)
+			}
+		})
+	}
+}
+
+// Main takes its arguments only from args: nil and an empty slice both mean
+// no arguments (cobra would otherwise parse os.Args[1:]) and run the root
+// command. Opening the database is made to fail so that the TUI does not
+// start; os.Args asks for the version, so reading it would print one and
+// succeed.
+func TestMainWithoutArgumentsIgnoresOSArgs(t *testing.T) {
+	missing := filepath.Join(t.TempDir(), "missing")
+	t.Setenv(databasePathEnv, filepath.Join(missing, "munus.db"))
+	origArgs := os.Args
+	t.Cleanup(func() { os.Args = origArgs })
+	os.Args = []string{"munus", "--version"}
+
+	for _, args := range [][]string{nil, {}} {
+		code, stdout, stderr := runMain(t, t.Context(), "v1.2.3", args)
+		if code != 1 || stdout != "" || !strings.Contains(stderr, "Error: failed to initialize database") || strings.Contains(stderr, "Usage:") {
+			t.Errorf("args %#v: got exit code %d, stdout %q, stderr %q", args, code, stdout, stderr)
+		}
+	}
+	if _, err := os.Stat(missing); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("expected no directory to be created (stat: %v)", err)
+	}
+}
+
+// Main can be called several times in one process. Each call builds its own
+// commands, flags and database from its arguments and the environment at that
+// time, and closes the database before it returns.
+func TestMainCallsShareNoState(t *testing.T) {
+	dir := t.TempDir()
+	first, second := filepath.Join(dir, "first.db"), filepath.Join(dir, "second.db")
+	t.Setenv(databasePathEnv, first)
+
+	if code, _, stderr := runMain(t, t.Context(), "v1", []string{"add", "-t", "Kept", "-d", "x"}); code != 0 {
+		t.Fatalf("add: exit code %d, stderr %q", code, stderr)
+	}
+	// --completed hides the open task...
+	if code, stdout, stderr := runMain(t, t.Context(), "v1", []string{"list", "--completed"}); code != 0 || stdout != "" {
+		t.Fatalf("list --completed: exit code %d, stdout %q, stderr %q", code, stdout, stderr)
+	}
+	// ...and is not carried over into the next call.
+	if code, stdout, stderr := runMain(t, t.Context(), "v1", []string{"list"}); code != 0 || !strings.Contains(stdout, "Kept") {
+		t.Fatalf("list: exit code %d, stdout %q, stderr %q", code, stdout, stderr)
+	}
+	// The successful list silenced usage on its own command only.
+	if code, _, stderr := runMain(t, t.Context(), "v1", []string{"list", "--bogus"}); code != 1 || !strings.Contains(stderr, "Usage:") {
+		t.Fatalf("list --bogus: exit code %d, stderr %q", code, stderr)
+	}
+	if code, stdout, _ := runMain(t, t.Context(), "v2", []string{"--version"}); code != 0 || stdout != "munus version v2\n" {
+		t.Fatalf("--version: exit code %d, stdout %q", code, stdout)
+	}
+
+	// The database location is resolved again by every call.
+	t.Setenv(databasePathEnv, second)
+	if code, stdout, stderr := runMain(t, t.Context(), "v2", []string{"list"}); code != 0 || stdout != "" {
+		t.Fatalf("list in the second database: exit code %d, stdout %q, stderr %q", code, stdout, stderr)
+	}
+	if _, err := os.Stat(second); err != nil {
+		t.Fatalf("expected the second database to be created: %v", err)
+	}
+
+	// Both databases were closed when Main returned (Windows cannot remove an
+	// open SQLite file).
+	for _, path := range []string{first, second} {
+		if err := os.Remove(path); err != nil {
+			t.Fatalf("remove %s: %v", path, err)
+		}
+	}
+}
+
+// Main runs the commands with ctx, so the caller can cancel them.
+func TestMainRunsCommandsWithContext(t *testing.T) {
+	t.Setenv(databasePathEnv, filepath.Join(t.TempDir(), "munus.db"))
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+
+	code, _, stderr := runMain(t, ctx, "v1", []string{"add", "-t", "A", "-d", "x"})
+	if code != 1 || !strings.Contains(stderr, context.Canceled.Error()) {
+		t.Fatalf("add with a cancelled context: exit code %d, stderr %q", code, stderr)
+	}
+	if code, stdout, stderr := runMain(t, t.Context(), "v1", []string{"list"}); code != 0 || stdout != "" {
+		t.Fatalf("expected no task after the cancelled add, got exit code %d, stdout %q, stderr %q", code, stdout, stderr)
+	}
+}

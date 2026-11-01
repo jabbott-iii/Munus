@@ -10,9 +10,9 @@ paths:
 
 ## Opening and transactions
 
-- `main.go` builds a deferred database (`NewDeferredDatabaseAt(LocateDatabase())`); the first
-  open creates the directory (`ensurePrivateDir`), the file and the schema. Help, version and
-  argument errors must never reach it.
+- `Main` builds a deferred database (`NewDeferredDatabaseAt(LocateDatabase())`) on every call
+  and closes it before returning; the first open creates the directory (`ensurePrivateDir`),
+  the file and the schema. Help, version and argument errors must never reach it.
 - The DSN gets `_txlock=immediate` unless it sets `_txlock`, so every transaction starts with
   `BEGIN IMMEDIATE`; `withBusyTimeout` adds a 15 s busy timeout unless the DSN sets
   `_busy_timeout` or `_timeout`. Keep both, and keep the README "Configuration" row in step.

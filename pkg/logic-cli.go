@@ -18,6 +18,7 @@ package pkg
 
 import (
 	"bufio"
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -36,6 +37,46 @@ import (
 // reported, so those errors are deliberately ignored.
 
 //--------------------------------------CORE----------------------------------------------------------------------------//
+
+// Main runs the munus command line with args, which exclude the program name,
+// and returns the process exit code: 0 on success, 1 on any error. version is
+// what --version reports. Without arguments it starts the TUI.
+//
+// Main is the munus binary's top-level boundary and can also be called by
+// other modules, more than once in one process: each call resolves the
+// database location (MUNUS_DB_PATH or the per-user data directory) again,
+// builds a new root command, opens the database only when a command needs it
+// and closes it before returning. Errors are written to standard error.
+// Main never reads os.Args and never calls os.Exit.
+//
+// Main installs no signal handlers of its own. Outside the TUI, Ctrl+C keeps
+// its default behaviour (terminate the process), which is safe because every
+// write is a single SQLite transaction; trapping it would leave prompts
+// hanging. While the TUI runs, Bubble Tea reads Ctrl+C as a key (quit, exit
+// 0) and handles SIGINT and SIGTERM until the TUI ends.
+func Main(ctx context.Context, version string, args []string) int {
+	// The sqlite database is opened lazily by the commands, so help and
+	// version output never create a database file or its directory.
+	db := NewDeferredDatabaseAt(LocateDatabase())
+
+	rootCmd := NewRootCmd(db)
+	rootCmd.Version = version
+	// cobra parses os.Args[1:] when the arguments are nil.
+	if args == nil {
+		args = []string{}
+	}
+	rootCmd.SetArgs(args)
+	err := rootCmd.ExecuteContext(ctx)
+	if cerr := db.Close(); cerr != nil {
+		// The root command's error writer replaces control characters.
+		_, _ = fmt.Fprintf(rootCmd.ErrOrStderr(), "munus: close database: %v\n", cerr)
+		err = cerr
+	}
+	if err != nil {
+		return 1
+	}
+	return 0
+}
 
 // NewRootCmd tui main entry point
 func NewRootCmd(db *Database) *cobra.Command {

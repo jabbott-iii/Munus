@@ -28,6 +28,12 @@ paths:
   `Confirm` (whole line, `y`/`yes` in any case, EOF means no).
 - Task IDs are positive integers; unknown IDs are runtime errors, not usage errors.
 - `main.version` is stamped by `-ldflags` at build time; do not hard-code a version.
+- `Main(ctx, version, args)` is the entry point of the binary (`main.go` only calls
+  `os.Exit(pkg.Main(context.Background(), version, os.Args[1:]))`) and of other modules that
+  embed Munus, which may call it several times in one process. It takes the arguments only from
+  `args` (nil means none; cobra would otherwise read `os.Args`), runs the root command with
+  `ExecuteContext(ctx)`, closes the database and returns 0, or 1 on any error. It never calls
+  `os.Exit`, and nothing it builds (commands, flags, database) may outlive the call.
 - Do not trap Ctrl+C in CLI commands.
 - Keep flag help text and README "Core CLI capabilities" in step; `--help` output is part of the
   documentation.

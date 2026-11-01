@@ -18,7 +18,6 @@ package main
 
 import (
 	"context"
-	"fmt"
 	"os"
 
 	"github.com/jabbott-iii/Munus/pkg"
@@ -28,23 +27,8 @@ import (
 // it is only written by the linker.
 var version = "dev"
 
+// main only wires the process to pkg.Main, which runs the command line,
+// opens and closes the database and returns the exit code.
 func main() {
-	// The sqlite database is opened lazily by the root command, so help and
-	// version output never create a database file or its directory.
-	db := pkg.NewDeferredDatabaseAt(pkg.LocateDatabase())
-
-	rootCmd := pkg.NewRootCmd(db)
-	rootCmd.Version = version
-	// main is the program's top-level boundary. Ctrl+C keeps its default
-	// behaviour (terminate the process), which is safe because every write is
-	// a single SQLite transaction; trapping it would leave prompts hanging.
-	err := rootCmd.ExecuteContext(context.Background())
-	if cerr := db.Close(); cerr != nil {
-		// The root command's error writer replaces control characters.
-		_, _ = fmt.Fprintf(rootCmd.ErrOrStderr(), "munus: close database: %v\n", cerr)
-		err = cerr
-	}
-	if err != nil {
-		os.Exit(1)
-	}
+	os.Exit(pkg.Main(context.Background(), version, os.Args[1:]))
 }

@@ -64,10 +64,10 @@ What to run:
 
 | Path | Contents |
 |---|---|
-| `main.go` | Resolves the DB location, creates a deferred DB, stamps `main.version`, runs the root command |
+| `main.go` | Holds `main.version` (stamped at build time) and exits with `pkg.Main`'s exit code |
 | `pkg/database.go` | `Storage` interface, GORM `Database`, migration, tags, triggers, all shared types |
 | `pkg/database_path.go` | `LocateDatabase`: `MUNUS_DB_PATH` or the per-user data directory, legacy `./munus.db` notice |
-| `pkg/logic-cli.go` | Cobra commands: root (TUI), `add`, `edit`, `list`, `complete`, `delete`, `export`, `import` |
+| `pkg/logic-cli.go` | `Main` (resolves the DB location, creates a deferred DB, runs the root command, returns the exit code); cobra commands: root (TUI), `add`, `edit`, `list`, `complete`, `delete`, `export`, `import` |
 | `pkg/logic-tui.go` | Status transitions, deadline labels, filters (pure helpers, clock passed in) |
 | `pkg/ui-form.go`, `pkg/ui-list.go` | Bubble Tea form and list/dashboard models; text limits live in `ui-form.go` |
 | `pkg/ext-text.go` | Text and tag validation, control-character handling, `sanitizeForTerminal` |
